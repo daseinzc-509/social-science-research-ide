@@ -1,0 +1,544 @@
+"""Zero-dependency local web UI for the SRA workspace.
+
+The server binds to loopback only and is intended for a single-user local workstation.
+"""
+
+from __future__ import annotations
+
+import json
+import mimetypes
+import shutil
+import tempfile
+import threading
+import uuid
+import webbrowser
+from dataclasses import dataclass, field
+from email import policy
+from email.parser import BytesParser
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import parse_qs, quote, urlparse
+
+from .analyzer import PROMPT_VERSION, PaperAnalysisPipeline
+from .pipeline import ImportPipeline
+from .repository import ResearchRepository
+
+_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+
+
+@dataclass
+class _Job:
+    id: str
+    kind: str
+    status: str = "queued"
+    messages: list[str] = field(default_factory=list)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class _JobStore:
+    def __init__(self) -> None:
+        self._jobs: dict[str, _Job] = {}
+        self._lock = threading.Lock()
+
+    def create(self, kind: str) -> _Job:
+        job = _Job(id=str(uuid.uuid4()), kind=kind)
+        with self._lock:
+            self._jobs[job.id] = job
+        return job
+
+    def get(self, job_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return {
+                "id": job.id,
+                "kind": job.kind,
+                "status": job.status,
+                "messages": list(job.messages),
+                "result": job.result,
+                "error": job.error,
+            }
+
+    def start(self, job: _Job, target: Callable[[Callable[[str], None]], dict[str, Any]]) -> None:
+        def runner() -> None:
+            self._set(job.id, status="running")
+            try:
+                result = target(lambda message: self.message(job.id, message))
+            except Exception as exc:  # noqa: BLE001 - boundary converts failures to user-visible job errors.
+                self._set(job.id, status="error", error=str(exc))
+            else:
+                self._set(job.id, status="done", result=result)
+
+        threading.Thread(target=runner, daemon=True, name=f"sra-{job.kind}-{job.id[:8]}").start()
+
+    def message(self, job_id: str, message: str) -> None:
+        clean = str(message).strip()
+        if not clean:
+            return
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job.messages.append(clean)
+                if len(job.messages) > 200:
+                    del job.messages[:-200]
+
+    def _set(self, job_id: str, **changes: Any) -> None:
+        with self._lock:
+            job = self._jobs[job_id]
+            for key, value in changes.items():
+                setattr(job, key, value)
+
+
+class SRAWebApp:
+    def __init__(
+        self,
+        data_dir: Path,
+        repository: ResearchRepository,
+        *,
+        pipeline_factory: Callable[..., PaperAnalysisPipeline] = PaperAnalysisPipeline,
+        import_pipeline_factory: Callable[..., ImportPipeline] = ImportPipeline,
+    ) -> None:
+        self.data_dir = Path(data_dir).expanduser().resolve()
+        self.repository = repository
+        self.pipeline_factory = pipeline_factory
+        self.import_pipeline_factory = import_pipeline_factory
+        self.jobs = _JobStore()
+
+    def list_papers(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for paper in self.repository.list_papers():
+            card = None
+            card_error = None
+            try:
+                card = self.repository.get_card(paper.id)
+            except Exception as exc:  # noqa: BLE001
+                card_error = str(exc)
+            metadata = card.metadata.model_dump(mode="json") if card is not None else {}
+            items.append(
+                {
+                    "id": paper.id,
+                    "original_name": paper.original_name,
+                    "page_count": paper.page_count,
+                    "parse_status": str(paper.parse_status),
+                    "created_at": paper.created_at,
+                    "has_card": card is not None,
+                    "card_error": card_error,
+                    "title": metadata.get("title") or paper.original_name,
+                    "authors": metadata.get("authors") or [],
+                    "year": metadata.get("year"),
+                    "journal": metadata.get("journal"),
+                    "facts": len(card.basic_facts) if card is not None else 0,
+                    "evidence_spans": len(card.evidence_spans) if card is not None else 0,
+                    "analysis_claims": len(card.analysis) if card is not None else 0,
+                    "warnings": len(card.warnings) if card is not None else 0,
+                }
+            )
+        return items
+
+    def paper_detail(self, paper_id: str) -> dict[str, Any]:
+        paper = self.repository.get_paper(paper_id)
+        if paper is None:
+            raise KeyError(f"unknown paper id: {paper_id}")
+        card = self.repository.get_card(paper_id)
+        return {
+            "paper": paper.model_dump(mode="json"),
+            "card": card.model_dump(mode="json") if card is not None else None,
+        }
+
+    def start_analysis(
+        self,
+        paper_id: str,
+        *,
+        research_context: str | None,
+        exclude_after_text: str | None,
+        force: bool,
+    ) -> str:
+        if self.repository.get_paper(paper_id) is None:
+            raise KeyError(f"unknown paper id: {paper_id}")
+        job = self.jobs.create("analyze")
+
+        def work(progress: Callable[[str], None]) -> dict[str, Any]:
+            progress("Preparing analysis…")
+            pipeline = self.pipeline_factory(self.repository, progress=progress)
+            card = pipeline.analyze(
+                paper_id,
+                research_context=(research_context or "").strip() or None,
+                exclude_after_text=(exclude_after_text or "").strip() or None,
+                force=force,
+            )
+            return {
+                "paper_id": card.paper_id,
+                "facts": len(card.basic_facts),
+                "evidence_spans": len(card.evidence_spans),
+                "tables": len(card.tables),
+                "analysis_claims": len(card.analysis),
+                "warnings": len(card.warnings),
+            }
+
+        self.jobs.start(job, work)
+        return job.id
+
+    def start_import(self, filename: str, data: bytes) -> str:
+        safe_name = Path(filename).name
+        if not safe_name.lower().endswith(".pdf"):
+            raise ValueError("Only PDF files can be imported.")
+        if not data:
+            raise ValueError("Uploaded PDF is empty.")
+        temp_dir = Path(tempfile.mkdtemp(prefix="sra-upload-"))
+        temp_path = temp_dir / safe_name
+        temp_path.write_bytes(data)
+        job = self.jobs.create("import")
+
+        def work(progress: Callable[[str], None]) -> dict[str, Any]:
+            try:
+                progress(f"Importing {safe_name}…")
+                pipeline = self.import_pipeline_factory(self.data_dir, self.repository)
+                record, parsed, created = pipeline.import_pdf(temp_path)
+                progress("PDF parsed and stored." if created else "This exact PDF was already imported; reused existing record.")
+                return {
+                    "paper_id": record.id,
+                    "created": created,
+                    "page_count": record.page_count,
+                    "parse_status": str(record.parse_status),
+                    "warnings": parsed.warnings,
+                }
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.jobs.start(job, work)
+        return job.id
+
+    def doctor(self, *, deep: bool) -> dict[str, Any]:
+        return self.repository.diagnose(
+            self.data_dir / "papers",
+            current_prompt_version=PROMPT_VERSION,
+            deep=deep,
+        )
+
+    def prune_cache(self, *, all_runs: bool, apply: bool, vacuum: bool) -> dict[str, Any]:
+        return self.repository.prune_model_runs(
+            current_prompt_version=PROMPT_VERSION,
+            all_runs=all_runs,
+            apply=apply,
+            vacuum=vacuum,
+        )
+
+    def export_text(self, paper_id: str) -> str:
+        if self.repository.get_paper(paper_id) is None:
+            raise KeyError(f"unknown paper id: {paper_id}")
+        blocks = self.repository.get_source_blocks(paper_id)
+        return "\n\n".join(
+            f"[PDF page {block.page_number} | source_block_id={block.id}]\n{block.text}"
+            for block in blocks
+        )
+
+
+class _SRAHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address: tuple[str, int], app: SRAWebApp):
+        self.app = app
+        super().__init__(address, _Handler)
+
+
+class _Handler(BaseHTTPRequestHandler):
+    server: _SRAHTTPServer
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path
+        try:
+            if path == "/":
+                return self._send_html(_INDEX_HTML)
+            if path == "/api/papers":
+                return self._send_json({"papers": self.server.app.list_papers()})
+            if path == "/api/doctor":
+                deep = parse_qs(parsed.query).get("deep", ["0"])[0] in {"1", "true", "yes"}
+                return self._send_json(self.server.app.doctor(deep=deep))
+            if path.startswith("/api/jobs/"):
+                job_id = path.removeprefix("/api/jobs/")
+                job = self.server.app.jobs.get(job_id)
+                if job is None:
+                    return self._send_error(HTTPStatus.NOT_FOUND, "Unknown job.")
+                return self._send_json(job)
+            if path.startswith("/api/papers/"):
+                return self._paper_get(path)
+            if path == "/favicon.ico":
+                return self._send_bytes(b"", "image/x-icon", status=HTTPStatus.NO_CONTENT)
+            return self._send_error(HTTPStatus.NOT_FOUND, "Not found.")
+        except (OSError, ValueError, KeyError) as exc:
+            return self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path
+        try:
+            if path == "/api/import":
+                filename, data = self._read_upload()
+                job_id = self.server.app.start_import(filename, data)
+                return self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
+            if path.startswith("/api/papers/") and path.endswith("/analyze"):
+                paper_id = path[len("/api/papers/") : -len("/analyze")].strip("/")
+                payload = self._read_json()
+                job_id = self.server.app.start_analysis(
+                    paper_id,
+                    research_context=_optional_string(payload.get("research_context")),
+                    exclude_after_text=_optional_string(payload.get("exclude_after_text")),
+                    force=bool(payload.get("force", False)),
+                )
+                return self._send_json({"job_id": job_id}, status=HTTPStatus.ACCEPTED)
+            if path == "/api/prune-cache":
+                payload = self._read_json()
+                result = self.server.app.prune_cache(
+                    all_runs=bool(payload.get("all_runs", False)),
+                    apply=bool(payload.get("apply", False)),
+                    vacuum=bool(payload.get("vacuum", False)),
+                )
+                return self._send_json(result)
+            if path == "/api/shutdown":
+                self._send_json({"ok": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return None
+            return self._send_error(HTTPStatus.NOT_FOUND, "Not found.")
+        except (OSError, ValueError, KeyError) as exc:
+            return self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
+    def _paper_get(self, path: str) -> None:
+        rest = path.removeprefix("/api/papers/")
+        parts = rest.split("/")
+        paper_id = parts[0]
+        if len(parts) == 1:
+            return self._send_json(self.server.app.paper_detail(paper_id))
+        suffix = "/".join(parts[1:])
+        paper = self.server.app.repository.get_paper(paper_id)
+        if paper is None:
+            return self._send_error(HTTPStatus.NOT_FOUND, "Unknown paper.")
+        if suffix == "pdf":
+            path_obj = Path(paper.stored_path)
+            if not path_obj.is_file():
+                return self._send_error(HTTPStatus.NOT_FOUND, "Stored PDF is missing.")
+            return self._send_file(path_obj, inline=True, download_name=paper.original_name)
+        if suffix == "card.json":
+            card = self.server.app.repository.get_card(paper_id)
+            if card is None:
+                return self._send_error(HTTPStatus.NOT_FOUND, "No Paper Card has been saved yet.")
+            data = json.dumps(card.model_dump(mode="json"), ensure_ascii=False, indent=2).encode("utf-8")
+            return self._send_bytes(
+                data,
+                "application/json; charset=utf-8",
+                download_name=f"{_download_stem(paper.original_name)}-paper-card.json",
+            )
+        if suffix == "text.txt":
+            data = self.server.app.export_text(paper_id).encode("utf-8")
+            return self._send_bytes(
+                data,
+                "text/plain; charset=utf-8",
+                download_name=f"{_download_stem(paper.original_name)}-parsed.txt",
+            )
+        return self._send_error(HTTPStatus.NOT_FOUND, "Not found.")
+
+    def _read_json(self) -> dict[str, Any]:
+        length = self._content_length(limit=2 * 1024 * 1024)
+        data = self.rfile.read(length)
+        if not data:
+            return {}
+        value = json.loads(data.decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("JSON body must be an object.")
+        return value
+
+    def _read_upload(self) -> tuple[str, bytes]:
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type.lower():
+            raise ValueError("Upload must use multipart/form-data.")
+        length = self._content_length(limit=_MAX_UPLOAD_BYTES)
+        body = self.rfile.read(length)
+        message = BytesParser(policy=policy.default).parsebytes(
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+        )
+        if not message.is_multipart():
+            raise ValueError("Malformed multipart upload.")
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
+                continue
+            if part.get_param("name", header="content-disposition") != "file":
+                continue
+            filename = part.get_filename() or "upload.pdf"
+            payload = part.get_payload(decode=True) or b""
+            if len(payload) > _MAX_UPLOAD_BYTES:
+                raise ValueError("PDF is larger than the 256 MiB upload limit.")
+            return filename, payload
+        raise ValueError("No PDF file was found in the upload.")
+
+    def _content_length(self, *, limit: int) -> int:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            raise ValueError("Missing Content-Length header.")
+        try:
+            length = int(raw)
+        except ValueError as exc:
+            raise ValueError("Invalid Content-Length header.") from exc
+        if length < 0 or length > limit:
+            raise ValueError(f"Request is too large; limit is {limit // (1024 * 1024)} MiB.")
+        return length
+
+    def _send_html(self, html: str) -> None:
+        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _send_json(self, payload: Any, *, status: HTTPStatus = HTTPStatus.OK) -> None:
+        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self._send_bytes(data, "application/json; charset=utf-8", status=status)
+
+    def _send_error(self, status: HTTPStatus, message: str) -> None:
+        self._send_json({"error": message}, status=status)
+
+    def _send_file(self, path: Path, *, inline: bool, download_name: str) -> None:
+        media_type = mimetypes.guess_type(download_name)[0] or "application/octet-stream"
+        disposition = "inline" if inline else "attachment"
+        data = path.read_bytes()
+        self._send_bytes(data, media_type, disposition=disposition, download_name=download_name)
+
+    def _send_bytes(
+        self,
+        data: bytes,
+        content_type: str,
+        *,
+        status: HTTPStatus = HTTPStatus.OK,
+        disposition: str | None = None,
+        download_name: str | None = None,
+    ) -> None:
+        self.send_response(int(status))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'self'")
+        if disposition and download_name:
+            ascii_name = "".join(ch if 32 <= ord(ch) < 127 and ch not in {'"', '\\'} else "_" for ch in download_name)
+            encoded = quote(download_name, safe="")
+            self.send_header(
+                "Content-Disposition",
+                f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}',
+            )
+        elif download_name:
+            ascii_name = "".join(ch if 32 <= ord(ch) < 127 and ch not in {'"', '\\'} else "_" for ch in download_name)
+            encoded = quote(download_name, safe="")
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}',
+            )
+        self.end_headers()
+        if data:
+            self.wfile.write(data)
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Expected a string value.")
+    return value
+
+
+def _download_stem(filename: str) -> str:
+    stem = Path(filename).stem.strip() or "paper"
+    return "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in stem)
+
+
+def serve_ui(
+    data_dir: Path,
+    repository: ResearchRepository,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    open_browser: bool = True,
+) -> None:
+    """Run the local browser UI until interrupted or closed from the page."""
+    app = SRAWebApp(data_dir, repository)
+    last_error: OSError | None = None
+    server: _SRAHTTPServer | None = None
+    candidate_ports = [port] if port == 0 else list(range(port, min(port + 10, 65536)))
+    for candidate in candidate_ports:
+        try:
+            server = _SRAHTTPServer((host, candidate), app)
+            break
+        except OSError as exc:
+            last_error = exc
+    if server is None:
+        raise OSError(f"Could not start local UI on ports {candidate_ports[0]}-{candidate_ports[-1]}: {last_error}")
+
+    actual_port = int(server.server_address[1])
+    url = f"http://{host}:{actual_port}/"
+    print(f"SRA UI: {url}")
+    print("Local-only server. Close it from the UI or press Ctrl+C in this window.")
+    if open_browser:
+        threading.Timer(0.25, lambda: webbrowser.open_new_tab(url)).start()
+    try:
+        server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+_INDEX_HTML = r'''<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Social Science Research IDE</title>
+<style>
+:root{--bg:#f5f3ee;--paper:#fffdf8;--ink:#18323a;--muted:#6c7778;--line:#d9d5ca;--accent:#c85f3a;--accent2:#2d6f73;--ok:#2c7a5a;--warn:#a76321;--bad:#a33c3c;--shadow:0 16px 50px rgba(31,48,53,.09)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}button,input,textarea{font:inherit}button{cursor:pointer}.top{height:72px;display:flex;align-items:center;gap:18px;padding:0 28px;border-bottom:1px solid var(--line);background:rgba(255,253,248,.94);position:sticky;top:0;z-index:20;backdrop-filter:blur(10px)}.brand{font-family:Georgia,"Noto Serif SC",serif;font-size:22px;font-weight:700;letter-spacing:.02em;white-space:nowrap}.issue{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.14em}.top-spacer{flex:1}.btn{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:10px;padding:9px 13px;font-weight:650;text-decoration:none;display:inline-block}.btn:hover{border-color:#a8aaa3}.btn.primary{background:var(--ink);color:white;border-color:var(--ink)}.btn.danger{color:var(--bad)}.layout{display:grid;grid-template-columns:330px minmax(0,1fr);min-height:calc(100vh - 72px)}.side{border-right:1px solid var(--line);padding:18px;background:#f0eee7;overflow:auto}.search{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);outline:none;margin-bottom:12px}.paper-list{display:flex;flex-direction:column;gap:8px}.paper-item{padding:13px;border:1px solid transparent;border-radius:12px;cursor:pointer}.paper-item:hover{background:rgba(255,255,255,.55)}.paper-item.active{background:var(--paper);border-color:var(--line);box-shadow:0 6px 20px rgba(31,48,53,.06)}.paper-title{font-family:Georgia,"Noto Serif SC",serif;font-size:15px;font-weight:700;line-height:1.35;margin-bottom:7px}.paper-meta{font-size:12px;color:var(--muted);line-height:1.45}.badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 7px;border-radius:999px;background:#e7ebe5;margin-right:5px}.badge.ok{color:var(--ok);background:#e4efe8}.badge.warn{color:var(--warn);background:#f5eadb}.badge.muted{color:var(--muted);background:#e9e7e1}.main{padding:34px;overflow:auto}.empty{max-width:760px;margin:13vh auto;text-align:center}.empty h1{font-family:Georgia,"Noto Serif SC",serif;font-size:38px;margin:0 0 14px}.empty p{color:var(--muted);font-size:16px;line-height:1.8}.hero{max-width:1050px;margin:0 auto 22px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:var(--accent2);font-weight:750}.hero h1{font-family:Georgia,"Noto Serif SC",serif;font-size:38px;line-height:1.18;margin:8px 0 10px}.authors{color:var(--muted);font-size:15px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.tabs{max-width:1050px;margin:0 auto 18px;display:flex;gap:4px;border-bottom:1px solid var(--line)}.tab{padding:10px 14px;border:0;background:transparent;color:var(--muted);font-weight:700}.tab.active{color:var(--ink);border-bottom:2px solid var(--accent)}.panel{max-width:1050px;margin:0 auto}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 5px 20px rgba(31,48,53,.035)}.k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}.v{font-size:15px;font-weight:650;line-height:1.5;word-break:break-word}.section{margin:22px 0}.section h2{font-family:Georgia,"Noto Serif SC",serif;font-size:22px;margin:0 0 12px}.prose{line-height:1.85;color:#31494f;white-space:pre-wrap}.chips{display:flex;gap:7px;flex-wrap:wrap}.chip{background:#e9eee9;border-radius:999px;padding:5px 9px;font-size:12px}.claim{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin:9px 0}.claim-head{display:flex;gap:8px;align-items:center;margin-bottom:7px}.claim-field{font-size:11px;font-weight:800;color:var(--accent2);text-transform:uppercase;letter-spacing:.08em}.claim-text{line-height:1.65}.evidence{margin-top:10px;border-left:2px solid #c6d7d4;padding:7px 10px;color:#52666b;font-size:13px;line-height:1.55}.evidence .page{color:var(--accent2);font-weight:750}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--paper);margin:10px 0}.data-table{border-collapse:collapse;width:100%;font-size:12px}.data-table td{border-bottom:1px solid #ece9e1;border-right:1px solid #ece9e1;padding:7px 8px;vertical-align:top}.data-table tr:last-child td{border-bottom:0}.notice{padding:12px 14px;border-radius:10px;background:#f5eadb;color:#7c531f;margin:10px 0}.good{background:#e4efe8;color:#28664c}.modal-back{position:fixed;inset:0;background:rgba(18,32,36,.35);display:none;align-items:center;justify-content:center;z-index:40;padding:20px}.modal-back.open{display:flex}.modal{width:min(720px,96vw);max-height:88vh;overflow:auto;background:var(--paper);border-radius:18px;border:1px solid var(--line);box-shadow:var(--shadow);padding:22px}.modal h2{font-family:Georgia,"Noto Serif SC",serif;margin:0 0 14px}.field{margin:14px 0}.field label{display:block;font-size:12px;font-weight:750;margin-bottom:6px}.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 11px;background:#fff;outline:none}.field textarea{min-height:92px;resize:vertical}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.log{background:#16282d;color:#dfe9e6;border-radius:10px;padding:12px;font-family:Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;max-height:280px;overflow:auto}.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.health-stat{padding:12px;border:1px solid var(--line);border-radius:10px}.health-stat b{display:block;font-size:20px;margin-top:3px}.toast{position:fixed;right:22px;bottom:22px;max-width:420px;background:var(--ink);color:white;padding:12px 14px;border-radius:11px;box-shadow:var(--shadow);display:none;z-index:60}.toast.show{display:block}.small{font-size:12px;color:var(--muted)}.split{display:flex;justify-content:space-between;gap:12px;align-items:center}.drop{border:1px dashed #aab5b1;border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin-bottom:14px}.footer-note{font-size:11px;color:var(--muted);margin-top:14px;line-height:1.55}.raw{background:#182b31;color:#dce8e5;padding:14px;border-radius:12px;overflow:auto;font:12px/1.55 Consolas,monospace;white-space:pre-wrap;max-height:560px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.side{display:none}.main{padding:22px}.grid,.health-grid{grid-template-columns:1fr}.hero h1{font-size:30px}.top{padding:0 14px}.issue{display:none}}
+</style>
+</head>
+<body>
+<header class="top"><div><div class="brand">Social Science Research IDE</div><div class="issue">Evidence-first local workspace</div></div><div class="top-spacer"></div><button class="btn" id="healthBtn">数据库健康</button><button class="btn primary" id="importBtn">导入 PDF</button><button class="btn danger" id="closeBtn">关闭</button><input id="fileInput" type="file" accept="application/pdf,.pdf" hidden></header>
+<div class="layout"><aside class="side"><input class="search" id="search" placeholder="搜索论文…"><div id="paperList" class="paper-list"></div></aside><main class="main" id="main"><div class="empty"><h1>你的论文工作台</h1><p>左侧选择一篇论文，或点击“导入 PDF”。分析、查看证据、导出和数据库检查都可以在这里完成，不必再逐条输入命令。</p></div></main></div>
+<div class="modal-back" id="analyzeModal"><div class="modal"><h2>分析论文</h2><div class="field"><label>研究关注（可选）</label><textarea id="researchContext" placeholder="例如：我关心大语言模型如何影响社会互动"></textarea></div><div class="field"><label>在此文本后排除（可选，用于一个 PDF 包含相邻文章）</label><input id="excludeMarker" placeholder="例如：Revisiting Description: Data Deep Description in Quantitative Research"></div><div class="field"><label><input type="checkbox" id="forceRun"> 忽略缓存，重新调用 Lite + Pro（通常不要勾）</label></div><div class="modal-actions"><button class="btn" data-close="analyzeModal">取消</button><button class="btn primary" id="runAnalyze">开始分析</button></div></div></div>
+<div class="modal-back" id="jobModal"><div class="modal"><h2 id="jobTitle">处理中</h2><div class="log" id="jobLog">准备中…</div><div class="modal-actions"><button class="btn" id="jobClose" style="display:none">完成</button></div></div></div>
+<div class="modal-back" id="healthModal"><div class="modal"><div class="split"><h2>数据库健康</h2><button class="btn" data-close="healthModal">关闭</button></div><div id="healthBody">正在检查…</div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const state={papers:[],selected:null,detail:null,tab:'overview'};
+const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200)}
+async function api(url,opts={}){const r=await fetch(url,opts);const ct=r.headers.get('content-type')||'';const data=ct.includes('json')?await r.json():await r.text();if(!r.ok)throw new Error(data.error||data||`HTTP ${r.status}`);return data}
+function openModal(id){$('#'+id).classList.add('open')}function closeModal(id){$('#'+id).classList.remove('open')}
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeModal(b.dataset.close));
+function fmtBytes(n){n=Number(n||0);const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i? n.toFixed(2):Math.round(n))+' '+u[i]}
+async function loadPapers(){const d=await api('/api/papers');state.papers=d.papers;renderList();if(state.selected){const exists=state.papers.some(p=>p.id===state.selected);if(exists)await selectPaper(state.selected);else{state.selected=null;renderEmpty()}}else if(state.papers.length){await selectPaper(state.papers[0].id)}}
+function renderList(){const q=$('#search').value.trim().toLowerCase();const list=$('#paperList');list.innerHTML='';for(const p of state.papers.filter(p=>`${p.title} ${p.original_name} ${(p.authors||[]).join(' ')}`.toLowerCase().includes(q))){const el=document.createElement('div');el.className='paper-item'+(p.id===state.selected?' active':'');el.onclick=()=>selectPaper(p.id);el.innerHTML=`<div class="paper-title">${esc(p.title)}</div><div class="paper-meta">${esc((p.authors||[]).join('、'))}${p.year?' · '+esc(p.year):''}<br><span class="badge ${p.has_card?'ok':'muted'}">${p.has_card?'已分析':'未分析'}</span>${p.warnings?`<span class="badge warn">${p.warnings} warning</span>`:''}<span class="badge muted">${p.page_count} 页</span></div>`;list.appendChild(el)}}
+function renderEmpty(){state.detail=null;$('#main').innerHTML=`<div class="empty"><h1>你的论文工作台</h1><p>左侧选择一篇论文，或点击“导入 PDF”。分析、查看证据、导出和数据库检查都可以在这里完成，不必再逐条输入命令。</p></div>`}
+async function selectPaper(id){state.selected=id;localStorage.setItem('sra.selected',id);renderList();try{state.detail=await api('/api/papers/'+encodeURIComponent(id));renderPaper()}catch(e){toast(e.message)}}
+function metadataGrid(m){const rows=[['期刊',m.journal],['年份',m.year],['卷',m.volume],['期',m.issue],['页码',m.pages],['DOI',m.doi]];return `<div class="grid">${rows.map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${esc(v||'—')}</div></div>`).join('')}</div>`}
+function evidenceHTML(evs){if(!evs||!evs.length)return'';return evs.map(e=>`<div class="evidence"><span class="page">PDF p.${esc(e.page_number)}</span> · ${esc(e.quote)}</div>`).join('')}
+function claimsHTML(items){if(!items||!items.length)return'<div class="small">暂无内容</div>';return items.map(c=>`<div class="claim"><div class="claim-head"><span class="claim-field">${esc(c.field_name)}</span><span class="badge ${c.verification==='SUPPORTED'?'ok':'muted'}">${esc(c.verification)}</span></div><div class="claim-text">${esc(c.statement)}</div>${evidenceHTML(c.evidence)}</div>`).join('')}
+function renderPaper(){const {paper,card}=state.detail;const m=card?.metadata||{};const title=m.title||paper.original_name;const authors=(m.authors||[]).join('、');$('#main').innerHTML=`<section class="hero"><div class="eyebrow">${esc(m.journal||'Imported paper')}${m.year?' · '+esc(m.year):''}</div><h1>${esc(title)}</h1><div class="authors">${esc(authors||paper.original_name)} · ${paper.page_count} PDF pages</div><div class="actions"><button class="btn primary" id="analyzeBtn">${card?'重新分析':'开始分析'}</button><a class="btn" target="_blank" href="/api/papers/${encodeURIComponent(paper.id)}/pdf">打开 PDF</a>${card?`<a class="btn" href="/api/papers/${encodeURIComponent(paper.id)}/card.json">导出 Card JSON</a>`:''}<a class="btn" href="/api/papers/${encodeURIComponent(paper.id)}/text.txt">导出解析文本</a></div></section><nav class="tabs"><button class="tab" data-tab="overview">概览</button><button class="tab" data-tab="facts">事实与证据</button><button class="tab" data-tab="review">AI 审读</button><button class="tab" data-tab="tables">表格</button><button class="tab" data-tab="raw">原始 Card</button></nav><section class="panel" id="panel"></section>`;$('#analyzeBtn').onclick=showAnalyze;document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderTab()});renderTab()}
+function renderTab(){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));const {paper,card}=state.detail;const p=$('#panel');if(!card){p.innerHTML=`<div class="notice">这篇 PDF 已导入并解析，但还没有 Paper Card。点击上方“开始分析”。</div>`;return}const m=card.metadata||{};if(state.tab==='overview'){p.innerHTML=`${card.warnings?.length?`<div class="notice">${card.warnings.map(esc).join('<br>')}</div>`:`<div class="notice good">Paper Card 当前为 0 warnings。</div>`}${metadataGrid(m)}<div class="section"><h2>关键词</h2><div class="chips">${(m.keywords||[]).length?(m.keywords||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join(''):'<span class="small">未提取</span>'}</div></div><div class="section"><h2>摘要</h2><div class="card prose">${esc(m.abstract||'未提取')}</div></div><div class="grid"><div class="card"><div class="k">Basic facts</div><div class="v">${card.basic_facts.length}</div></div><div class="card"><div class="k">Evidence spans</div><div class="v">${card.evidence_spans.length}</div></div><div class="card"><div class="k">AI analysis</div><div class="v">${card.analysis.length}</div></div></div>`}else if(state.tab==='facts'){p.innerHTML=`<div class="section"><h2>书目信息证据</h2>${claimsHTML(card.metadata_claims)}</div><div class="section"><h2>基础事实</h2>${claimsHTML(card.basic_facts)}</div>`}else if(state.tab==='review'){p.innerHTML=`<div class="section"><h2>方法与贡献审读</h2>${claimsHTML(card.analysis)}</div><div class="section"><h2>潜在局限</h2>${claimsHTML(card.limitations)}</div><div class="section"><h2>阅读建议</h2>${card.reading_recommendation?claimsHTML([card.reading_recommendation]):'<div class="small">暂无</div>'}</div>`}else if(state.tab==='tables'){p.innerHTML=(card.tables||[]).length?(card.tables||[]).map(t=>`<div class="section"><h2>PDF p.${esc(t.page_number)}</h2>${t.table_rows?`<div class="table-wrap"><table class="data-table">${t.table_rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`:`<div class="card prose">${esc(t.text)}</div>`}</div>`).join(''):'<div class="small">没有解析到表格。</div>'}else{p.innerHTML=`<pre class="raw">${esc(JSON.stringify(card,null,2))}</pre>`}}
+function showAnalyze(){const id=state.selected;$('#researchContext').value=localStorage.getItem('sra.context.'+id)||'';$('#excludeMarker').value=localStorage.getItem('sra.exclude.'+id)||'';$('#forceRun').checked=false;openModal('analyzeModal')}
+$('#runAnalyze').onclick=async()=>{const id=state.selected;const context=$('#researchContext').value;const marker=$('#excludeMarker').value;localStorage.setItem('sra.context.'+id,context);localStorage.setItem('sra.exclude.'+id,marker);closeModal('analyzeModal');try{const d=await api(`/api/papers/${encodeURIComponent(id)}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({research_context:context,exclude_after_text:marker,force:$('#forceRun').checked})});watchJob(d.job_id,'论文分析')}catch(e){toast(e.message)}};
+async function watchJob(jobId,title){$('#jobTitle').textContent=title;$('#jobLog').textContent='准备中…';$('#jobClose').style.display='none';openModal('jobModal');while(true){let j;try{j=await api('/api/jobs/'+jobId)}catch(e){$('#jobLog').textContent=e.message;$('#jobClose').style.display='inline-block';return}$('#jobLog').textContent=(j.messages||[]).join('\n')||'处理中…';$('#jobLog').scrollTop=$('#jobLog').scrollHeight;if(j.status==='done'){if(j.result)$('#jobLog').textContent+='\n\n完成。';$('#jobClose').style.display='inline-block';await loadPapers();if(j.result?.paper_id)await selectPaper(j.result.paper_id);return}if(j.status==='error'){$('#jobLog').textContent+='\n\n错误：'+j.error;$('#jobClose').style.display='inline-block';return}await new Promise(r=>setTimeout(r,900))}}
+$('#jobClose').onclick=()=>closeModal('jobModal');
+$('#importBtn').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;const form=new FormData();form.append('file',f);try{const d=await api('/api/import',{method:'POST',body:form});watchJob(d.job_id,'导入 PDF')}catch(err){toast(err.message)}finally{e.target.value=''}};
+$('#search').oninput=renderList;
+$('#healthBtn').onclick=async()=>{openModal('healthModal');$('#healthBody').innerHTML='正在检查…';try{const r=await api('/api/doctor');renderHealth(r)}catch(e){$('#healthBody').textContent=e.message}};
+function renderHealth(r){const c=r.counts,s=r.storage,k=r.cache,i=r.issues;const issueCount=Object.values(i).reduce((n,v)=>n+(Array.isArray(v)?v.length:Object.keys(v||{}).length),0);$('#healthBody').innerHTML=`<div class="notice ${r.status==='ok'?'good':''}">${r.status==='ok'?'仓库检查正常。':`有 ${issueCount} 项需要检查。`}</div><div class="health-grid"><div class="health-stat"><span class="small">论文</span><b>${c.papers}</b></div><div class="health-stat"><span class="small">Paper Cards</span><b>${c.paper_cards}</b></div><div class="health-stat"><span class="small">Model cache</span><b>${c.model_runs}</b></div><div class="health-stat"><span class="small">数据库</span><b>${fmtBytes(r.database_bytes)}</b></div><div class="health-stat"><span class="small">PDF</span><b>${fmtBytes(s.papers_dir_pdf_bytes)}</b></div><div class="health-stat"><span class="small">旧缓存</span><b>${k.stale_runs}</b></div></div><div class="section"><h2>缓存清理</h2><p class="small">只会操作 model_runs，不碰 PDF、Paper Card、source blocks 或 notes。</p><div class="actions"><button class="btn" id="previewPrune">预览旧缓存</button><button class="btn danger" id="applyPrune">清理旧缓存</button><button class="btn" id="deepDoctor">深度校验 PDF SHA-256</button></div><div id="healthExtra" class="small" style="margin-top:12px"></div></div>`;$('#previewPrune').onclick=()=>prune(false);$('#applyPrune').onclick=()=>prune(true);$('#deepDoctor').onclick=async()=>{const x=$('#healthExtra');x.textContent='正在计算 PDF SHA-256…';try{const d=await api('/api/doctor?deep=1');x.textContent=d.status==='ok'?'深度检查通过：所有保存的 PDF 哈希与数据库一致。':JSON.stringify(d.issues,null,2)}catch(e){x.textContent=e.message}}}
+async function prune(apply){const x=$('#healthExtra');if(apply&&!confirm('只删除旧 prompt 版本的模型缓存。不会删除 PDF、Paper Card、source blocks 或 notes。继续？'))return;try{const d=await api('/api/prune-cache',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all_runs:false,apply,vacuum:apply})});x.textContent=apply?`已删除 ${d.deleted_runs} 条旧缓存；剩余 ${d.total_runs_after} 条。`:`可清理 ${d.matched_runs} 条旧缓存，约 ${fmtBytes(d.matched_bytes)}。`;if(apply){const r=await api('/api/doctor');renderHealth(r)}}catch(e){x.textContent=e.message}}
+$('#closeBtn').onclick=async()=>{if(!confirm('关闭本地 SRA 界面？'))return;try{await api('/api/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch{}document.body.innerHTML='<div class="empty"><h1>SRA 已关闭</h1><p>这个浏览器标签可以关掉了。</p></div>'};
+(async()=>{state.selected=localStorage.getItem('sra.selected');try{await loadPapers()}catch(e){toast(e.message)}})();
+</script>
+</body>
+</html>'''

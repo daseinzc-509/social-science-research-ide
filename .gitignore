@@ -1,0 +1,16 @@
+.venv/
+.conda-env/
+.conda-pkgs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+data/
+parsed-paper*.txt
+paper-card*.json
+.env
+.env.*
+!.env.example
+*.egg-info/
+build/
+dist/
