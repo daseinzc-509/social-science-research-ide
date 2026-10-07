@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .models import PaperCard, PaperRecord, ParsedDocument, SourceBlock
+from .models import PaperCard, PaperMetadata, PaperRecord, ParsedDocument, SourceBlock
 
 
 class ResearchRepository:
@@ -54,7 +54,9 @@ class ResearchRepository:
                     page_number INTEGER NOT NULL CHECK (page_number > 0),
                     text TEXT NOT NULL,
                     bbox_json TEXT,
-                    table_rows_json TEXT
+                    table_rows_json TEXT,
+                    role TEXT NOT NULL DEFAULT 'body',
+                    source_label TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_source_blocks_paper_page
                     ON source_blocks(paper_id, page_number);
@@ -79,11 +81,21 @@ class ResearchRepository:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (paper_id, stage, model, prompt_version, input_sha256)
                 );
+                CREATE TABLE IF NOT EXISTS paper_metadata_overrides (
+                    paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+                    metadata_json TEXT NOT NULL,
+                    source_note TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(source_blocks)")}
             if "table_rows_json" not in columns:
                 connection.execute("ALTER TABLE source_blocks ADD COLUMN table_rows_json TEXT")
+            if "role" not in columns:
+                connection.execute("ALTER TABLE source_blocks ADD COLUMN role TEXT NOT NULL DEFAULT 'body'")
+            if "source_label" not in columns:
+                connection.execute("ALTER TABLE source_blocks ADD COLUMN source_label TEXT")
             paper_columns = {row["name"] for row in connection.execute("PRAGMA table_info(papers)")}
             if "parser_version" not in paper_columns:
                 connection.execute("ALTER TABLE papers ADD COLUMN parser_version TEXT NOT NULL DEFAULT 'legacy'")
@@ -109,11 +121,12 @@ class ResearchRepository:
                  json.dumps(record.warnings, ensure_ascii=False), record.created_at),
             )
             connection.executemany(
-                "INSERT INTO source_blocks (id, paper_id, page_number, text, bbox_json, table_rows_json) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO source_blocks (id, paper_id, page_number, text, bbox_json, table_rows_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (block.id, record.id, block.page_number, block.text,
                      json.dumps(block.bbox) if block.bbox is not None else None,
-                     json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None)
+                     json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None,
+                     block.role, block.source_label)
                     for block in document.blocks
                 ],
             )
@@ -129,11 +142,12 @@ class ResearchRepository:
             connection.execute("DELETE FROM source_blocks WHERE paper_id = ?", (paper_id,))
             connection.executemany(
                 """INSERT INTO source_blocks
-                (id, paper_id, page_number, text, bbox_json, table_rows_json) VALUES (?, ?, ?, ?, ?, ?)""",
+                (id, paper_id, page_number, text, bbox_json, table_rows_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (block.id, paper_id, block.page_number, block.text,
                      json.dumps(block.bbox) if block.bbox is not None else None,
-                     json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None)
+                     json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None,
+                     block.role, block.source_label)
                     for block in document.blocks
                 ],
             )
@@ -168,12 +182,85 @@ class ResearchRepository:
     def get_card(self, paper_id: str) -> PaperCard | None:
         with self._connection() as connection:
             row = connection.execute("SELECT card_json FROM paper_cards WHERE paper_id = ?", (paper_id,)).fetchone()
-        return PaperCard.model_validate_json(row[0]) if row else None
+        if not row:
+            return None
+        card = PaperCard.model_validate_json(row[0])
+        override = self.get_metadata_overrides(paper_id)
+        values = override.get("values", {}) if override else {}
+        if values:
+            merged = {**card.metadata.model_dump(mode="python"), **values}
+            metadata = PaperMetadata.model_validate(merged)
+            card = card.model_copy(update={"metadata": metadata})
+        return card
+
+    def get_metadata_overrides(self, paper_id: str) -> dict[str, object]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT metadata_json, source_note, updated_at FROM paper_metadata_overrides WHERE paper_id = ?",
+                (paper_id,),
+            ).fetchone()
+        if row is None:
+            return {"values": {}, "source_note": None, "updated_at": None}
+        values = json.loads(row["metadata_json"])
+        return {
+            "values": values if isinstance(values, dict) else {},
+            "source_note": row["source_note"],
+            "updated_at": row["updated_at"],
+        }
+
+    def save_metadata_overrides(
+        self, paper_id: str, values: dict[str, object], *, source_note: str | None = None
+    ) -> dict[str, object]:
+        allowed = {"title", "authors", "year", "journal", "volume", "issue", "pages", "doi", "keywords"}
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValueError(f"unsupported metadata override field(s): {', '.join(sorted(unknown))}")
+        with self._connection() as connection:
+            exists = connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not exists:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            card_row = connection.execute(
+                "SELECT card_json FROM paper_cards WHERE paper_id = ?", (paper_id,)
+            ).fetchone()
+            base = PaperMetadata()
+            if card_row is not None:
+                base = PaperCard.model_validate_json(card_row[0]).metadata
+            # Validate the effective metadata, but persist only fields that actually
+            # differ from automatic extraction. This keeps future re-analysis free to
+            # update untouched fields instead of silently freezing the whole form.
+            base_values = base.model_dump(mode="python")
+            validated = PaperMetadata.model_validate({**base_values, **values})
+            validated_values = validated.model_dump(mode="python")
+            effective_overrides = {
+                key: validated_values[key]
+                for key in values
+                if validated_values.get(key) != base_values.get(key)
+            }
+            note = (source_note or "").strip() or None
+            if not effective_overrides and note is None:
+                connection.execute(
+                    "DELETE FROM paper_metadata_overrides WHERE paper_id = ?", (paper_id,)
+                )
+            else:
+                connection.execute(
+                    """INSERT INTO paper_metadata_overrides (paper_id, metadata_json, source_note)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(paper_id) DO UPDATE SET
+                        metadata_json = excluded.metadata_json,
+                        source_note = excluded.source_note,
+                        updated_at = CURRENT_TIMESTAMP""",
+                    (paper_id, json.dumps(effective_overrides, ensure_ascii=False), note),
+                )
+        return self.get_metadata_overrides(paper_id)
+
+    def clear_metadata_overrides(self, paper_id: str) -> None:
+        with self._connection() as connection:
+            connection.execute("DELETE FROM paper_metadata_overrides WHERE paper_id = ?", (paper_id,))
 
     def get_source_blocks(self, paper_id: str) -> list[SourceBlock]:
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT id, page_number, text, bbox_json, table_rows_json FROM source_blocks "
+                "SELECT id, page_number, text, bbox_json, table_rows_json, role, source_label FROM source_blocks "
                 "WHERE paper_id = ? ORDER BY page_number, rowid", (paper_id,)
             ).fetchall()
         return [
@@ -181,6 +268,8 @@ class ResearchRepository:
                 id=row["id"], page_number=row["page_number"], text=row["text"],
                 bbox=tuple(json.loads(row["bbox_json"])) if row["bbox_json"] else None,
                 table_rows=json.loads(row["table_rows_json"]) if row["table_rows_json"] else None,
+                role=row["role"] or "body",
+                source_label=row["source_label"],
             )
             for row in rows
         ]
@@ -420,6 +509,72 @@ class ResearchRepository:
             "total_runs_after": total_after,
             "database_bytes_before": database_before,
             "database_bytes_after": database_after,
+        }
+
+    def clear_derived_analysis(self, paper_id: str) -> dict[str, int]:
+        """Delete the current Paper Card and model cache for one paper.
+
+        Parsed source blocks and user notes are intentionally preserved. This is
+        used after an explicit reparse so the next analysis cannot accidentally
+        reuse a Card or model result derived from an older parse.
+        """
+        with self._connection() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM papers WHERE id = ?", (paper_id,)
+            ).fetchone()
+            if not exists:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            card_count = connection.execute(
+                "SELECT COUNT(*) FROM paper_cards WHERE paper_id = ?", (paper_id,)
+            ).fetchone()[0]
+            model_run_count = connection.execute(
+                "SELECT COUNT(*) FROM model_runs WHERE paper_id = ?", (paper_id,)
+            ).fetchone()[0]
+            connection.execute("DELETE FROM paper_cards WHERE paper_id = ?", (paper_id,))
+            connection.execute("DELETE FROM model_runs WHERE paper_id = ?", (paper_id,))
+        return {
+            "paper_cards": int(card_count),
+            "model_runs": int(model_run_count),
+        }
+
+    def delete_paper(self, paper_id: str) -> dict[str, object]:
+        """Delete one paper and every database row owned by it.
+
+        SQLite foreign-key cascades remove source blocks, Paper Card, model cache
+        and user notes. The PDF file itself is deliberately handled by the caller
+        so filesystem deletion can be guarded separately.
+        """
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM papers WHERE id = ?", (paper_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            counts = {
+                "source_blocks": connection.execute(
+                    "SELECT COUNT(*) FROM source_blocks WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
+                "paper_cards": connection.execute(
+                    "SELECT COUNT(*) FROM paper_cards WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
+                "model_runs": connection.execute(
+                    "SELECT COUNT(*) FROM model_runs WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
+                "user_notes": connection.execute(
+                    "SELECT COUNT(*) FROM user_notes WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
+                "metadata_overrides": connection.execute(
+                    "SELECT COUNT(*) FROM paper_metadata_overrides WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
+            }
+            stored_path = row["stored_path"]
+            original_name = row["original_name"]
+            connection.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+        return {
+            "paper_id": paper_id,
+            "original_name": original_name,
+            "stored_path": stored_path,
+            **{key: int(value) for key, value in counts.items()},
         }
 
     def add_user_note(self, paper_id: str, note_id: str, note: str) -> None:

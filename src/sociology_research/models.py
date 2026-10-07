@@ -33,6 +33,8 @@ class SourceBlock(BaseModel):
     text: str = Field(min_length=1)
     bbox: tuple[float, float, float, float] | None = None
     table_rows: list[list[str]] | None = None
+    role: Literal["body", "heading", "front_matter", "footnote", "table", "furniture"] = "body"
+    source_label: str | None = None
 
     @field_validator("text")
     @classmethod
