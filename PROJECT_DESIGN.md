@@ -1,6 +1,6 @@
 # Sociology Research Agent / Social Science Research IDE
 
-## Project Design Brief v0.2
+## Project Design Brief v0.3
 
 本文件定义项目的研究目标、首版可交付范围、架构边界和阶段路线图。它既是项目上下文，也是后续实现与评估的依据；其中“长期方向”不代表要在首版实现。
 
@@ -105,7 +105,7 @@ NO_SOURCE       当前找不到支持该判断的原文
 
 ### 2.5 首版技术边界与最小接口
 
-首版采用 Python、Pydantic 和 SQLite。PDF 解析先使用 PyMuPDF；解析器边界保持可替换。原始 PDF 和解析产物放在项目数据目录，SQLite 保存元数据、文本块、Paper Card、证据引用、用户笔记及运行状态。首版为单机研究原型，不设计多用户并发或云同步。
+首版采用 Python、Pydantic 和 SQLite。PDF 解析默认使用 Docling，保留 PyMuPDF 作为轻量后备和回归测试路径；解析器边界保持可替换。原始 PDF 和解析产物放在项目数据目录，SQLite 保存元数据、文本块、Paper Card、证据引用、用户笔记及运行状态。首版为单机研究原型，不设计多用户并发或云同步。
 
 首版只定义足以隔离变化的边界：
 
@@ -150,6 +150,57 @@ CLI 分析默认只生成本地调用预览；必须显式传 `--run` 才发送�
 
 ---
 
+### 2.7 批量 PDF 入库（下一阶段）
+
+批量提交首先解决“把一组本地 PDF 安全地纳入研究库”的问题，不把导入和模型分析绑定成一个不可控的长任务。批量流程必须复用单篇导入的哈希、存储、解析和 SQLite 写入规则：
+
+```text
+目录 / 多选文件
+  → 发现 PDF 与扩展名校验
+  → SHA-256 去重
+  → 每个文件独立复制和解析
+  → 每个文件写入 imported / duplicate / needs_review / failed 状态
+  → 批量结果报告
+  → 用户确认后再运行分析
+```
+
+批量任务的最小结果对象应包含输入路径、原始文件名、SHA-256、论文 ID（若已入库）、解析状态、错误信息、警告和耗时。任务必须允许部分成功；重跑时依靠哈希幂等，不因同一个文件被重新扫描而产生重复论文。批量导入默认不调用 Lite/Pro 模型，分析必须是显式的第二步。
+
+批量阶段的验收条件：
+
+- 递归目录中的 PDF 可以逐个处理，并为每个文件返回独立结果。
+- 同一文件内容只对应一个 Paper 记录；重命名不产生重复记录。
+- 一个文件失败不会回滚同批次已成功的文件。
+- 扫描件、损坏文件和解析异常保留明确状态，不能伪装成普通成功。
+- 批量分析可以按状态、标签或用户选择筛选，且不会隐式重复消耗已缓存的模型结果。
+
+### 2.8 参考文献与文内引用（下一阶段）
+
+参考文献功能不是“把论文最后一页抄成一串字符串”，而是把三个层次分开保存：
+
+1. **ReferenceEntry**：参考文献表中的一条记录。保存原始文本、规范化字段和来源证据；字段缺失时保持为空。
+2. **CitationMention**：正文或脚注中一次引用出现的位置。保存引用标记、页码、文本块、附近句子和能指向的 `ReferenceEntry`。
+3. **ReferenceLink**：参考文献条目与本地论文、DOI 或外部元数据的候选匹配。保存匹配方式、置信度、状态和人工修订记录。
+
+建议的状态机是：
+
+```text
+RAW → STRUCTURED → CANDIDATE_MATCH → CONFIRMED
+                    ↘ NEEDS_REVIEW
+```
+
+其中 `RAW` 永远保留；`STRUCTURED` 只表示解析器识别出了字段；`CANDIDATE_MATCH` 只是候选，不等于同一篇论文；`CONFIRMED` 需要 DOI、稳定元数据或人工确认。任何解析器都可能在双栏、脚注、连字符和跨页参考文献上出错，因此每条记录都要能回到 PDF 页和 `SourceBlock`。
+
+首个可交付范围应是：
+
+- 找到参考文献区段并逐条切分。
+- 提取原始引用字符串和页级证据。
+- 解析作者、年份、标题、期刊、卷期、页码、DOI 等常用字段。
+- 识别正文引用标记与参考文献条目的候选对应关系。
+- 对缺字段、无法切分、匹配冲突和跨页记录标记 `NEEDS_REVIEW`。
+
+首个阶段不承诺自动构建完整引文网络、推断学术影响、用引用次数替代理论重要性，也不把模型生成的引用当成原文事实。跨论文综合仍然只能引用已经保存并经过人工检查的 `ReferenceEntry` 和 `CitationMention`。
+
 ## 3. 长期架构方向与数据演进
 
 ### 3.1 长期模块
@@ -188,6 +239,7 @@ ExtractionRun
 Concept / Theory / Mechanism / Debate
 ResearchQuestion / Gap / Puzzle / Argument
 LiteratureMap / Draft
+ReferenceEntry / CitationMention / ReferenceLink
 ```
 
 研究问题应允许版本演进，并能记录哪些论文、争论或判断促成变化。不要在没有真实使用案例前设计完整 ontology 或数十张表。
@@ -244,15 +296,19 @@ Approved Argument → Outline → Human Approval → Draft
 
 ### Milestone 1 — One Paper
 
-实现本地 PDF 导入、PyMuPDF 解析、Lite 事实提取、Pro 深度分析、Pydantic 输出校验、证据关联、SQLite 持久化与结果缓存、薄 CLI。Lite 按来源块分段；Pro 只接收 Lite 结果和精选证据，不重复发送全文。通过单篇端到端用例与字段级评估检查首版验收条件。
+实现本地 PDF 导入、Docling 版面/表格/OCR 解析、Lite 事实提取、Pro 深度分析、Pydantic 输出校验、证据关联、SQLite 持久化与结果缓存、薄 CLI。Lite 按来源块分段；Pro 只接收 Lite 结果和精选证据，不重复发送全文。通过单篇端到端用例与字段级评估检查首版验收条件。
+
+### Milestone 1.5 — Batch Intake
+
+在不改变单篇导入语义的前提下，加入目录扫描、哈希去重、逐文件结果、部分成功和批量任务报告。导入和分析分成两个明确动作；先验证本地论文库能稳定承载几十到几百篇 PDF，再扩大分析范围。
 
 ### Milestone 2 — Multiple Papers
 
-支持用户导入一组论文，对 Paper Card 进行主题、理论、方法、共同发现和冲突发现的比较。所有综合判断仍须关联到各自来源论文与证据；先验证结构化记忆是否足以支持跨论文综合。
+支持用户导入一组论文，解析参考文献表和正文引用位置，并对 Paper Card 进行主题、理论、方法、共同发现和冲突发现的比较。所有综合判断仍须关联到各自来源论文与证据；先验证参考文献结构化记忆是否足以支持跨论文综合，再考虑引文网络。
 
 ### Milestone 3 — Literature Discovery
 
-加入查询扩展、OpenAlex/Crossref 等来源的文献发现、候选筛选和元数据规范化。验证去重、来源标注和筛选质量；后续再按需要加入引文滚雪球、作者扩展或其他数据库。
+加入查询扩展、OpenAlex/Crossref 等来源的文献发现、候选筛选和元数据规范化。验证去重、来源标注和筛选质量；后续再按需要把已确认的 `ReferenceLink` 用于引文滚雪球、作者扩展或其他数据库查询。
 
 ### Milestone 4 — Iterative Research Loop
 
@@ -285,6 +341,7 @@ Multi-agent swarm
 Neo4j、复杂知识图谱或 GraphRAG
 独立 Vector Database、嵌入检索与重排
 自动文献搜索、全网下载和筛选
+完整引文网络、自动影响力判断和“引用越多越重要”的排序
 FastAPI、SSE、后台任务队列或 PostgreSQL
 WPF/Web 前端、SaaS、云同步、认证或移动端
 完整 Zotero replacement

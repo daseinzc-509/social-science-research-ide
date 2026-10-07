@@ -87,6 +87,25 @@ class ResearchRepository:
                     source_note TEXT,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS reference_entries (
+                    id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+                    raw_text TEXT NOT NULL,
+                    entry_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (paper_id, ordinal)
+                );
+                CREATE TABLE IF NOT EXISTS citation_mentions (
+                    id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    mention_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_reference_entries_paper
+                    ON reference_entries(paper_id, ordinal);
+                CREATE INDEX IF NOT EXISTS idx_citation_mentions_paper
+                    ON citation_mentions(paper_id);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(source_blocks)")}
@@ -511,6 +530,15 @@ class ResearchRepository:
             "database_bytes_after": database_after,
         }
 
+    def refresh_parsed_document_and_invalidate(self, paper_id: str, document: ParsedDocument) -> dict[str, int]:
+        """Refresh parser output and remove analysis derived from the old parse.
+
+        Source blocks are the evidence base for Paper Cards. When parser output
+        changes, old cards/model runs may point at obsolete block ids.
+        """
+        self.refresh_parsed_document(paper_id, document)
+        return self.clear_derived_analysis(paper_id)
+
     def clear_derived_analysis(self, paper_id: str) -> dict[str, int]:
         """Delete the current Paper Card and model cache for one paper.
 
@@ -587,6 +615,37 @@ class ResearchRepository:
             connection.execute(
                 "INSERT INTO user_notes (id, paper_id, note) VALUES (?, ?, ?)", (note_id, paper_id, note.strip())
             )
+
+    def save_references(self, paper_id: str, entries: list, mentions: list) -> None:
+        """Replace extracted references for one paper; raw source text remains in source_blocks."""
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone() is None:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            connection.execute("DELETE FROM reference_entries WHERE paper_id = ?", (paper_id,))
+            connection.execute("DELETE FROM citation_mentions WHERE paper_id = ?", (paper_id,))
+            connection.executemany(
+                "INSERT INTO reference_entries (id, paper_id, ordinal, raw_text, entry_json) VALUES (?, ?, ?, ?, ?)",
+                [(entry.id, paper_id, entry.ordinal, entry.raw_text, entry.model_dump_json()) for entry in entries],
+            )
+            connection.executemany(
+                "INSERT INTO citation_mentions (id, paper_id, mention_json) VALUES (?, ?, ?)",
+                [(mention.id, paper_id, mention.model_dump_json()) for mention in mentions],
+            )
+
+    def get_references(self, paper_id: str) -> tuple[list, list]:
+        from .models import CitationMention, ReferenceEntry
+
+        with self._connection() as connection:
+            entries = connection.execute(
+                "SELECT entry_json FROM reference_entries WHERE paper_id = ? ORDER BY ordinal", (paper_id,)
+            ).fetchall()
+            mentions = connection.execute(
+                "SELECT mention_json FROM citation_mentions WHERE paper_id = ? ORDER BY rowid", (paper_id,)
+            ).fetchall()
+        return (
+            [ReferenceEntry.model_validate_json(row[0]) for row in entries],
+            [CitationMention.model_validate_json(row[0]) for row in mentions],
+        )
 
     @staticmethod
     def _sha256_file(path: Path) -> str:

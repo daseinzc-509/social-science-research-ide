@@ -9,14 +9,14 @@ set "PYTHON_EXE=%~dp0.conda-env\python.exe"
 
 if exist "%SRA_EXE%" (
     echo Starting SRA local workspace...
-    "%SRA_EXE%" ui
+    "%SRA_EXE%" ui --port 8766
     goto :done
 )
 
 if exist "%PYTHON_EXE%" (
     echo SRA console launcher was not found.
     echo Trying the Python module directly...
-    "%PYTHON_EXE%" -m sociology_research.cli ui
+    "%PYTHON_EXE%" -m sociology_research.cli ui --port 8766
     goto :done
 )
 

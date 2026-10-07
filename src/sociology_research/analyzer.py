@@ -283,15 +283,24 @@ class PaperAnalysisPipeline:
             self._report(
                 f"Document parser refresh required: {record.parser_version or 'none'} → {self.parser.version}"
             )
-            refreshed = self.parser.parse(
-                Path(record.stored_path),
-                paper_id=record.id,
-                sha256=record.sha256,
-                progress=self._report,
-            )
-            self.repository.refresh_parsed_document(paper_id, refreshed)
-            self._report(f"Document parsing complete: {len(refreshed.blocks)} source blocks stored.")
-            record = self.repository.get_paper(paper_id)
+            stored_pdf = Path(record.stored_path)
+            if stored_pdf.is_file():
+                refreshed = self.parser.parse(
+                    stored_pdf,
+                    paper_id=record.id,
+                    sha256=record.sha256,
+                    progress=self._report,
+                )
+                self.repository.refresh_parsed_document(paper_id, refreshed)
+                self._report(f"Document parsing complete: {len(refreshed.blocks)} source blocks stored.")
+                record = self.repository.get_paper(paper_id)
+            else:
+                cached_blocks = self.repository.get_source_blocks(paper_id)
+                if not cached_blocks:
+                    raise PaperAnalysisError(
+                        f"Stored PDF is missing and no cached source blocks are available: {stored_pdf}"
+                    )
+                self._report("Stored PDF is missing; using cached source blocks without re-parsing.")
         else:
             self._report(f"Document parse cache ready: {record.parser_version}")
         blocks = self.repository.get_source_blocks(paper_id)
@@ -1334,7 +1343,7 @@ def _derive_front_matter_metadata(
         abstract_start = None
         for j, block in enumerate(page_blocks[: idx + 1]):
             text = unicodedata.normalize("NFKC", block.text)
-            if re.search(r"(?:摘要|提要)\s*[:：]", text):
+            if re.search(r"^\s*(?:摘\s*要|提\s*要|abstract)\s*[:：]?", text, re.I):
                 abstract_start = j
                 break
         if abstract_start is not None and abstract_start < idx:
@@ -1343,7 +1352,7 @@ def _derive_front_matter_metadata(
             for j, block in enumerate(abstract_blocks):
                 text = unicodedata.normalize("NFKC", block.text)
                 if j == 0:
-                    text = re.sub(r"^.*?(?:摘要|提要)\s*[:：]\s*", "", text, count=1, flags=re.S)
+                    text = re.sub(r"^\s*(?:摘\s*要|提\s*要|abstract)\s*[:：]?\s*", "", text, count=1, flags=re.S | re.I)
                 abstract_parts.append(text)
             abstract = _smart_join_wrapped(abstract_parts)
             if abstract:
@@ -1355,6 +1364,45 @@ def _derive_front_matter_metadata(
                     candidates.append(claim)
 
     return candidates
+
+
+def _derive_abstract_metadata(
+    blocks: list[SourceBlock], span_registry: dict[str, EvidenceSpan]
+) -> list[tuple[str, object, ExtractedClaim]]:
+    """Recover abstracts from Docling front matter without relying on LLM evidence spans."""
+    front = [
+        block for block in blocks
+        if block.table_rows is None and block.page_number <= 3 and block.role != "furniture"
+    ]
+    front.sort(key=lambda block: (block.page_number, block.bbox[1] if block.bbox else 0, block.bbox[0] if block.bbox else 0))
+    marker = re.compile(r"(?:^|\n)\s*(?:摘\s*要|提\s*要|abstract)\s*[:：]?", re.I)
+    stop = re.compile(r"(?:关键词|关键字|keywords?|中图分类号|doi)\s*[:：]?", re.I)
+    for index, block in enumerate(front):
+        normalized = unicodedata.normalize("NFKC", block.text)
+        match = marker.search(normalized)
+        if not match:
+            continue
+        parts = [normalized[match.end():].strip()]
+        evidence_blocks = [block]
+        for following in front[index + 1:]:
+            following_text = unicodedata.normalize("NFKC", following.text).strip()
+            if stop.search(following_text) or following.role == "heading":
+                break
+            if following.page_number > block.page_number + 1:
+                break
+            parts.append(following_text)
+            evidence_blocks.append(following)
+            if len(" ".join(parts)) >= 2000:
+                break
+        abstract = _smart_join_wrapped([part for part in parts if part])[:2000]
+        if len(abstract) < 40:
+            continue
+        evidence: list[EvidenceReference] = []
+        for source_block in evidence_blocks:
+            evidence.extend(_evidence_references_for_block(source_block.id, span_registry, max_refs=2))
+        candidate = _layout_claim("abstract", abstract, evidence)
+        return [candidate] if candidate else []
+    return []
 
 
 def _derive_repeating_header_metadata(
@@ -1604,6 +1652,7 @@ def _derive_layout_metadata_candidates(
 ) -> list[tuple[str, object, ExtractedClaim]]:
     return [
         *_derive_front_matter_metadata(blocks, span_registry),
+        *_derive_abstract_metadata(blocks, span_registry),
         *_derive_repeating_header_metadata(blocks, span_registry),
         *_derive_page_range_metadata(blocks, span_registry),
     ]

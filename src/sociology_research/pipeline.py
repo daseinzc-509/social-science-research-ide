@@ -47,7 +47,7 @@ class ImportPipeline:
                 Path(existing.stored_path), paper_id=existing.id, sha256=digest, progress=self.progress
             )
             if existing.parser_version != document.parser_version:
-                self.repository.refresh_parsed_document(existing.id, document)
+                self.repository.refresh_parsed_document_and_invalidate(existing.id, document)
                 existing = self.repository.get_paper(existing.id)
             return existing, document, False
 

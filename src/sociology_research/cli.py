@@ -10,6 +10,8 @@ from pathlib import Path
 
 from .analyzer import PROMPT_VERSION, PaperAnalysisError, PaperAnalysisPipeline
 from .llm_client import ModelRequestError
+from .library import LibraryService
+from .references import extract_references
 from .pipeline import ImportPipeline
 from .repository import ResearchRepository
 
@@ -107,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     import_cmd = commands.add_parser("import-pdf", help="Import and parse a local PDF")
     import_cmd.add_argument("pdf", type=Path)
+    batch_cmd = commands.add_parser("import-pdf-dir", help="Import every PDF in a directory")
+    batch_cmd.add_argument("path", type=Path)
+    batch_cmd.add_argument("--no-recursive", action="store_true", help="Only scan the immediate directory")
+    batch_cmd.add_argument("--json", action="store_true", help="Print per-file results as JSON")
     commands.add_parser("list", help="List imported papers")
     show_cmd = commands.add_parser("show", help="Show a paper and its parse status")
     show_cmd.add_argument("paper_id")
@@ -116,6 +122,14 @@ def build_parser() -> argparse.ArgumentParser:
     text_cmd = commands.add_parser("export-text", help="Export parsed source blocks with page and block IDs")
     text_cmd.add_argument("paper_id")
     text_cmd.add_argument("--output", type=Path, required=True)
+    refs_cmd = commands.add_parser("extract-references", help="Extract references and citation mentions from a parsed paper")
+    refs_cmd.add_argument("paper_id")
+    refs_cmd.add_argument("--output", type=Path, required=True)
+    refs_cmd.add_argument("--format", choices=("json", "bibtex"), default="json")
+    export_refs_cmd = commands.add_parser("export-references", help="Export saved references for Zotero or other reference managers")
+    export_refs_cmd.add_argument("paper_id")
+    export_refs_cmd.add_argument("--output", type=Path, required=True)
+    export_refs_cmd.add_argument("--format", choices=("json", "bibtex"), default="bibtex")
     analyze_cmd = commands.add_parser("analyze", help="Run Lite extraction followed by Pro analysis")
     analyze_cmd.add_argument("paper_id")
     analyze_cmd.add_argument("--research-context", help="Optional project question; used only for relevance assessment")
@@ -146,6 +160,28 @@ def main(argv: list[str] | None = None) -> int:
             for warning in parsed.warnings:
                 print(f"Warning: {warning}")
             return 0
+        if args.command == "import-pdf-dir":
+            service = LibraryService(data_dir, repository, progress=_progress)
+            paths = service.scan_pdfs(args.path, recursive=not args.no_recursive)
+            if not paths:
+                if not args.path.exists():
+                    print(f"No such path: {args.path}", file=sys.stderr)
+                    return 2
+                print("No PDF files found.")
+                return 0
+            results = service.batch_import(paths)
+            if args.json:
+                print(json.dumps(results, ensure_ascii=False, indent=2))
+            else:
+                counts: dict[str, int] = {}
+                for result in results:
+                    status = str(result["status"])
+                    counts[status] = counts.get(status, 0) + 1
+                    suffix = f" — {result['message']}" if result.get("message") else ""
+                    paper_id = f" [{result['paper_id']}]" if result.get("paper_id") else ""
+                    print(f"{status.upper():9} {result['path']}{paper_id}{suffix}")
+                print("Summary: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items())))
+            return 0 if not any(result["status"] == "failed" for result in results) else 1
         if args.command == "list":
             for paper in repository.list_papers():
                 print(f"{paper.id}\t{paper.parse_status.value}\t{paper.original_name}")
@@ -185,6 +221,41 @@ def main(argv: list[str] | None = None) -> int:
             )
             args.output.write_text(content, encoding="utf-8")
             print(f"Exported {len(blocks)} source blocks to {args.output}")
+            return 0
+        if args.command == "extract-references":
+            if repository.get_paper(args.paper_id) is None:
+                print(f"Unknown paper id: {args.paper_id}", file=sys.stderr)
+                return 2
+            blocks = repository.get_source_blocks(args.paper_id)
+            entries, mentions = extract_references(args.paper_id, blocks)
+            repository.save_references(args.paper_id, entries, mentions)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "paper_id": args.paper_id,
+                "references": [entry.model_dump(mode="json") for entry in entries],
+                "citation_mentions": [mention.model_dump(mode="json") for mention in mentions],
+            }
+            content = json.dumps(payload, ensure_ascii=False, indent=2) if args.format == "json" else _references_to_bibtex(entries)
+            args.output.write_text(content, encoding="utf-8")
+            print(f"Extracted {len(entries)} references and {len(mentions)} citation mentions to {args.output}")
+            return 0
+        if args.command == "export-references":
+            if repository.get_paper(args.paper_id) is None:
+                print(f"Unknown paper id: {args.paper_id}", file=sys.stderr)
+                return 2
+            entries, mentions = repository.get_references(args.paper_id)
+            if not entries:
+                print("No saved references found. Run extract-references first.", file=sys.stderr)
+                return 2
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "paper_id": args.paper_id,
+                "references": [entry.model_dump(mode="json") for entry in entries],
+                "citation_mentions": [mention.model_dump(mode="json") for mention in mentions],
+            }
+            content = json.dumps(payload, ensure_ascii=False, indent=2) if args.format == "json" else _references_to_bibtex(entries)
+            args.output.write_text(content, encoding="utf-8")
+            print(f"Exported {len(entries)} references to {args.output}")
             return 0
         if args.command == "doctor":
             report = repository.diagnose(
@@ -260,6 +331,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     return 2
+
+
+def _references_to_bibtex(entries: list) -> str:
+    blocks: list[str] = []
+    for index, entry in enumerate(entries, start=1):
+        key = _bibtex_key(entry, index)
+        fields = [("author", " and ".join(entry.authors)), ("title", entry.title), ("year", entry.year),
+                  ("journal", entry.container_title), ("volume", entry.volume), ("number", entry.issue),
+                  ("pages", entry.pages), ("doi", entry.doi), ("url", entry.url)]
+        lines = [f"@article{{{key},"]
+        for name, value in fields:
+            if value not in (None, "", []):
+                escaped = str(value).replace("{", "\\{").replace("}", "\\}")
+                lines.append(f"  {name} = {{{escaped}}},")
+        lines.append(f"  note = {{Imported from PDF p. {entry.source_page}; review raw_text before citing}},")
+        lines.append("}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + "\n"
+
+
+def _bibtex_key(entry, index: int) -> str:
+    author = (entry.authors[0] if entry.authors else "ref").split()[-1]
+    author = "".join(character for character in author if character.isalnum()) or "ref"
+    return f"{author}{entry.year or 'nd'}_{index}"
 
 
 if __name__ == "__main__":

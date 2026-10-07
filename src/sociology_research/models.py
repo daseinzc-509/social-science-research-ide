@@ -25,6 +25,54 @@ class ParseStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
 
 
+class ReferenceParseStatus(StrEnum):
+    RAW = "raw"
+    STRUCTURED = "structured"
+    NEEDS_REVIEW = "needs_review"
+
+
+class ReferenceMatchStatus(StrEnum):
+    CANDIDATE = "candidate"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    NEEDS_REVIEW = "needs_review"
+
+
+class ReferenceEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    paper_id: str
+    ordinal: int = Field(ge=1)
+    raw_text: str = Field(min_length=1)
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1400, le=2200)
+    title: str | None = None
+    container_title: str | None = None
+    volume: str | None = None
+    issue: str | None = None
+    pages: str | None = None
+    doi: str | None = None
+    url: str | None = None
+    source_page: int = Field(ge=1)
+    source_block_id: str
+    parse_status: ReferenceParseStatus = ReferenceParseStatus.STRUCTURED
+    needs_review_reason: str | None = None
+
+
+class CitationMention(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    paper_id: str
+    marker: str = Field(min_length=1)
+    reference_entry_id: str | None = None
+    page_number: int = Field(ge=1)
+    source_block_id: str
+    context_text: str = Field(min_length=1, max_length=1000)
+    match_status: ReferenceMatchStatus = ReferenceMatchStatus.CANDIDATE
+
+
 class SourceBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

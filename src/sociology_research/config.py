@@ -26,6 +26,15 @@ class Settings:
             pro_model=_optional_environment_value("SRA_PRO_MODEL"),
         )
 
+    @classmethod
+    def from_values(cls, values: dict[str, str | None]) -> "Settings":
+        return cls(
+            api_key=(values.get("SRA_API_KEY") or "").strip() or None,
+            api_base_url=(values.get("SRA_API_BASE_URL") or "").strip() or None,
+            lite_model=(values.get("SRA_LITE_MODEL") or "").strip() or None,
+            pro_model=(values.get("SRA_PRO_MODEL") or "").strip() or None,
+        )
+
     def require_model_configuration(self) -> tuple[str, str, str, str]:
         missing = [
             name
@@ -40,6 +49,25 @@ class Settings:
         if missing:
             raise ValueError("Missing model configuration: " + ", ".join(missing))
         return self.api_key, self.api_base_url, self.lite_model, self.pro_model
+
+
+def local_env_path() -> Path:
+    return _PROJECT_ROOT / ".env"
+
+
+def save_local_environment(values: dict[str, str | None]) -> None:
+    """Persist model settings to the ignored project .env and current process."""
+    allowed = ("SRA_API_KEY", "SRA_API_BASE_URL", "SRA_LITE_MODEL", "SRA_PRO_MODEL")
+    lines = [f"{name}={str(values.get(name) or '').strip()}" for name in allowed]
+    local_env_path().write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for name in allowed:
+        value = str(values.get(name) or "").strip()
+        if value:
+            os.environ[name] = value
+        else:
+            os.environ.pop(name, None)
+
+
 
 
 @dataclass(frozen=True)
