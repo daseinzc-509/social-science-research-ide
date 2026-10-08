@@ -78,11 +78,10 @@ class AnalysisConfig:
     lite_thinking: Literal["enabled", "disabled"] = "disabled"
     pro_thinking: Literal["enabled", "disabled"] = "enabled"
     pro_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
+    lite_max_completion_tokens: int = 4000
     pro_max_completion_tokens: int = 16000
-    # Pro v2 retrieves source excerpts directly from the parsed document instead of
-    # being restricted to Lite-selected quotes. Keep the budget explicit and local.
-    pro_evidence_char_limit: int = 24000
-    pro_direct_review_span_limit: int = 96
+    pro_max_source_excerpts: int = 120
+    pro_source_char_budget: int = 42000
 
 
 def _optional_environment_value(name: str) -> str | None:

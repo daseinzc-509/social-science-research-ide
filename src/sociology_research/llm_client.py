@@ -108,7 +108,7 @@ class OpenAICompatibleClient:
             choice = response_data["choices"][0]
             if choice.get("finish_reason") == "length":
                 raise ModelRequestError(
-                    "Model output reached the configured token limit and was truncated; no incomplete result was saved."
+                    "Model output reached max_completion_tokens and was truncated; no incomplete result was saved."
                 )
             content = choice["message"]["content"]
         except ModelRequestError:
