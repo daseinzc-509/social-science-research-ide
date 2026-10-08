@@ -1482,52 +1482,139 @@ def _derive_abstract_metadata(
 def _derive_repeating_header_metadata(
     blocks: list[SourceBlock], span_registry: dict[str, EvidenceSpan]
 ) -> list[tuple[str, object, ExtractedClaim]]:
-    """Recover journal/year/issue from repeated running headers.
+    """Recover journal/year/volume/issue from repeated running headers.
 
-    Docling often emits the journal name and ``2026.2`` as separate page-header
-    items. This supports both combined and split representations.
+    Academic journals encode running-header metadata in several common forms. In
+    particular, Chinese journals often use strings such as::
+
+        Academic Monthly 第57卷 06 Jun 2025
+
+    while other issues use ``2026.2`` or ``Vol. 57 No. 6 Jun 2025``. Docling may
+    keep that header in one block or split the journal, volume and date across
+    adjacent header blocks. This recovery is deliberately deterministic and only
+    accepts a candidate when it repeats on at least two physical pages.
     """
-    occurrences: dict[tuple[str, int, str], list[SourceBlock]] = {}
-    year_issue = re.compile(r"\b((?:19|20)\d{2})\s*[.·．]\s*(\d{1,2})\b")
+    occurrences: dict[tuple[str, int, str, str | None], list[SourceBlock]] = {}
+
+    month_names = (
+        "jan|january|feb|february|mar|march|apr|april|may|jun|june|"
+        "jul|july|aug|august|sep|sept|september|oct|october|nov|november|"
+        "dec|december"
+    )
+    metadata_patterns = (
+        re.compile(
+            r"\b(?P<year>(?:19|20)\d{2})\s*[.·．]\s*(?P<issue>\d{1,2})\b",
+            re.I,
+        ),
+        re.compile(
+            rf"第\s*(?P<volume>\d{{1,3}})\s*卷\s*"
+            rf"(?:(?:第\s*)?(?P<issue>\d{{1,2}})\s*(?:期\b)?\s*)?"
+            rf"(?:(?:{month_names})\.?\s*)?"
+            rf"(?P<year>(?:19|20)\d{{2}})\b",
+            re.I,
+        ),
+        re.compile(
+            rf"\bvol(?:ume)?\.?\s*(?P<volume>\d{{1,3}})\s*"
+            rf"(?:(?:no|issue)\.?\s*(?P<issue>\d{{1,2}})\s*)?"
+            rf"(?:(?:{month_names})\.?\s*)?"
+            rf"(?P<year>(?:19|20)\d{{2}})\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?P<year>(?:19|20)\d{2})\s*年?\s*第?\s*"
+            r"(?P<volume>\d{1,3})\s*卷\s*第?\s*(?P<issue>\d{1,2})\s*期\b",
+            re.I,
+        ),
+        # Split-header fallback, e.g. one block is ``06 Jun 2025`` while another
+        # block on the same page contains ``Academic Monthly`` / ``第57卷``.
+        re.compile(
+            rf"\b(?P<issue>\d{{1,2}})\s*(?:{month_names})\.?\s*"
+            rf"(?P<year>(?:19|20)\d{{2}})\b",
+            re.I,
+        ),
+    )
+    standalone_volume = re.compile(
+        r"(?:第\s*(?P<cn>\d{1,3})\s*卷|\bvol(?:ume)?\.?\s*(?P<en>\d{1,3})\b)",
+        re.I,
+    )
 
     by_page: dict[int, list[SourceBlock]] = {}
     for block in blocks:
-        if block.table_rows is None and len(block.text) <= 180:
+        if block.table_rows is None and len(block.text) <= 220:
             by_page.setdefault(block.page_number, []).append(block)
 
-    def clean_journal(text: str) -> str:
+    def normalized_text(text: str) -> str:
         text = unicodedata.normalize("NFKC", text)
-        lines = [line.strip(" -|:/") for line in text.splitlines() if line.strip()]
-        usable = [
-            line for line in lines
-            if 2 <= len(line) <= 80
-            and not any(char.isdigit() for char in line)
-            and line not in {"专题研究", "专题", "研究"}
-        ]
+        text = text.replace("\u00a0", " ")
+        return re.sub(r"[ \t]+", " ", text)
+
+    def clean_journal(text: str) -> str:
+        text = normalized_text(text)
+        lines = [line.strip(" -|:/·") for line in text.splitlines() if line.strip()]
+        usable = []
+        for line in lines:
+            line = re.sub(r"\s+", " ", line).strip()
+            if not (2 <= len(line) <= 80):
+                continue
+            if any(char.isdigit() for char in line):
+                continue
+            if line.casefold() in {
+                "专题研究", "专题", "研究", "special issue", "special section",
+            }:
+                continue
+            if re.fullmatch(rf"(?:{month_names})\.?", line, flags=re.I):
+                continue
+            usable.append(line)
         return usable[0] if usable else ""
 
-    for page_blocks in by_page.values():
-        for year_block in page_blocks:
-            text = unicodedata.normalize("NFKC", year_block.text)
-            match = year_issue.search(text)
+    def parse_metadata(text: str) -> tuple[re.Match[str], int, str, str | None] | None:
+        for pattern in metadata_patterns:
+            match = pattern.search(text)
             if not match:
                 continue
+            groups = match.groupdict()
+            year = int(groups["year"])
+            issue = groups.get("issue") or ""
+            volume = groups.get("volume")
+            if not issue:
+                continue
+            return match, year, issue, volume
+        return None
+
+    def headerish(block: SourceBlock) -> bool:
+        source_label = (block.source_label or "").casefold()
+        return (
+            block.role == "furniture"
+            or "page_header" in source_label
+            or "header" in source_label
+        )
+
+    for page_blocks in by_page.values():
+        for metadata_block in page_blocks:
+            text = normalized_text(metadata_block.text)
+            parsed = parse_metadata(text)
+            if parsed is None:
+                continue
+            match, year, issue, volume = parsed
 
             journal = ""
-            supporting = [year_block]
-            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            supporting = [metadata_block]
 
-            for line in lines:
-                line_match = year_issue.search(line)
-                if line_match:
-                    prefix = clean_journal(line[: line_match.start()])
-                    if prefix:
-                        journal = prefix
-                        break
+            # Combined header: everything before the structured metadata is the
+            # strongest journal-name candidate.
+            prefix = clean_journal(text[: match.start()])
+            if prefix:
+                journal = prefix
 
+            # Multi-line combined header: the journal may be on the line directly
+            # before or after the metadata line.
             if not journal:
-                match_index = next((i for i, line in enumerate(lines) if year_issue.search(line)), -1)
-                neighbors = []
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                match_index = next(
+                    (i for i, line in enumerate(lines) if parse_metadata(line) is not None),
+                    -1,
+                )
+                neighbors: list[str] = []
                 if match_index > 0:
                     neighbors.append(lines[match_index - 1])
                 if 0 <= match_index + 1 < len(lines):
@@ -1537,42 +1624,50 @@ def _derive_repeating_header_metadata(
                     if journal:
                         break
 
+            # Split Docling header: recover a standalone volume and journal from
+            # nearby page-header/furniture blocks on the same page.
+            nearby: list[tuple[float, int, SourceBlock]] = []
+            for other in page_blocks:
+                if other.id == metadata_block.id or not headerish(other):
+                    continue
+                distance = 10000.0
+                if metadata_block.bbox is not None and other.bbox is not None:
+                    distance = abs(other.bbox[1] - metadata_block.bbox[1])
+                nearby.append((distance, len(other.text), other))
+            nearby.sort(key=lambda item: (item[0], item[1]))
+
+            if volume is None:
+                for _, _, other in nearby:
+                    volume_match = standalone_volume.search(normalized_text(other.text))
+                    if not volume_match:
+                        continue
+                    volume = volume_match.group("cn") or volume_match.group("en")
+                    supporting.append(other)
+                    break
+
             if not journal:
-                header_candidates = []
-                for other in page_blocks:
-                    if other.id == year_block.id:
-                        continue
-                    source_label = (other.source_label or "").casefold()
-                    if not (
-                        other.role == "furniture"
-                        or "page_header" in source_label
-                        or "header" in source_label
-                    ):
-                        continue
+                for _, _, other in nearby:
                     candidate = clean_journal(other.text)
                     if not candidate:
                         continue
-                    distance = 10000.0
-                    if year_block.bbox is not None and other.bbox is not None:
-                        distance = abs(other.bbox[1] - year_block.bbox[1])
-                    header_candidates.append((distance, len(candidate), candidate, other))
-                if header_candidates:
-                    _, _, journal, journal_block = min(
-                        header_candidates, key=lambda item: (item[0], item[1])
-                    )
-                    supporting.append(journal_block)
+                    journal = candidate
+                    supporting.append(other)
+                    break
 
             if not journal:
                 continue
-            key = (journal, int(match.group(1)), match.group(2))
+
+            key = (journal, year, issue, volume)
             occurrences.setdefault(key, []).extend(supporting)
 
-    eligible = []
+    eligible: list[
+        tuple[tuple[str, int, str, str | None], list[SourceBlock]]
+    ] = []
     for key, value in occurrences.items():
         if len({block.page_number for block in value}) < 2:
             continue
-        seen = set()
-        deduped = []
+        seen: set[str] = set()
+        deduped: list[SourceBlock] = []
         for block in sorted(
             value,
             key=lambda item: (
@@ -1588,16 +1683,17 @@ def _derive_repeating_header_metadata(
     if not eligible:
         return []
 
-    (journal, year, issue), matching_blocks = max(
+    (journal, year, issue, volume), matching_blocks = max(
         eligible,
         key=lambda item: (
             len({block.page_number for block in item[1]}),
+            1 if item[0][3] is not None else 0,
             -min(block.page_number for block in item[1]),
         ),
     )
 
-    evidence = []
-    used_sources = set()
+    evidence: list[EvidenceReference] = []
+    used_sources: set[str] = set()
     for block in matching_blocks:
         for reference in _evidence_references_for_block(
             block.id, span_registry, max_refs=1
@@ -1605,20 +1701,18 @@ def _derive_repeating_header_metadata(
             if reference.source_block_id not in used_sources:
                 used_sources.add(reference.source_block_id)
                 evidence.append(reference)
-        evidence_text = " ".join(item.quote for item in evidence)
-        if (
-            journal in evidence_text
-            and str(year) in evidence_text
-            and str(issue) in evidence_text
-        ):
+        if len(evidence) >= 4:
             break
 
-    candidates = []
-    for field_name, value in (
+    candidates: list[tuple[str, object, ExtractedClaim]] = []
+    values: list[tuple[str, object]] = [
         ("journal", journal),
         ("year", year),
         ("issue", issue),
-    ):
+    ]
+    if volume is not None:
+        values.insert(2, ("volume", volume))
+    for field_name, value in values:
         candidate = _layout_claim(field_name, value, evidence)
         if candidate:
             candidates.append(candidate)
