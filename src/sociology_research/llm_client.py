@@ -51,7 +51,7 @@ class OpenAICompatibleClient:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "max_tokens": max_tokens,
+                "max_completion_tokens": max_tokens,
                 "stream": False,
                 "response_format": {"type": "json_object"},
                 **({"thinking": {"type": thinking}} if thinking else {}),

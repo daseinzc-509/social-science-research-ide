@@ -241,7 +241,7 @@ class PaperAnalysisPipeline:
             try:
                 pro_result = self._cached_call(
                     paper_id, "pro", pro_model, pro_prompt, PRO_SYSTEM_PROMPT, ProAnalysis, client,
-                    max_tokens=4200, force=force, stage_label="Pro independent review",
+                    max_tokens=self.analysis_config.pro_max_completion_tokens, force=force, stage_label="Pro independent review",
                     thinking=self.analysis_config.pro_thinking,
                     reasoning_effort=self.analysis_config.pro_reasoning_effort,
                 )
