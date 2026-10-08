@@ -13,6 +13,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -72,7 +73,7 @@ class DoclingDocumentParser:
             version = importlib.metadata.version("docling")
         except importlib.metadata.PackageNotFoundError:
             version = "missing"
-        self.version = f"docling-standard-v2-print-pages:{version}"
+        self.version = f"docling-standard-v3-text-quality-ocr:{version}"
 
     def parse(
         self,
@@ -105,11 +106,25 @@ class DoclingDocumentParser:
             # mixed image-heavy documents.
             options.do_ocr = text_profile.needs_ocr
             options.do_table_structure = True
+            full_page_ocr_enabled = False
+            if text_profile.force_full_page_ocr:
+                options.do_ocr = True
+                full_page_ocr_enabled = _enable_full_page_ocr(options)
             if hasattr(options, "generate_page_images"):
                 options.generate_page_images = False
             if hasattr(options, "generate_picture_images"):
                 options.generate_picture_images = False
-            if text_profile.needs_ocr:
+            if text_profile.force_full_page_ocr and full_page_ocr_enabled:
+                _emit(
+                    progress,
+                    f"Docling: embedded text looks corrupted on {text_profile.suspicious_pages} page(s); full-page OCR enabled.",
+                )
+            elif text_profile.force_full_page_ocr:
+                _emit(
+                    progress,
+                    f"Docling: embedded text looks corrupted on {text_profile.suspicious_pages} page(s); OCR enabled, but full-page mode is unavailable in this Docling build.",
+                )
+            elif text_profile.needs_ocr:
                 _emit(
                     progress,
                     f"Docling: {text_profile.text_pages}/{text_profile.page_count} pages have usable embedded text; OCR enabled.",
@@ -142,6 +157,10 @@ class DoclingDocumentParser:
             raise DocumentParseError(f"Docling could not parse PDF: {exc}") from exc
 
         warnings: list[str] = []
+        if text_profile.force_full_page_ocr and not full_page_ocr_enabled:
+            warnings.append(
+                "Embedded PDF text appears corrupted, but full-page OCR could not be enabled; review extracted text before analysis."
+            )
         status_value = str(getattr(result, "status", "")).casefold()
         if status_value and "success" not in status_value:
             warnings.append(f"Docling conversion status needs review: {getattr(result, 'status', status_value)}")
@@ -188,7 +207,7 @@ class DoclingDocumentParser:
 
 
 class PyMuPDFDocumentParser:
-    version = "pymupdf-tables-v3-print-pages"
+    version = "pymupdf-tables-v4-text-quality"
 
     def parse(
         self,
@@ -221,11 +240,18 @@ class PyMuPDFDocumentParser:
             blocks: list[SourceBlock] = []
             warnings: list[str] = []
             empty_pages: list[int] = []
+            suspicious_text_pages: list[int] = []
             for page_index, page in enumerate(document, start=1):
                 if page_index == 1 or page_index == document.page_count or page_index % 5 == 0:
                     _emit(progress, f"PyMuPDF fallback: parsing page {page_index}/{document.page_count}…")
                 table_blocks: list[SourceBlock] = []
                 table_boxes: list[tuple[float, float, float, float]] = []
+                try:
+                    page_text_for_quality = page.get_text("text") or ""
+                except Exception:
+                    page_text_for_quality = ""
+                if _looks_like_garbled_text(page_text_for_quality):
+                    suspicious_text_pages.append(page_index)
                 try:
                     found_tables = page.find_tables()
                     for table_index, table in enumerate(found_tables.tables):
@@ -286,8 +312,14 @@ class PyMuPDFDocumentParser:
                 preview = ", ".join(map(str, empty_pages[:12]))
                 suffix = "…" if len(empty_pages) > 12 else ""
                 warnings.append(f"No selectable text found on page(s): {preview}{suffix}; OCR is not supported by the fallback parser.")
+            if suspicious_text_pages:
+                preview = ", ".join(map(str, suspicious_text_pages[:12]))
+                suffix = "…" if len(suspicious_text_pages) > 12 else ""
+                warnings.append(
+                    f"Embedded text appears corrupted on page(s): {preview}{suffix}; use the Docling parser so full-page OCR can replace the bad text layer."
+                )
 
-            status = ParseStatus.NEEDS_REVIEW if empty_pages else ParseStatus.SUCCESS
+            status = ParseStatus.NEEDS_REVIEW if (empty_pages or suspicious_text_pages) else ParseStatus.SUCCESS
             return ParsedDocument(
                 paper_id=paper_id,
                 sha256=sha256,
@@ -308,11 +340,22 @@ class PyMuPDFDocumentParser:
 
 
 class _TextLayerProfile:
-    def __init__(self, *, page_count: int, text_pages: int, text_chars: int, needs_ocr: bool):
+    def __init__(
+        self,
+        *,
+        page_count: int,
+        text_pages: int,
+        text_chars: int,
+        needs_ocr: bool,
+        suspicious_pages: int = 0,
+        force_full_page_ocr: bool = False,
+    ):
         self.page_count = page_count
         self.text_pages = text_pages
         self.text_chars = text_chars
         self.needs_ocr = needs_ocr
+        self.suspicious_pages = suspicious_pages
+        self.force_full_page_ocr = force_full_page_ocr
 
 
 def _emit(progress: Callable[[str], None] | None, message: str) -> None:
@@ -320,12 +363,112 @@ def _emit(progress: Callable[[str], None] | None, message: str) -> None:
         progress(message)
 
 
+def _is_cjk_like(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x3040 <= code <= 0x30FF
+        or 0xAC00 <= code <= 0xD7AF
+    )
+
+
+def _garbled_text_score(text: str) -> int:
+    """Return a conservative corruption score for an embedded PDF text layer.
+
+    The important case is a visually normal CJK PDF whose ToUnicode/font mapping
+    yields valid-but-nonsensical ASCII fragments (for example stray ``#``, ``_``
+    and one-letter Latin runs) instead of the visible Chinese characters.  Simple
+    character-count checks treat such pages as healthy, so we score several
+    independent signals and only flag pages when they agree.
+    """
+
+    normalized = unicodedata.normalize("NFKC", text or "")
+    compact = "".join(char for char in normalized if not char.isspace())
+    if not compact:
+        return 0
+
+    score = 0
+    length = len(compact)
+    hard_bad = 0
+    for char in compact:
+        category = unicodedata.category(char)
+        if char == "\ufffd" or category in {"Co", "Cs"}:
+            hard_bad += 1
+        elif category == "Cc":
+            hard_bad += 1
+    if hard_bad >= 2 or hard_bad / length >= 0.005:
+        score += 7
+    elif hard_bad == 1:
+        score += 2
+
+    cjk_count = sum(1 for char in compact if _is_cjk_like(char))
+    cjk_ratio = cjk_count / length
+    suspicious_symbols = sum(char in "#^_`~|■□�" for char in compact)
+    if cjk_ratio >= 0.20:
+        symbol_threshold = max(3, length // 220)
+        if suspicious_symbols >= symbol_threshold:
+            score += 5
+        elif suspicious_symbols >= 2:
+            score += 1
+
+        single_ascii = len(
+            re.findall(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])", normalized)
+        )
+        if single_ascii >= max(8, length // 90):
+            score += 4
+
+        # Broken CJK font maps often inject short Latin fragments directly between
+        # Han characters.  Legitimate acronyms (AI, LLM, DAG) are normally sparse,
+        # so require many transitions before treating them as a corruption signal.
+        mixed_fragments = len(
+            re.findall(
+                r"(?<=[\u3400-\u9fff])[#^_`~|A-Za-z]{1,2}(?=[\u3400-\u9fff])",
+                compact,
+            )
+        )
+        if mixed_fragments >= max(6, length // 120):
+            score += 4
+
+    return score
+
+
+def _looks_like_garbled_text(text: str) -> bool:
+    compact_length = len(re.sub(r"\s+", "", text or ""))
+    if compact_length < 40:
+        return False
+    return _garbled_text_score(text) >= 7
+
+
+def _enable_full_page_ocr(options: object) -> bool:
+    """Switch the installed Docling OCR options to full-page replacement mode."""
+
+    ocr_options = getattr(options, "ocr_options", None)
+    if ocr_options is None:
+        return False
+    try:
+        from docling.datamodel.pipeline_options import OcrMode
+
+        ocr_options.mode = OcrMode.FULL_PAGE
+        return True
+    except Exception:
+        # Docling 2.x builds also expose a compatibility property.  Keep this
+        # fallback so the parser remains usable across the supported minor range.
+        try:
+            ocr_options.force_full_page_ocr = True
+            return True
+        except Exception:
+            return False
+
+
 def _pdf_text_layer_profile(path: Path) -> _TextLayerProfile:
-    """Cheaply decide whether OCR is needed without asking Docling to OCR everything.
+    """Cheaply decide whether OCR is needed without trusting text quantity alone.
 
     A page counts as text-bearing when PyMuPDF can extract at least 40 non-whitespace
-    characters. OCR is enabled for image-only or strongly mixed PDFs; born-digital
-    journal articles therefore avoid the OCR model entirely.
+    characters.  In addition, pages with a suspicious embedded text mapping are
+    detected so a visually normal but copy-corrupted PDF can be sent through
+    Docling full-page OCR instead of preserving the bad text layer.
     """
 
     try:
@@ -340,19 +483,39 @@ def _pdf_text_layer_profile(path: Path) -> _TextLayerProfile:
         page_count = int(doc.page_count)
         text_pages = 0
         text_chars = 0
+        suspicious_pages = 0
+        strong_suspicious_pages = 0
         for page in doc:
-            compact = re.sub(r"\s+", "", page.get_text("text") or "")
+            page_text = page.get_text("text") or ""
+            compact = re.sub(r"\s+", "", page_text)
             text_chars += len(compact)
             if len(compact) >= 40:
                 text_pages += 1
+                score = _garbled_text_score(page_text)
+                if score >= 7:
+                    suspicious_pages += 1
+                if score >= 9:
+                    strong_suspicious_pages += 1
+
         # Requiring >=80% text-bearing pages keeps OCR on for materially mixed/scanned PDFs.
         required = max(1, (page_count * 4 + 4) // 5) if page_count else 1
-        needs_ocr = page_count == 0 or text_pages < required or text_chars < max(200, page_count * 80)
+        weak_text_layer = (
+            page_count == 0
+            or text_pages < required
+            or text_chars < max(200, page_count * 80)
+        )
+        suspicious_threshold = max(2, (text_pages + 3) // 4) if text_pages > 3 else 1
+        force_full_page_ocr = (
+            strong_suspicious_pages > 0
+            or suspicious_pages >= suspicious_threshold
+        )
         return _TextLayerProfile(
             page_count=page_count,
             text_pages=text_pages,
             text_chars=text_chars,
-            needs_ocr=needs_ocr,
+            needs_ocr=weak_text_layer or force_full_page_ocr,
+            suspicious_pages=suspicious_pages,
+            force_full_page_ocr=force_full_page_ocr,
         )
     finally:
         doc.close()
