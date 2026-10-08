@@ -157,31 +157,87 @@ class SRAWebApp:
 
     def model_settings(self) -> dict[str, Any]:
         settings = Settings.from_environment()
-        key = settings.api_key or ""
-        masked = (key[:4] + "…" + key[-4:]) if len(key) > 10 else ("已设置" if key else "")
+        lite_key = settings.effective_lite_api_key or ""
+        pro_key = settings.effective_pro_api_key or ""
+
+        def masked(key: str) -> str:
+            return (key[:4] + "…" + key[-4:]) if len(key) > 10 else ("已设置" if key else "")
+
+        lite_url = settings.effective_lite_api_base_url or ""
+        pro_url = settings.effective_pro_api_base_url or ""
         return {
-            "api_key_masked": masked,
-            "has_api_key": bool(key),
-            "api_base_url": settings.api_base_url or "",
+            "lite_api_key_masked": masked(lite_key),
+            "has_lite_api_key": bool(lite_key),
+            "lite_api_base_url": lite_url,
             "lite_model": settings.lite_model or "",
+            "pro_api_key_masked": masked(pro_key),
+            "has_pro_api_key": bool(pro_key),
+            "pro_api_base_url": pro_url,
             "pro_model": settings.pro_model or "",
+            "same_connection": bool(
+                lite_key
+                and pro_key
+                and lite_key == pro_key
+                and lite_url.rstrip("/") == pro_url.rstrip("/")
+            ),
         }
 
     def save_model_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = Settings.from_environment()
-        raw_key = payload.get("api_key")
-        api_key = current.api_key if raw_key in (None, "", "••••••••") else str(raw_key).strip()
-        values = {
-            "SRA_API_KEY": api_key,
-            "SRA_API_BASE_URL": str(payload.get("api_base_url") or "").strip(),
-            "SRA_LITE_MODEL": str(payload.get("lite_model") or "").strip(),
-            "SRA_PRO_MODEL": str(payload.get("pro_model") or "").strip(),
-        }
-        if not values["SRA_API_BASE_URL"].startswith(("http://", "https://")):
-            raise ValueError("Base URL 必须以 http:// 或 https:// 开头")
-        if not values["SRA_LITE_MODEL"] or not values["SRA_PRO_MODEL"]:
-            raise ValueError("Lite 和 Pro 模型名都不能为空")
-        save_local_environment(values)
+
+        # Accept the old single-connection API payload as a compatibility fallback.
+        shared_raw_key = payload.get("api_key")
+        shared_raw_url = payload.get("api_base_url")
+        raw_lite_key = payload.get("lite_api_key", shared_raw_key)
+        raw_pro_key = payload.get("pro_api_key", shared_raw_key)
+
+        def resolved_key(raw: Any, existing: str | None) -> str:
+            if raw in (None, "", "••••••••"):
+                return existing or ""
+            return str(raw).strip()
+
+        lite_key = resolved_key(raw_lite_key, current.effective_lite_api_key)
+        pro_key = resolved_key(raw_pro_key, current.effective_pro_api_key)
+        lite_url = str(
+            payload.get("lite_api_base_url", shared_raw_url if shared_raw_url is not None else current.effective_lite_api_base_url or "")
+            or ""
+        ).strip()
+        pro_url = str(
+            payload.get("pro_api_base_url", shared_raw_url if shared_raw_url is not None else current.effective_pro_api_base_url or "")
+            or ""
+        ).strip()
+        lite_model = str(payload.get("lite_model", current.lite_model or "") or "").strip()
+        pro_model = str(payload.get("pro_model", current.pro_model or "") or "").strip()
+
+        if bool(payload.get("pro_use_lite_connection", False)):
+            pro_key = lite_key
+            pro_url = lite_url
+
+        for stage, key, base_url, model in (
+            ("Lite", lite_key, lite_url, lite_model),
+            ("Pro", pro_key, pro_url, pro_model),
+        ):
+            if not key:
+                raise ValueError(f"{stage} API Key 不能为空")
+            if not base_url.startswith(("http://", "https://")):
+                raise ValueError(f"{stage} Base URL 必须以 http:// 或 https:// 开头")
+            if not model:
+                raise ValueError(f"{stage} 模型名不能为空")
+
+        save_local_environment(
+            {
+                # Persist the new split settings. Clear legacy shared values written by
+                # earlier UI versions so future behavior is unambiguous.
+                "SRA_LITE_API_KEY": lite_key,
+                "SRA_LITE_API_BASE_URL": lite_url,
+                "SRA_LITE_MODEL": lite_model,
+                "SRA_PRO_API_KEY": pro_key,
+                "SRA_PRO_API_BASE_URL": pro_url,
+                "SRA_PRO_MODEL": pro_model,
+                "SRA_API_KEY": None,
+                "SRA_API_BASE_URL": None,
+            }
+        )
         return self.model_settings()
 
     def paper_detail(self, paper_id: str) -> dict[str, Any]:
@@ -827,7 +883,7 @@ _INDEX_HTML = r'''<!doctype html>
 <div class="layout"><aside class="side"><input class="search" id="search" placeholder="搜索论文…"><div id="paperList" class="paper-list"></div></aside><main class="main" id="main"><div class="empty"><h1>你的论文工作台</h1><p>左侧选择一篇论文，或点击“导入 PDF”。分析、查看证据、导出和数据库检查都可以在这里完成，不必再逐条输入命令。</p></div></main></div>
 <div class="modal-back" id="metadataModal"><div class="modal"><h2>编辑书目信息</h2><div class="small">手动修订会保留在本地数据库中，重新分析不会覆盖；“恢复自动提取”可撤销全部手动修订。</div><div class="grid" style="margin-top:12px"><div class="field"><label>期刊</label><input id="metaJournal"></div><div class="field"><label>年份</label><input id="metaYear" inputmode="numeric"></div><div class="field"><label>卷</label><input id="metaVolume" placeholder="没有卷号可留空"></div><div class="field"><label>期</label><input id="metaIssue"></div><div class="field"><label>页码</label><input id="metaPages" placeholder="例如 114-140"></div><div class="field"><label>DOI</label><input id="metaDoi"></div></div><div class="field"><label>题名</label><input id="metaTitle"></div><div class="field"><label>作者（用 、 或 ; 分隔）</label><input id="metaAuthors"></div><div class="field"><label>关键词（用 ； 或 ; 分隔）</label><input id="metaKeywords"></div><div class="field"><label>来源 / 网址（可选）</label><input id="metaSource" placeholder="例如 国家哲学社会科学文献中心或 DOI 页面"></div><div class="modal-actions"><button class="btn danger" id="resetMetadata">恢复自动提取</button><button class="btn" data-close="metadataModal">取消</button><button class="btn primary" id="saveMetadata">保存修订</button></div></div></div><div class="modal-back" id="analyzeModal"><div class="modal"><h2>分析论文</h2><div class="field"><label>研究关注（可选）</label><textarea id="researchContext" placeholder="例如：我关心大语言模型如何影响社会互动"></textarea></div><div class="field"><label>在此文本后排除（可选，用于一个 PDF 包含相邻文章）</label><input id="excludeMarker" placeholder="例如：Revisiting Description: Data Deep Description in Quantitative Research"></div><div class="check-field"><label class="checkbox-label" for="forceRun"><input type="checkbox" id="forceRun" style="appearance:auto;-webkit-appearance:checkbox;width:18px!important;height:18px!important;min-width:18px!important;max-width:18px!important;margin:0!important;padding:0!important;justify-self:start"><span>忽略缓存，重新调用 Lite + Pro（通常不要勾）</span></label></div><div class="ui-build">UI build: checkbox-hotfix-2</div><div class="modal-actions"><button class="btn" data-close="analyzeModal">取消</button><button class="btn primary" id="runAnalyze">开始分析</button></div></div></div>
 <div class="modal-back" id="jobModal"><div class="modal"><h2 id="jobTitle">处理中</h2><div class="job-progress"><div class="progress-meta"><span id="jobStage">准备中…</span><span id="jobElapsed">0s</span></div><div class="progress-track indeterminate" id="jobTrack"><div class="progress-bar" id="jobBar"></div></div><div class="progress-hint" id="jobHint">当前页面仍显示上一次保存的 Paper Card；新分析完成后会自动刷新。</div></div><div class="log" id="jobLog">准备中…</div><div class="modal-actions"><button class="btn" id="jobClose" style="display:none">完成</button></div></div></div>
-<div class="modal-back" id="healthModal"><div class="modal"><div class="split"><h2>数据库健康</h2><button class="btn" data-close="healthModal">关闭</button></div><div id="healthBody">正在检查…</div></div></div><div class="modal-back" id="dashboardModal"><div class="modal"><div class="split"><h2>研究控制面板</h2><button class="btn" data-close="dashboardModal">关闭</button></div><div id="dashboardBody">正在加载…</div></div></div><div class="modal-back" id="modelSettingsModal"><div class="modal"><div class="split"><h2>模型设置</h2><button class="btn" data-close="modelSettingsModal">关闭</button></div><p class="small">Lite 和 Pro 可以使用同一个服务商与 Base URL，但模型名分开。API Key 保存到本地 .env，不会在界面完整显示。</p><div class="field"><label>API Key</label><input id="settingsApiKey" type="password" placeholder="留空表示保持现有 Key"></div><div class="field"><label>Base URL</label><input id="settingsBaseUrl" placeholder="https://.../chat/completions 的上级地址"></div><div class="field"><label>Lite 模型</label><input id="settingsLiteModel"><div class="small">基础事实提取：标题、摘要、方法、样本、发现、关键词。</div></div><div class="field"><label>Pro 模型</label><input id="settingsProModel"><div class="small">深度审读：方法合理性、贡献、局限、阅读价值。</div></div><div class="modal-actions"><button class="btn" data-close="modelSettingsModal">取消</button><button class="btn primary" id="saveModelSettings">保存模型设置</button></div></div></div>
+<div class="modal-back" id="healthModal"><div class="modal"><div class="split"><h2>数据库健康</h2><button class="btn" data-close="healthModal">关闭</button></div><div id="healthBody">正在检查…</div></div></div><div class="modal-back" id="dashboardModal"><div class="modal"><div class="split"><h2>研究控制面板</h2><button class="btn" data-close="dashboardModal">关闭</button></div><div id="dashboardBody">正在加载…</div></div></div><div class="modal-back" id="modelSettingsModal"><div class="modal"><div class="split"><h2>模型设置</h2><button class="btn" data-close="modelSettingsModal">关闭</button></div><p class="small">Lite 与 Pro 的服务商、Base URL、API Key 和模型名都可以独立配置。API Key 只保存在本地 .env，界面不会回显完整内容。</p><div class="card" style="margin-top:14px"><div class="k">LITE · 事实提取</div><div class="field"><label>Lite API Key</label><input id="settingsLiteApiKey" type="password" placeholder="留空表示保持现有 Key"></div><div class="field"><label>Lite Base URL</label><input id="settingsLiteBaseUrl" placeholder="https://.../v1 或服务商的 OpenAI-compatible 上级地址"></div><div class="field"><label>Lite 模型</label><input id="settingsLiteModel"><div class="small">基础事实提取：标题、摘要、方法、样本、发现、关键词。</div></div></div><div class="check-field"><label class="checkbox-label" for="settingsProUseLiteConnection"><input type="checkbox" id="settingsProUseLiteConnection"><span>Pro 使用与 Lite 相同的 API Key 和 Base URL</span></label></div><div class="card" style="margin-top:10px"><div class="k">PRO · 深度审读</div><div class="field"><label>Pro API Key</label><input id="settingsProApiKey" type="password" placeholder="留空表示保持现有 Key"></div><div class="field"><label>Pro Base URL</label><input id="settingsProBaseUrl" placeholder="可与 Lite 不同"></div><div class="field"><label>Pro 模型</label><input id="settingsProModel"><div class="small">深度审读：方法合理性、贡献、局限、阅读价值。</div></div></div><div class="modal-actions"><button class="btn" data-close="modelSettingsModal">取消</button><button class="btn primary" id="saveModelSettings">保存模型设置</button></div></div></div>
 <div class="toast" id="toast"></div>
 <script>
 const state={papers:[],selected:null,detail:null,tab:'overview'};
@@ -865,8 +921,11 @@ async function uploadBatch(files){if(!files.length)return;const pdfs=files.filte
 $('#batchImportBtn').onclick=()=>$('#batchFileInput').click();$('#folderImportBtn').onclick=()=>$('#folderFileInput').click();$('#batchFileInput').onchange=async e=>{await uploadBatch([...e.target.files]);e.target.value=''};$('#folderFileInput').onchange=async e=>{await uploadBatch([...e.target.files]);e.target.value=''};
 async function extractRefs(){const id=state.selected;if(!id)return;try{await api(`/api/papers/${encodeURIComponent(id)}/extract-references`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});await selectPaper(id);state.tab='references';renderTab();toast('参考文献提取完成。')}catch(e){toast(e.message)}}
 $('#search').oninput=renderList;
-$('#modelSettingsBtn').onclick=async()=>{openModal('modelSettingsModal');try{const d=await api('/api/model-settings');$('#settingsApiKey').value='';$('#settingsApiKey').placeholder=d.has_api_key?`已设置：${d.api_key_masked}，留空保持不变`:'请输入 API Key';$('#settingsBaseUrl').value=d.api_base_url;$('#settingsLiteModel').value=d.lite_model;$('#settingsProModel').value=d.pro_model}catch(e){toast(e.message)}};
-$('#saveModelSettings').onclick=async()=>{try{const d=await api('/api/model-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:$('#settingsApiKey').value,api_base_url:$('#settingsBaseUrl').value,lite_model:$('#settingsLiteModel').value,pro_model:$('#settingsProModel').value})});closeModal('modelSettingsModal');toast('模型设置已保存。下一次分析会使用新配置。')}catch(e){toast(e.message)}};
+function syncProConnectionFields(){const same=$('#settingsProUseLiteConnection').checked;$('#settingsProApiKey').disabled=same;$('#settingsProBaseUrl').disabled=same;if(same){$('#settingsProBaseUrl').value=$('#settingsLiteBaseUrl').value;$('#settingsProApiKey').value='';$('#settingsProApiKey').placeholder='使用 Lite API Key'}}
+$('#settingsProUseLiteConnection').onchange=syncProConnectionFields;
+$('#settingsLiteBaseUrl').oninput=()=>{if($('#settingsProUseLiteConnection').checked)$('#settingsProBaseUrl').value=$('#settingsLiteBaseUrl').value};
+$('#modelSettingsBtn').onclick=async()=>{openModal('modelSettingsModal');try{const d=await api('/api/model-settings');$('#settingsLiteApiKey').value='';$('#settingsLiteApiKey').placeholder=d.has_lite_api_key?`已设置：${d.lite_api_key_masked}，留空保持不变`:'请输入 Lite API Key';$('#settingsLiteBaseUrl').value=d.lite_api_base_url;$('#settingsLiteModel').value=d.lite_model;$('#settingsProApiKey').value='';$('#settingsProApiKey').placeholder=d.has_pro_api_key?`已设置：${d.pro_api_key_masked}，留空保持不变`:'请输入 Pro API Key';$('#settingsProBaseUrl').value=d.pro_api_base_url;$('#settingsProModel').value=d.pro_model;$('#settingsProUseLiteConnection').checked=Boolean(d.same_connection);syncProConnectionFields()}catch(e){toast(e.message)}};
+$('#saveModelSettings').onclick=async()=>{try{await api('/api/model-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lite_api_key:$('#settingsLiteApiKey').value,lite_api_base_url:$('#settingsLiteBaseUrl').value,lite_model:$('#settingsLiteModel').value,pro_api_key:$('#settingsProApiKey').value,pro_api_base_url:$('#settingsProBaseUrl').value,pro_model:$('#settingsProModel').value,pro_use_lite_connection:$('#settingsProUseLiteConnection').checked})});closeModal('modelSettingsModal');toast('Lite / Pro 模型连接已保存。下一次分析会使用新配置。')}catch(e){toast(e.message)}};
 $('#dashboardBtn').onclick=async()=>{openModal('dashboardModal');$('#dashboardBody').innerHTML='正在加载…';try{const d=await api('/api/dashboard');$('#dashboardBody').innerHTML=`<div class="health-grid"><div class="health-stat"><span class="small">论文总数</span><b>${d.papers}</b></div><div class="health-stat"><span class="small">已分析</span><b>${d.analyzed}</b></div><div class="health-stat"><span class="small">待分析</span><b>${d.pending_analysis}</b></div><div class="health-stat"><span class="small">待复核</span><b>${d.needs_review}</b></div><div class="health-stat"><span class="small">参考文献</span><b>${d.references}</b></div></div><div class="actions"><button class="btn primary" id="batchAnalyzeBtn">批量分析待处理论文</button><button class="btn" id="batchRefsBtn">批量提取参考文献</button></div><div class="small">批量分析会逐篇执行 Lite → Pro，并保留每篇失败结果，不会因一篇失败中断队列。</div>`;$('#batchAnalyzeBtn').onclick=async()=>{try{const x=await api('/api/batch-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});closeModal('dashboardModal');watchJob(x.job_id,'批量分析')}catch(e){toast(e.message)}};$('#batchRefsBtn').onclick=async()=>{try{const ids=d.items.map(x=>x.id);for(const id of ids)await api(`/api/papers/${encodeURIComponent(id)}/extract-references`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});toast('批量参考文献提取完成。');await loadPapers()}catch(e){toast(e.message)}}}catch(e){$('#dashboardBody').textContent=e.message}};
 $('#healthBtn').onclick=async()=>{openModal('healthModal');$('#healthBody').innerHTML='正在检查…';try{const r=await api('/api/doctor');renderHealth(r)}catch(e){$('#healthBody').textContent=e.message}};
 function renderHealth(r){const c=r.counts,s=r.storage,k=r.cache,i=r.issues;const issueCount=Object.values(i).reduce((n,v)=>n+(Array.isArray(v)?v.length:Object.keys(v||{}).length),0);$('#healthBody').innerHTML=`<div class="notice ${r.status==='ok'?'good':''}">${r.status==='ok'?'仓库检查正常。':`有 ${issueCount} 项需要检查。`}</div><div class="health-grid"><div class="health-stat"><span class="small">论文</span><b>${c.papers}</b></div><div class="health-stat"><span class="small">Paper Cards</span><b>${c.paper_cards}</b></div><div class="health-stat"><span class="small">Model cache</span><b>${c.model_runs}</b></div><div class="health-stat"><span class="small">数据库</span><b>${fmtBytes(r.database_bytes)}</b></div><div class="health-stat"><span class="small">PDF</span><b>${fmtBytes(s.papers_dir_pdf_bytes)}</b></div><div class="health-stat"><span class="small">旧缓存</span><b>${k.stale_runs}</b></div></div><div class="section"><h2>缓存清理</h2><p class="small">只会操作 model_runs，不碰 PDF、Paper Card、source blocks 或 notes。</p><div class="actions"><button class="btn" id="previewPrune">预览旧缓存</button><button class="btn danger" id="applyPrune">清理旧缓存</button><button class="btn" id="deepDoctor">深度校验 PDF SHA-256</button></div><div id="healthExtra" class="small" style="margin-top:12px"></div></div>`;$('#previewPrune').onclick=()=>prune(false);$('#applyPrune').onclick=()=>prune(true);$('#deepDoctor').onclick=async()=>{const x=$('#healthExtra');x.textContent='正在计算 PDF SHA-256…';try{const d=await api('/api/doctor?deep=1');x.textContent=d.status==='ok'?'深度检查通过：所有保存的 PDF 哈希与数据库一致。':JSON.stringify(d.issues,null,2)}catch(e){x.textContent=e.message}}}

@@ -83,7 +83,8 @@ class PaperAnalysisPipeline:
 
     def preview(self, paper_id: str, *, exclude_after_text: str | None = None) -> dict[str, object]:
         record, blocks = self._load_paper_blocks(paper_id, exclude_after_text=exclude_after_text)
-        _, _, lite_model, pro_model = self.settings.require_model_configuration()
+        _, _, lite_model = self.settings.require_lite_configuration()
+        _, _, pro_model = self.settings.require_pro_configuration()
         chunks = _prepare_lite_chunks(blocks, max_chars=_lite_input_limit())
         return {
             "paper_id": paper_id,
@@ -119,13 +120,31 @@ class PaperAnalysisPipeline:
         record, blocks = self._load_paper_blocks(paper_id, exclude_after_text=exclude_after_text)
         self._report(f"Preparing evidence ledger from {len(blocks)} parsed source blocks…")
 
-        api_key, base_url, lite_model, pro_model = self.settings.require_model_configuration()
-        client = self._client or OpenAICompatibleClient(
-            api_key=api_key,
-            base_url=base_url,
-            timeout_seconds=self.analysis_config.request_timeout_seconds,
-            progress=self.progress,
-        )
+        lite_api_key, lite_base_url, lite_model = self.settings.require_lite_configuration()
+        pro_api_key, pro_base_url, pro_model = self.settings.require_pro_configuration()
+
+        if self._client is not None:
+            # Tests/custom callers that inject a client keep the historical behavior:
+            # the injected client is used for both stages.
+            lite_client = self._client
+            pro_client = self._client
+        else:
+            lite_client = OpenAICompatibleClient(
+                api_key=lite_api_key,
+                base_url=lite_base_url,
+                timeout_seconds=self.analysis_config.request_timeout_seconds,
+                progress=self.progress,
+            )
+            same_connection = (
+                lite_api_key == pro_api_key
+                and _connection_identity(lite_base_url) == _connection_identity(pro_base_url)
+            )
+            pro_client = lite_client if same_connection else OpenAICompatibleClient(
+                api_key=pro_api_key,
+                base_url=pro_base_url,
+                timeout_seconds=self.analysis_config.request_timeout_seconds,
+                progress=self.progress,
+            )
         source_map = {block.id: block for block in blocks}
         warnings = list(record.warnings)
 
@@ -160,9 +179,10 @@ class PaperAnalysisPipeline:
             )
             try:
                 extracted = self._cached_call(
-                    paper_id, "lite", lite_model, user_prompt, lite_system_prompt, LiteExtraction, client,
+                    paper_id, "lite", lite_model, user_prompt, lite_system_prompt, LiteExtraction, lite_client,
                     max_tokens=self.analysis_config.lite_max_completion_tokens, force=force, stage_label=label,
                     thinking=self.analysis_config.lite_thinking,
+                    connection_identity=_connection_identity(lite_base_url),
                 )
             except ModelRequestError as exc:
                 raise PaperAnalysisError(
@@ -243,11 +263,12 @@ class PaperAnalysisPipeline:
             )
             try:
                 pro_result = self._cached_call(
-                    paper_id, "pro", pro_model, pro_prompt, PRO_SYSTEM_PROMPT, ProAnalysis, client,
+                    paper_id, "pro", pro_model, pro_prompt, PRO_SYSTEM_PROMPT, ProAnalysis, pro_client,
                     max_tokens=self.analysis_config.pro_max_completion_tokens,
                     force=force, stage_label="Pro independent review",
                     thinking=self.analysis_config.pro_thinking,
                     reasoning_effort=self.analysis_config.pro_reasoning_effort,
+                    connection_identity=_connection_identity(pro_base_url),
                 )
             except ModelRequestError as exc:
                 raise PaperAnalysisError(
@@ -368,9 +389,10 @@ class PaperAnalysisPipeline:
         stage_label: str,
         thinking: str | None,
         reasoning_effort: str | None = None,
+        connection_identity: str = "",
     ) -> T:
         input_digest = hashlib.sha256(
-            f"{PROMPT_VERSION}\0{model}\0{thinking}\0{reasoning_effort}\0{system_prompt}\0{user_prompt}".encode("utf-8")
+            f"{PROMPT_VERSION}\0{connection_identity}\0{model}\0{thinking}\0{reasoning_effort}\0{system_prompt}\0{user_prompt}".encode("utf-8")
         ).hexdigest()
         if not force:
             cached = self.repository.get_model_run(paper_id, stage, model, PROMPT_VERSION, input_digest)
@@ -398,6 +420,12 @@ class PaperAnalysisPipeline:
             paper_id, stage, model, PROMPT_VERSION, input_digest, parsed.model_dump_json()
         )
         return parsed
+
+
+def _connection_identity(base_url: str) -> str:
+    """Return a non-secret cache identity for one provider endpoint."""
+    normalized = str(base_url).strip().rstrip("/")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 def _json_task(payload: str, schema: type[BaseModel]) -> str:
