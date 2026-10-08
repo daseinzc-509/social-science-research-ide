@@ -15,9 +15,67 @@ class Provenance(StrEnum):
 
 
 class VerificationStatus(StrEnum):
+    """Traceability status.
+
+    ``SUPPORTED`` is retained for stored-card compatibility. In v2 it means that the
+    claim has source-located provenance, not that semantic entailment has been proven.
+    Semantic support is represented independently by :class:`SemanticSupportStatus`.
+    """
+
     SUPPORTED = "SUPPORTED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     NO_SOURCE = "NO_SOURCE"
+
+
+class SemanticSupportStatus(StrEnum):
+    NOT_ASSESSED = "NOT_ASSESSED"
+    SUPPORTS = "SUPPORTS"
+    PARTIALLY_SUPPORTS = "PARTIALLY_SUPPORTS"
+    QUALIFIES = "QUALIFIES"
+    CONTRADICTS = "CONTRADICTS"
+    BACKGROUND_ONLY = "BACKGROUND_ONLY"
+    UNCLEAR = "UNCLEAR"
+
+
+class ReviewState(StrEnum):
+    MACHINE_GENERATED = "MACHINE_GENERATED"
+    USER_CONFIRMED = "USER_CONFIRMED"
+    USER_CORRECTED = "USER_CORRECTED"
+
+
+class EvidenceRole(StrEnum):
+    ANCHOR = "ANCHOR"
+    CONTEXT = "CONTEXT"
+    QUALIFIER = "QUALIFIER"
+    TABLE = "TABLE"
+
+
+class ClaimType(StrEnum):
+    METADATA = "METADATA"
+    RESEARCH_QUESTION = "RESEARCH_QUESTION"
+    THEORY = "THEORY"
+    DESCRIPTIVE = "DESCRIPTIVE"
+    ASSOCIATION = "ASSOCIATION"
+    CAUSAL = "CAUSAL"
+    MECHANISM = "MECHANISM"
+    METHOD = "METHOD"
+    SAMPLE = "SAMPLE"
+    MEASUREMENT = "MEASUREMENT"
+    LIMITATION = "LIMITATION"
+    CONTRIBUTION = "CONTRIBUTION"
+    RELEVANCE = "RELEVANCE"
+    OTHER = "OTHER"
+
+
+class StudyType(StrEnum):
+    QUANTITATIVE_OBSERVATIONAL = "quantitative_observational"
+    EXPERIMENTAL = "experimental"
+    QUALITATIVE = "qualitative"
+    THEORETICAL = "theoretical"
+    MIXED_METHODS = "mixed_methods"
+    REVIEW = "review"
+    OTHER = "other"
+    UNKNOWN = "unknown"
 
 
 class ParseStatus(StrEnum):
@@ -138,12 +196,27 @@ class EvidenceSpan(BaseModel):
         return self
 
 
+class ClaimScope(BaseModel):
+    """Optional scope/boundary information attached to a scholarly claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    population: str | None = Field(default=None, max_length=180)
+    setting: str | None = Field(default=None, max_length=180)
+    time_scope: str | None = Field(default=None, max_length=180)
+    subgroup: str | None = Field(default=None, max_length=180)
+    exposure_or_treatment: str | None = Field(default=None, max_length=180)
+    outcome: str | None = Field(default=None, max_length=180)
+    conditions: list[str] = Field(default_factory=list, max_length=6)
+
+
 class LLMEvidenceReference(BaseModel):
     """Small citation contract exposed to the model: choose one provided evidence token."""
 
     model_config = ConfigDict(extra="forbid")
 
     evidence_id: str = Field(min_length=2, max_length=24)
+    role: EvidenceRole = EvidenceRole.ANCHOR
 
 
 class LLMClaim(BaseModel):
@@ -155,6 +228,8 @@ class LLMClaim(BaseModel):
     statement: str = Field(min_length=1, max_length=260)
     provenance: Provenance
     verification: VerificationStatus
+    claim_type: ClaimType = ClaimType.OTHER
+    scope: ClaimScope = Field(default_factory=ClaimScope)
     evidence: list[LLMEvidenceReference] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
@@ -193,8 +268,11 @@ class LLMMetadataFact(BaseModel):
 class EvidenceReference(BaseModel):
     """Resolved citation stored in a Paper Card.
 
-    evidence_id is authoritative for new cards. The remaining fields are a denormalized,
-    human-readable snapshot and keep previously saved cards backwards compatible.
+    ``evidence_id`` is authoritative for new cards. The remaining fields are a
+    denormalized, human-readable snapshot and keep previously saved cards backwards
+    compatible. ``role`` turns a flat quote list into a lightweight evidence bundle:
+    one quote may be the anchor, while others provide context, qualifications, or a
+    table result.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -203,15 +281,22 @@ class EvidenceReference(BaseModel):
     source_block_id: str
     page_number: int = Field(ge=1)
     quote: str = Field(min_length=1, max_length=180)
+    role: EvidenceRole = EvidenceRole.ANCHOR
 
 
 class ExtractedClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    claim_id: str | None = None
     field_name: str = Field(min_length=1)
     statement: str = Field(min_length=1, max_length=260)
     provenance: Provenance
     verification: VerificationStatus
+    claim_type: ClaimType = ClaimType.OTHER
+    scope: ClaimScope = Field(default_factory=ClaimScope)
+    semantic_support: SemanticSupportStatus = SemanticSupportStatus.NOT_ASSESSED
+    support_note: str | None = Field(default=None, max_length=500)
+    review_state: ReviewState = ReviewState.MACHINE_GENERATED
     evidence: list[EvidenceReference] = Field(default_factory=list, max_length=16)
 
     @model_validator(mode="after")
@@ -245,11 +330,67 @@ class LiteExtraction(BaseModel):
     basic_facts: list[LLMClaim] = Field(default_factory=list, max_length=24)
 
 
+class LLMStudyProfile(BaseModel):
+    """Study profile drafted by Pro from independently retrieved source excerpts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    study_type: StudyType = StudyType.UNKNOWN
+    design_summary: str | None = Field(default=None, max_length=500)
+    population: str | None = Field(default=None, max_length=260)
+    setting: str | None = Field(default=None, max_length=260)
+    time_scope: str | None = Field(default=None, max_length=260)
+    data_source: str | None = Field(default=None, max_length=320)
+    sample_summary: str | None = Field(default=None, max_length=320)
+    identification_strategy: str | None = Field(default=None, max_length=320)
+    measurement_strategy: str | None = Field(default=None, max_length=320)
+    evidence: list[LLMEvidenceReference] = Field(default_factory=list, max_length=6)
+
+
+class StudyProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    study_type: StudyType = StudyType.UNKNOWN
+    router_hint: StudyType = StudyType.UNKNOWN
+    design_summary: str | None = Field(default=None, max_length=500)
+    population: str | None = Field(default=None, max_length=260)
+    setting: str | None = Field(default=None, max_length=260)
+    time_scope: str | None = Field(default=None, max_length=260)
+    data_source: str | None = Field(default=None, max_length=320)
+    sample_summary: str | None = Field(default=None, max_length=320)
+    identification_strategy: str | None = Field(default=None, max_length=320)
+    measurement_strategy: str | None = Field(default=None, max_length=320)
+    evidence: list[EvidenceReference] = Field(default_factory=list, max_length=12)
+
+
+class LLMClaimAudit(BaseModel):
+    """Semantic support judgment for one Lite fact; separate from source traceability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fact_id: str = Field(min_length=8, max_length=64)
+    semantic_support: SemanticSupportStatus
+    rationale: str = Field(min_length=1, max_length=500)
+    evidence: list[LLMEvidenceReference] = Field(default_factory=list, max_length=4)
+
+
+class ClaimAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fact_id: str = Field(min_length=8, max_length=64)
+    semantic_support: SemanticSupportStatus
+    rationale: str = Field(min_length=1, max_length=500)
+    evidence: list[EvidenceReference] = Field(default_factory=list, max_length=8)
+    review_state: ReviewState = ReviewState.MACHINE_GENERATED
+
+
 class ProAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    analysis: list[LLMClaim] = Field(default_factory=list, max_length=6)
-    limitations: list[LLMClaim] = Field(default_factory=list, max_length=3)
+    study_profile: LLMStudyProfile | None = None
+    claim_audits: list[LLMClaimAudit] = Field(default_factory=list, max_length=24)
+    analysis: list[LLMClaim] = Field(default_factory=list, max_length=8)
+    limitations: list[LLMClaim] = Field(default_factory=list, max_length=5)
     reading_recommendation: LLMClaim | None = None
 
 
@@ -260,6 +401,9 @@ class PaperCard(BaseModel):
     metadata: PaperMetadata = Field(default_factory=PaperMetadata)
     metadata_claims: list[ExtractedClaim] = Field(default_factory=list)
     basic_facts: list[ExtractedClaim] = Field(default_factory=list)
+    study_profile: StudyProfile | None = None
+    claim_audits: list[ClaimAudit] = Field(default_factory=list)
+    review_plan: list[str] = Field(default_factory=list, max_length=16)
     tables: list[SourceBlock] = Field(default_factory=list)
     evidence_spans: list[EvidenceSpan] = Field(default_factory=list)
     analysis: list[ExtractedClaim] = Field(default_factory=list)

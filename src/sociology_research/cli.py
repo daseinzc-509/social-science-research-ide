@@ -311,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
                 print("Add --run to send requests. Research context is optional and only affects relevance assessment.", flush=True)
                 return 0
-            print("Sending Lite then Pro requests. Successful stage results are cached; no automatic retries are made.", flush=True)
+            print("Sending Lite extraction then independent Pro source review. Successful stage results are cached; no automatic retries are made.", flush=True)
             card = pipeline.analyze(
                 args.paper_id,
                 research_context=args.research_context,
@@ -320,9 +320,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(
                 f"Paper Card saved: {card.paper_id} "
-                f"({len(card.basic_facts)} facts, {len(card.evidence_spans)} evidence spans, "
-                f"{len(card.tables)} parsed tables, {len(card.analysis)} analysis claims, "
-                f"{len(card.warnings)} warnings)"
+                f"({len(card.basic_facts)} facts, {len(card.claim_audits)} semantic audits, "
+                f"study={card.study_profile.study_type.value if card.study_profile else 'unknown'}, "
+                f"{len(card.evidence_spans)} evidence spans, {len(card.tables)} parsed tables, "
+                f"{len(card.analysis)} analysis claims, {len(card.warnings)} warnings)"
             )
             for warning in card.warnings:
                 print(f"Warning: {warning}", file=sys.stderr)
