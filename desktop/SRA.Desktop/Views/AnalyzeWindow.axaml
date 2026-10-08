@@ -1,0 +1,40 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SRA.Desktop.Views.AnalyzeWindow"
+        Title="分析论文"
+        Width="620"
+        Height="500"
+        MinWidth="560"
+        MinHeight="460"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="22">
+    <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+      <TextBlock Text="分析论文" Classes="h1" />
+      <TextBlock Text="保持网页版的分析选项：研究关注、相邻文章排除标记，以及是否忽略缓存。" Classes="muted" TextWrapping="Wrap" FontSize="11" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="1" Spacing="14">
+      <StackPanel Spacing="6">
+        <TextBlock Text="研究关注（可选）" FontWeight="SemiBold" />
+        <TextBox x:Name="ResearchContextBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110"
+                 PlaceholderText="例如：我关心大语言模型如何影响社会互动" />
+        <TextBlock Text="只影响相关性与阅读建议，不改变论文事实提取。" Classes="muted" FontSize="10" />
+      </StackPanel>
+
+      <StackPanel Spacing="6">
+        <TextBlock Text="在此文本后排除（可选）" FontWeight="SemiBold" />
+        <TextBox x:Name="ExcludeAfterBox" PlaceholderText="用于一个 PDF 含相邻文章的情况" />
+      </StackPanel>
+
+      <Border Classes="soft-card" Padding="12">
+        <CheckBox x:Name="ForceCheckBox" Content="忽略缓存，重新调用 Lite + Pro（通常不要勾）" />
+      </Border>
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,18,0,0">
+      <Button Content="取消" Classes="secondary" Click="Cancel_Click" />
+      <Button Content="开始分析" Classes="primary" Click="Run_Click" />
+    </StackPanel>
+  </Grid>
+</Window>

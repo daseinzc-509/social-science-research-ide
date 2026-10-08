@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SRA.Desktop.Views.MetadataWindow"
+        Title="编辑书目信息"
+        Width="720"
+        Height="720"
+        MinWidth="650"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="22">
+    <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+      <TextBlock Text="编辑书目信息" Classes="h1" />
+      <TextBlock Text="手动修订保存在本地数据库中，重新分析不会覆盖。恢复自动提取会清除全部手动修订。" Classes="muted" TextWrapping="Wrap" FontSize="11" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+          <StackPanel Grid.Column="0" Spacing="5"><TextBlock Text="期刊" FontWeight="SemiBold"/><TextBox x:Name="JournalBox"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="年份" FontWeight="SemiBold"/><TextBox x:Name="YearBox"/></StackPanel>
+        </Grid>
+        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+          <StackPanel Grid.Column="0" Spacing="5"><TextBlock Text="卷" FontWeight="SemiBold"/><TextBox x:Name="VolumeBox" PlaceholderText="没有可留空"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="期" FontWeight="SemiBold"/><TextBox x:Name="IssueBox"/></StackPanel>
+          <StackPanel Grid.Column="2" Spacing="5"><TextBlock Text="页码" FontWeight="SemiBold"/><TextBox x:Name="PagesBox" PlaceholderText="例如 114-140"/></StackPanel>
+        </Grid>
+        <StackPanel Spacing="5"><TextBlock Text="DOI" FontWeight="SemiBold"/><TextBox x:Name="DoiBox"/></StackPanel>
+        <StackPanel Spacing="5"><TextBlock Text="题名" FontWeight="SemiBold"/><TextBox x:Name="TitleBox"/></StackPanel>
+        <StackPanel Spacing="5"><TextBlock Text="作者（用 、 或 ; 分隔）" FontWeight="SemiBold"/><TextBox x:Name="AuthorsBox"/></StackPanel>
+        <StackPanel Spacing="5"><TextBlock Text="关键词（用 ； 或 ; 分隔）" FontWeight="SemiBold"/><TextBox x:Name="KeywordsBox"/></StackPanel>
+        <StackPanel Spacing="5"><TextBlock Text="来源 / 网址（可选）" FontWeight="SemiBold"/><TextBox x:Name="SourceBox" PlaceholderText="例如 DOI 页面或数据库记录"/></StackPanel>
+        <TextBlock x:Name="StatusText" Classes="muted" FontSize="10" TextWrapping="Wrap" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" Margin="0,18,0,0">
+      <Button Grid.Column="0" Content="恢复自动提取" Classes="danger" Click="Reset_Click" />
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+        <Button Content="取消" Classes="secondary" Click="Cancel_Click" />
+        <Button Content="保存修订" Classes="primary" Click="Save_Click" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

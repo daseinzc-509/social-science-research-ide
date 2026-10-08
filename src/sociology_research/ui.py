@@ -1,6 +1,7 @@
-"""Zero-dependency local web UI for the SRA workspace.
+"""Zero-dependency legacy web UI for the SRA workspace.
 
-The server binds to loopback only and is intended for a single-user local workstation.
+The web surface now delegates application behavior to ``services`` so the legacy UI
+and the Avalonia-facing FastAPI adapter share the same business operations.
 """
 
 from __future__ import annotations
@@ -8,12 +9,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
-import shutil
-import tempfile
 import threading
-import uuid
 import webbrowser
-from dataclasses import dataclass, field
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
@@ -22,83 +19,22 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, quote, urlparse
 
-from .analyzer import PROMPT_VERSION, PaperAnalysisPipeline, render_deep_reading_markdown
-from .config import Settings, save_local_environment
+from .analyzer import PaperAnalysisPipeline, render_deep_reading_markdown
 from .pipeline import ImportPipeline
-from .parser import create_default_parser
 from .repository import ResearchRepository
-from .library import LibraryService
-from .references import display_reference_text, extract_references
+from .services import create_application_services
 
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 
 
-@dataclass
-class _Job:
-    id: str
-    kind: str
-    status: str = "queued"
-    messages: list[str] = field(default_factory=list)
-    result: dict[str, Any] | None = None
-    error: str | None = None
-
-
-class _JobStore:
-    def __init__(self) -> None:
-        self._jobs: dict[str, _Job] = {}
-        self._lock = threading.Lock()
-
-    def create(self, kind: str) -> _Job:
-        job = _Job(id=str(uuid.uuid4()), kind=kind)
-        with self._lock:
-            self._jobs[job.id] = job
-        return job
-
-    def get(self, job_id: str) -> dict[str, Any] | None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                return None
-            return {
-                "id": job.id,
-                "kind": job.kind,
-                "status": job.status,
-                "messages": list(job.messages),
-                "result": job.result,
-                "error": job.error,
-            }
-
-    def start(self, job: _Job, target: Callable[[Callable[[str], None]], dict[str, Any]]) -> None:
-        def runner() -> None:
-            self._set(job.id, status="running")
-            try:
-                result = target(lambda message: self.message(job.id, message))
-            except Exception as exc:  # noqa: BLE001 - boundary converts failures to user-visible job errors.
-                self._set(job.id, status="error", error=str(exc))
-            else:
-                self._set(job.id, status="done", result=result)
-
-        threading.Thread(target=runner, daemon=True, name=f"sra-{job.kind}-{job.id[:8]}").start()
-
-    def message(self, job_id: str, message: str) -> None:
-        clean = str(message).strip()
-        if not clean:
-            return
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is not None:
-                job.messages.append(clean)
-                if len(job.messages) > 200:
-                    del job.messages[:-200]
-
-    def _set(self, job_id: str, **changes: Any) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            for key, value in changes.items():
-                setattr(job, key, value)
-
-
 class SRAWebApp:
+    """Compatibility facade for the legacy browser UI.
+
+    Business operations live in ``sociology_research.services``.  Keeping this facade
+    means the existing zero-dependency UI can continue to work during the Avalonia
+    migration without maintaining a second implementation of import/analysis/settings.
+    """
+
     def __init__(
         self,
         data_dir: Path,
@@ -111,189 +47,34 @@ class SRAWebApp:
         self.repository = repository
         self.pipeline_factory = pipeline_factory
         self.import_pipeline_factory = import_pipeline_factory
-        self.jobs = _JobStore()
+        self.services = create_application_services(
+            self.data_dir,
+            repository,
+            pipeline_factory=pipeline_factory,
+            import_pipeline_factory=import_pipeline_factory,
+        )
+        self.jobs = self.services.jobs
 
     def list_papers(self) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        for paper in self.repository.list_papers():
-            card = None
-            card_error = None
-            try:
-                card = self.repository.get_card(paper.id)
-            except Exception as exc:  # noqa: BLE001
-                card_error = str(exc)
-            metadata = card.metadata.model_dump(mode="json") if card is not None else {}
-            items.append(
-                {
-                    "id": paper.id,
-                    "original_name": paper.original_name,
-                    "page_count": paper.page_count,
-                    "parse_status": str(paper.parse_status),
-                    "created_at": paper.created_at,
-                    "has_card": card is not None,
-                    "card_error": card_error,
-                    "title": metadata.get("title") or paper.original_name,
-                    "authors": metadata.get("authors") or [],
-                    "year": metadata.get("year"),
-                    "journal": metadata.get("journal"),
-                    "facts": len(card.basic_facts) if card is not None else 0,
-                    "evidence_spans": len(card.evidence_spans) if card is not None else 0,
-                    "analysis_claims": len(card.analysis) if card is not None else 0,
-                    "warnings": len(card.warnings) if card is not None else 0,
-                }
-            )
-        return items
+        return self.services.papers.list_papers()
 
     def dashboard(self) -> dict[str, Any]:
-        papers = self.list_papers()
-        return {
-            "papers": len(papers),
-            "analyzed": sum(bool(item["has_card"]) for item in papers),
-            "pending_analysis": sum(not bool(item["has_card"]) for item in papers),
-            "needs_review": sum(item["parse_status"] == "needs_review" for item in papers),
-            "references": sum(len(self.repository.get_references(item["id"])[0]) for item in papers),
-            "items": papers,
-        }
+        return self.services.papers.dashboard()
 
     def model_settings(self) -> dict[str, Any]:
-        settings = Settings.from_environment()
-        lite_key = settings.effective_lite_api_key or ""
-        pro_key = settings.effective_pro_api_key or ""
-
-        def masked(key: str) -> str:
-            return (key[:4] + "…" + key[-4:]) if len(key) > 10 else ("已设置" if key else "")
-
-        lite_url = settings.effective_lite_api_base_url or ""
-        pro_url = settings.effective_pro_api_base_url or ""
-        return {
-            "lite_api_key_masked": masked(lite_key),
-            "has_lite_api_key": bool(lite_key),
-            "lite_api_base_url": lite_url,
-            "lite_model": settings.lite_model or "",
-            "pro_api_key_masked": masked(pro_key),
-            "has_pro_api_key": bool(pro_key),
-            "pro_api_base_url": pro_url,
-            "pro_model": settings.pro_model or "",
-            "same_connection": bool(
-                lite_key
-                and pro_key
-                and lite_key == pro_key
-                and lite_url.rstrip("/") == pro_url.rstrip("/")
-            ),
-        }
+        return self.services.settings.get_model_settings()
 
     def save_model_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        current = Settings.from_environment()
-
-        # Accept the old single-connection API payload as a compatibility fallback.
-        shared_raw_key = payload.get("api_key")
-        shared_raw_url = payload.get("api_base_url")
-        raw_lite_key = payload.get("lite_api_key", shared_raw_key)
-        raw_pro_key = payload.get("pro_api_key", shared_raw_key)
-
-        def resolved_key(raw: Any, existing: str | None) -> str:
-            if raw in (None, "", "••••••••"):
-                return existing or ""
-            return str(raw).strip()
-
-        lite_key = resolved_key(raw_lite_key, current.effective_lite_api_key)
-        pro_key = resolved_key(raw_pro_key, current.effective_pro_api_key)
-        lite_url = str(
-            payload.get("lite_api_base_url", shared_raw_url if shared_raw_url is not None else current.effective_lite_api_base_url or "")
-            or ""
-        ).strip()
-        pro_url = str(
-            payload.get("pro_api_base_url", shared_raw_url if shared_raw_url is not None else current.effective_pro_api_base_url or "")
-            or ""
-        ).strip()
-        lite_model = str(payload.get("lite_model", current.lite_model or "") or "").strip()
-        pro_model = str(payload.get("pro_model", current.pro_model or "") or "").strip()
-
-        if bool(payload.get("pro_use_lite_connection", False)):
-            pro_key = lite_key
-            pro_url = lite_url
-
-        for stage, key, base_url, model in (
-            ("Lite", lite_key, lite_url, lite_model),
-            ("Pro", pro_key, pro_url, pro_model),
-        ):
-            if not key:
-                raise ValueError(f"{stage} API Key 不能为空")
-            if not base_url.startswith(("http://", "https://")):
-                raise ValueError(f"{stage} Base URL 必须以 http:// 或 https:// 开头")
-            if not model:
-                raise ValueError(f"{stage} 模型名不能为空")
-
-        save_local_environment(
-            {
-                # Persist the new split settings. Clear legacy shared values written by
-                # earlier UI versions so future behavior is unambiguous.
-                "SRA_LITE_API_KEY": lite_key,
-                "SRA_LITE_API_BASE_URL": lite_url,
-                "SRA_LITE_MODEL": lite_model,
-                "SRA_PRO_API_KEY": pro_key,
-                "SRA_PRO_API_BASE_URL": pro_url,
-                "SRA_PRO_MODEL": pro_model,
-                "SRA_API_KEY": None,
-                "SRA_API_BASE_URL": None,
-            }
-        )
-        return self.model_settings()
+        return self.services.settings.save_model_settings(payload)
 
     def paper_detail(self, paper_id: str) -> dict[str, Any]:
-        paper = self.repository.get_paper(paper_id)
-        if paper is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        card = self.repository.get_card(paper_id)
-        references, mentions = self.repository.get_references(paper_id)
-        return {
-            "paper": paper.model_dump(mode="json"),
-            "card": card.model_dump(mode="json") if card is not None else None,
-            "metadata_overrides": self.repository.get_metadata_overrides(paper_id),
-            "references": [entry.model_dump(mode="json") for entry in references],
-            "citation_mentions": [mention.model_dump(mode="json") for mention in mentions],
-        }
+        return self.services.papers.get_paper(paper_id)
 
     def save_metadata_overrides(self, paper_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.repository.get_paper(paper_id) is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        values = payload.get("values", {})
-        if not isinstance(values, dict):
-            raise ValueError("metadata override values must be an object")
-        normalized: dict[str, object] = {}
-        text_fields = ("title", "journal", "volume", "issue", "pages", "doi")
-        for field_name in text_fields:
-            value = values.get(field_name)
-            normalized[field_name] = str(value).strip() if value not in (None, "") else None
-        raw_year = values.get("year")
-        if raw_year in (None, ""):
-            normalized["year"] = None
-        else:
-            try:
-                normalized["year"] = int(str(raw_year).strip())
-            except ValueError as exc:
-                raise ValueError("年份必须是 4 位数字") from exc
-        for field_name in ("authors", "keywords"):
-            value = values.get(field_name, [])
-            if isinstance(value, str):
-                parts = re.split(r"[;,；、\n]+", value)
-            elif isinstance(value, list):
-                parts = [str(item) for item in value]
-            else:
-                raise ValueError(f"{field_name} must be a string or list")
-            normalized[field_name] = [item.strip() for item in parts if item.strip()]
-        result = self.repository.save_metadata_overrides(
-            paper_id,
-            normalized,
-            source_note=_optional_string(payload.get("source_note")),
-        )
-        return {"ok": True, "metadata_overrides": result}
+        return self.services.papers.save_metadata_overrides(paper_id, payload)
 
     def clear_metadata_overrides(self, paper_id: str) -> dict[str, Any]:
-        if self.repository.get_paper(paper_id) is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        self.repository.clear_metadata_overrides(paper_id)
-        return {"ok": True}
+        return self.services.papers.clear_metadata_overrides(paper_id)
 
     def start_analysis(
         self,
@@ -303,248 +84,46 @@ class SRAWebApp:
         exclude_after_text: str | None,
         force: bool,
     ) -> str:
-        if self.repository.get_paper(paper_id) is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        job = self.jobs.create("analyze")
-
-        def work(progress: Callable[[str], None]) -> dict[str, Any]:
-            progress("Preparing analysis…")
-            pipeline = self.pipeline_factory(self.repository, progress=progress)
-            card = pipeline.analyze(
-                paper_id,
-                research_context=(research_context or "").strip() or None,
-                exclude_after_text=(exclude_after_text or "").strip() or None,
-                force=force,
-            )
-            persisted = self.repository.get_card(paper_id)
-            if persisted is None:
-                raise RuntimeError("分析已返回，但 Paper Card 没有成功落库")
-            return {
-                "paper_id": card.paper_id,
-                "persisted": True,
-                "facts": len(card.basic_facts),
-                "evidence_spans": len(card.evidence_spans),
-                "tables": len(card.tables),
-                "analysis_claims": len(card.analysis),
-                "warnings": len(card.warnings),
-            }
-
-        self.jobs.start(job, work)
-        return job.id
-
-    def start_batch_analysis(self, paper_ids: list[str] | None = None) -> str:
-        selected = paper_ids or [paper.id for paper in self.repository.list_papers() if self.repository.get_card(paper.id) is None]
-        if not selected:
-            raise ValueError("没有待分析的论文。")
-        job = self.jobs.create("batch-analysis")
-
-        def work(progress: Callable[[str], None]) -> dict[str, Any]:
-            done = 0
-            failed: list[dict[str, str]] = []
-            for index, paper_id in enumerate(selected, start=1):
-                paper = self.repository.get_paper(paper_id)
-                if paper is None:
-                    failed.append({"paper_id": paper_id, "error": "unknown_paper"})
-                    continue
-                progress(f"批量分析 {index}/{len(selected)}：{paper.original_name}")
-                try:
-                    pipeline = self.pipeline_factory(self.repository, progress=progress)
-                    pipeline.analyze(paper_id)
-                    done += 1
-                except Exception as exc:  # keep the queue moving
-                    failed.append({"paper_id": paper_id, "error": str(exc)})
-                    progress(f"失败：{paper.original_name}：{exc}")
-            return {"selected": len(selected), "completed": done, "failed": failed}
-
-        self.jobs.start(job, work)
-        return job.id
-
-    def start_import(self, filename: str, data: bytes) -> str:
-        safe_name = Path(filename).name
-        if not safe_name.lower().endswith(".pdf"):
-            raise ValueError("Only PDF files can be imported.")
-        if not data:
-            raise ValueError("Uploaded PDF is empty.")
-        temp_dir = Path(tempfile.mkdtemp(prefix="sra-upload-"))
-        temp_path = temp_dir / safe_name
-        temp_path.write_bytes(data)
-        job = self.jobs.create("import")
-
-        def work(progress: Callable[[str], None]) -> dict[str, Any]:
-            try:
-                progress(f"Importing {safe_name}…")
-                pipeline = self.import_pipeline_factory(self.data_dir, self.repository, progress=progress)
-                record, parsed, created = pipeline.import_pdf(temp_path)
-                progress("PDF parsed and stored." if created else "This exact PDF was already imported; reused existing record. Use ‘重建解析’ to force a fresh Docling parse.")
-                return {
-                    "paper_id": record.id,
-                    "created": created,
-                    "page_count": record.page_count,
-                    "parse_status": str(record.parse_status),
-                    "warnings": parsed.warnings,
-                }
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-        self.jobs.start(job, work)
-        return job.id
-
-    def start_batch_import(self, uploads: list[tuple[str, bytes]]) -> str:
-        if not uploads:
-            raise ValueError("No PDF files were uploaded.")
-        temp_dir = Path(tempfile.mkdtemp(prefix="sra-batch-upload-"))
-        paths: list[Path] = []
-        for index, (filename, data) in enumerate(uploads, start=1):
-            safe_name = Path(filename).name or f"upload-{index}.pdf"
-            if not safe_name.lower().endswith(".pdf"):
-                continue
-            if not data:
-                continue
-            path = temp_dir / f"{index:04d}-{safe_name}"
-            path.write_bytes(data)
-            paths.append(path)
-        if not paths:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise ValueError("No non-empty PDF files were uploaded.")
-        job = self.jobs.create("batch-import")
-
-        def work(progress: Callable[[str], None]) -> dict[str, Any]:
-            try:
-                progress(f"Batch import: {len(paths)} PDF files queued…")
-                service = LibraryService(self.data_dir, self.repository, progress=progress)
-                results = service.batch_import(paths)
-                imported = sum(result["status"] == "imported" for result in results)
-                duplicates = sum(result["status"] == "duplicate" for result in results)
-                failed = sum(result["status"] == "failed" for result in results)
-                progress(f"Batch import complete: {imported} imported, {duplicates} duplicate, {failed} failed.")
-                return {"results": results, "imported": imported, "duplicates": duplicates, "failed": failed}
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-        self.jobs.start(job, work)
-        return job.id
-
-    def extract_references(self, paper_id: str) -> dict[str, Any]:
-        if self.repository.get_paper(paper_id) is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        entries, mentions = extract_references(paper_id, self.repository.get_source_blocks(paper_id))
-        self.repository.save_references(paper_id, entries, mentions)
-        return {
-            "references": [entry.model_dump(mode="json") for entry in entries],
-            "citation_mentions": [mention.model_dump(mode="json") for mention in mentions],
-        }
-
-    def references_export(self, paper_id: str, fmt: str) -> tuple[str, str]:
-        paper = self.repository.get_paper(paper_id)
-        if paper is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        entries, mentions = self.repository.get_references(paper_id)
-        if not entries:
-            self.extract_references(paper_id)
-            entries, mentions = self.repository.get_references(paper_id)
-        if fmt == "json":
-            content = json.dumps({"paper_id": paper_id, "references": [e.model_dump(mode="json") for e in entries], "citation_mentions": [m.model_dump(mode="json") for m in mentions]}, ensure_ascii=False, indent=2)
-            return content, "application/json; charset=utf-8"
-        lines = []
-        for index, entry in enumerate(entries, start=1):
-            key = f"ref{entry.year or 'nd'}_{index}"
-            lines.append(f"@article{{{key},")
-            for name, value in (("author", " and ".join(entry.authors)), ("title", entry.title), ("year", entry.year), ("doi", entry.doi), ("journal", entry.container_title), ("pages", entry.pages)):
-                if value not in (None, "", []):
-                    escaped = str(value).replace("{", "\\{").replace("}", "\\}")
-                    lines.append(f"  {name} = {{{escaped}}},")
-            lines.append(f"  note = {{PDF page {entry.source_page}; verify raw_text before citing}},")
-            lines.append("}\n")
-        return "\n".join(lines), "application/x-bibtex; charset=utf-8"
-
-    def start_reparse(self, paper_id: str) -> str:
-        record = self.repository.get_paper(paper_id)
-        if record is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        job = self.jobs.create("reparse")
-
-        def work(progress: Callable[[str], None]) -> dict[str, Any]:
-            progress("Rebuild: starting a fresh document parse…")
-            parser = create_default_parser()
-            refreshed = parser.parse(
-                Path(record.stored_path),
-                paper_id=record.id,
-                sha256=record.sha256,
-                progress=progress,
-            )
-            progress("Rebuild: replacing stored source blocks…")
-            self.repository.refresh_parsed_document(record.id, refreshed)
-            cleared = self.repository.clear_derived_analysis(record.id)
-            progress(
-                "Rebuild complete: source blocks refreshed; old Paper Card and model cache cleared."
-            )
-            return {
-                "paper_id": record.id,
-                "page_count": refreshed.page_count,
-                "source_blocks": len(refreshed.blocks),
-                "parser_version": refreshed.parser_version,
-                "cleared_paper_cards": cleared["paper_cards"],
-                "cleared_model_runs": cleared["model_runs"],
-            }
-
-        self.jobs.start(job, work)
-        return job.id
-
-    def delete_paper(self, paper_id: str, *, delete_file: bool) -> dict[str, Any]:
-        record = self.repository.get_paper(paper_id)
-        if record is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-
-        stored_path = Path(record.stored_path).expanduser().resolve()
-        papers_root = (self.data_dir / "papers").resolve()
-        db_result = self.repository.delete_paper(paper_id)
-        file_deleted = False
-        file_warning = None
-
-        if delete_file and stored_path.exists():
-            try:
-                stored_path.relative_to(papers_root)
-            except ValueError:
-                file_warning = (
-                    "Database rows were deleted, but the PDF path was outside the managed papers directory "
-                    "and was not removed."
-                )
-            else:
-                try:
-                    stored_path.unlink()
-                    file_deleted = True
-                except OSError as exc:
-                    file_warning = f"Database rows were deleted, but the PDF file could not be removed: {exc}"
-
-        return {
-            **db_result,
-            "file_deleted": file_deleted,
-            "file_warning": file_warning,
-        }
-
-    def doctor(self, *, deep: bool) -> dict[str, Any]:
-        return self.repository.diagnose(
-            self.data_dir / "papers",
-            current_prompt_version=PROMPT_VERSION,
-            deep=deep,
+        return self.services.analysis.start_analysis(
+            paper_id,
+            research_context=research_context,
+            exclude_after_text=exclude_after_text,
+            force=force,
         )
 
+    def start_batch_analysis(self, paper_ids: list[str] | None = None) -> str:
+        return self.services.analysis.start_batch_analysis(paper_ids)
+
+    def start_import(self, filename: str, data: bytes) -> str:
+        return self.services.papers.start_import(filename, data)
+
+    def start_batch_import(self, uploads: list[tuple[str, bytes]]) -> str:
+        return self.services.papers.start_batch_import(uploads)
+
+    def extract_references(self, paper_id: str) -> dict[str, Any]:
+        return self.services.exports.extract_references(paper_id)
+
+    def references_export(self, paper_id: str, fmt: str) -> tuple[str, str]:
+        return self.services.exports.references_export(paper_id, fmt)
+
+    def start_reparse(self, paper_id: str) -> str:
+        return self.services.papers.start_reparse(paper_id)
+
+    def delete_paper(self, paper_id: str, *, delete_file: bool) -> dict[str, Any]:
+        return self.services.papers.delete_paper(paper_id, delete_file=delete_file)
+
+    def doctor(self, *, deep: bool) -> dict[str, Any]:
+        return self.services.maintenance.doctor(deep=deep)
+
     def prune_cache(self, *, all_runs: bool, apply: bool, vacuum: bool) -> dict[str, Any]:
-        return self.repository.prune_model_runs(
-            current_prompt_version=PROMPT_VERSION,
+        return self.services.maintenance.prune_cache(
             all_runs=all_runs,
             apply=apply,
             vacuum=vacuum,
         )
 
     def export_text(self, paper_id: str) -> str:
-        if self.repository.get_paper(paper_id) is None:
-            raise KeyError(f"unknown paper id: {paper_id}")
-        blocks = self.repository.get_source_blocks(paper_id)
-        return "\n\n".join(
-            f"[PDF page {block.page_number} | source_block_id={block.id}]\n{block.text}"
-            for block in blocks
-        )
+        return self.services.exports.parsed_text(paper_id)
 
 
 class _SRAHTTPServer(ThreadingHTTPServer):

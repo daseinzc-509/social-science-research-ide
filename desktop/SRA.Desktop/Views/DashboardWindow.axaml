@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SRA.Desktop.Views.DashboardWindow"
+        Title="研究控制面板"
+        Width="760"
+        Height="560"
+        MinWidth="680"
+        MinHeight="500"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="22">
+    <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+      <TextBlock Text="研究控制面板" Classes="h1" />
+      <TextBlock Text="与网页版一致：查看论文库状态，并批量处理待分析论文或参考文献。" Classes="muted" FontSize="11" />
+    </StackPanel>
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*,*" ColumnSpacing="8">
+      <Border Grid.Column="0" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="论文总数" Classes="eyebrow"/><TextBlock x:Name="PapersText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="1" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="已分析" Classes="eyebrow"/><TextBlock x:Name="AnalyzedText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="2" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="待分析" Classes="eyebrow"/><TextBlock x:Name="PendingText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="3" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="待复核" Classes="eyebrow"/><TextBlock x:Name="ReviewText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="4" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="参考文献" Classes="eyebrow"/><TextBlock x:Name="ReferencesText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
+    </Grid>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,16,0,12">
+      <Button Content="批量分析待处理论文" Classes="primary" Click="BatchAnalyze_Click" />
+      <Button Content="批量提取参考文献" Classes="secondary" Click="BatchReferences_Click" />
+      <Button Content="刷新" Classes="ghost" Click="Refresh_Click" />
+    </StackPanel>
+
+    <Border Grid.Row="3" Classes="soft-card" Padding="12">
+      <TextBox x:Name="LogBox" Text="正在加载…" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+               Background="Transparent" BorderThickness="0" FontFamily="Consolas" FontSize="10"
+               ScrollViewer.VerticalScrollBarVisibility="Auto" />
+    </Border>
+  </Grid>
+</Window>

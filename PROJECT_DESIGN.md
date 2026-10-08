@@ -1,365 +1,496 @@
 # Sociology Research Agent / Social Science Research IDE
 
-## Project Design Brief v0.3
+## Project Design Brief v0.4
 
-本文件定义项目的研究目标、首版可交付范围、架构边界和阶段路线图。它既是项目上下文，也是后续实现与评估的依据；其中“长期方向”不代表要在首版实现。
+本文件定义项目当前产品目标、架构边界和阶段路线图。v0.4 的核心变化是：项目已完成“薄 CLI 验证研究引擎”的早期阶段，进入 **Desktop Foundation**；桌面端采用 Avalonia，Python 研究引擎通过本地版本化 API 暴露能力。
 
 最高优先级原则：
 
-> 先构建最小且可信的研究引擎。每项学术判断都要能回到证据；研究逻辑与基础设施、界面分开；复杂度必须由实际需要证明。
+> 先构建可信的研究理解，再构建漂亮的研究工作台；界面通过稳定边界访问研究引擎，不把研究逻辑复制进 UI。
 
 ---
 
-## 1. 产品目标与研究原则
+## 1. 产品定位
 
-### 1.1 产品定位
+项目长期定位为 **Social Science Research IDE**：一个 local-first、evidence-first 的个人研究阅读环境。
 
-项目暂名 **Sociology Research Agent**，长期方向为 **Social Science Research IDE**。它面向社会科学研究者，支持研究者从文献中形成可检查的研究记忆、比较观点、识别争论并发展研究问题。
-
-它不是“输入主题后自动搜论文并生成综述”的工具。核心工作过程是反复进行：
+它帮助研究者完成：
 
 ```text
-研究兴趣 → 发现与筛选文献 → 阅读 → 结构化研究记忆
-        → 比较与追问 → 补充文献 → 修正理解
-        → 形成问题与论证 → 人类审查
+发现 / 收集文献
+  → 阅读
+  → 可审计的结构化理解
+  → 用户核查与修正
+  → 项目级研究记忆
+  → 比较 / 争论 / Evidence Matrix
+  → 形成问题与论证
+  → 文献综述 / 写作支持
 ```
 
-文献综述应组织知识分类、发展脉络、理论关系、争论和未解问题，而不是把多篇摘要拼接起来。研究问题可以随研究推进而演化；AI 提供候选解释和问题，人类研究者做最终学术判断。
-
-### 1.2 设计原则
-
-- **Human Researcher First**：AI 是研究助手，不代替研究者决定理论意义、研究问题或最终论证。
-- **Evidence First**：重要判断应能回到来源文档中的页、段落或文本块。解析或定位不足时要明确显示不确定性。
-- **区分知识来源**：作者陈述、AI 推断和用户笔记是不同类型的数据，不得互相伪装或覆盖。
-- **Structured Research Memory**：保存已提取、已核对的研究内容；检索是找原文的手段，不是研究记忆本身。
-- **代码处理确定性任务**：文件校验、页码和来源 ID 校验、去重、存取和格式检查由普通程序完成；模型用于语义提取和比较。
-- **先单体工作流**：首版使用普通 Python 组件和明确的数据流，不为“Agent 感”引入多 Agent 或复杂编排。
-- **Research is iterative**：检索、阅读、比较和提问未来形成循环，不把研究过程压缩成一次搜索和一次写作。
+它不是“一键搜索并自动写综述”的产品。AI 提供提取、比较、审读和候选综合，人类研究者决定理论意义、研究问题和最终论证。
 
 ---
 
-## 2. 首版规格：单篇论文阅读原型
+## 2. 当前已验证能力：Paper Understanding v2
 
-### 2.1 目标与边界
-
-首版只验证一个问题：
-
-> 对一篇真实的社会科学论文，系统能否生成结构清楚、来源可追溯、便于人工核查的 Paper Card？
-
-输入是一份用户提供的本地 PDF。首版不自动搜索、下载或筛选文献，不生成跨论文综述，不提供桌面 IDE。通过薄 CLI 触发导入、阅读、查看和导出，避免在研究引擎验证前开发 UI。
-
-首版默认支持**可提取文本的学术 PDF**。扫描件、加密或损坏文件、表格密集或版面异常的文件不得静默当作成功处理：系统应返回明确的解析状态、失败原因或需人工复核标记。首版不承诺 OCR、复杂表格理解或所有出版版式的精确段落定位；没有可靠定位时只提供可用的页级引用，并说明限制。
-
-### 2.2 输入、输出与处理流程
+当前单篇论文链路为：
 
 ```text
-本地 PDF
-  → 文件校验与项目内归档
-  → 按页解析文本和可用版面位置
-  → 结构化阅读与字段校验
-  → Paper Card 和证据关联
-  → SQLite 持久化
-  → CLI 查看或导出
+PDF
+  → Docling / PyMuPDF
+  → SourceBlock + provenance
+  → Evidence ledger
+  → Lite factual index
+  → deterministic metadata/evidence verification
+  → study-type routing
+  → Pro independent full-document retrieval
+  → StudyProfile / ClaimAudit / methodological review
+  → PaperCard
+  → Deep Reading Report
 ```
 
-导入时保留原始 PDF，不修改原文件；在项目数据目录保存导入副本、文件哈希和解析记录。重复导入可用哈希识别。解析与模型运行都应有状态；部分失败时保留成功的解析结果和错误信息，不能把缺失字段填成猜测。
+核心原则：
 
-### 2.3 Paper Card 内容
-
-每张卡片至少包含以下字段；不适用、文中未报告或无法判断时使用明确状态，不要求模型补全：
-
-- **Metadata**：标题、作者、年份、期刊、卷期页、DOI、关键词。每个可追溯字段记录来源；PDF 未提供且首版未连接外部元数据源时标为未知。
-- **Research Question**：论文试图回答的问题。
-- **Theory & Concepts**：使用的理论、核心概念，以及理论在解释中的作用。
-- **Research Subject / Sample**：对象、场景、国家或地区、样本、时间范围；只记录文中支持的内容。
-- **Method**：研究设计和方法，并允许“文中未说明”或“无法判断”。
-- **Findings**：逐项记录主要发现，避免把结果与作者对结果的解释混在一起。
-- **Author Explanation / Mechanism**：作者提出的解释、机制或理论说明。
-- **Limitations**：分别记录作者自述局限与 AI 推断的潜在局限。
-- **Relevance**：仅当用户提供当前项目兴趣或研究问题时评估相关性，并附理由；没有研究上下文时不输出伪精确分数。
-- **User Notes**：独立保存用户内容，模型重新运行不得覆盖。
-
-### 2.4 判断、证据与核查状态
-
-每条 Finding、机制说明、局限判断及其他实质性 AI 输出都应带来源类型：
-
-```text
-AUTHOR_STATED   原文明确陈述或报告
-AI_INFERRED     AI 基于原文作出的解释或综合
-USER_NOTE       用户自己的摘录、判断或笔记
-```
-
-证据引用至少记录来源文档、PDF 物理页码（从 1 开始）、文本块 ID 和可回看的原文片段；印刷页码和版面坐标可用时另存。不得只保存模型生成的页码字符串而无法映射回解析文本。
-
-来源类型与核查状态分开表示。核查状态至少区分：
-
-```text
-SUPPORTED       有可定位的原文依据，等待或已完成人工检查
-NEEDS_REVIEW    解析、定位或语义判断存在不确定性
-NO_SOURCE       当前找不到支持该判断的原文
-```
-
-`SUPPORTED` 只表示存在可追溯来源，不表示系统已经证明引文在语义上充分支持结论。没有原文支持的 AI 判断不得显示为已核实结论；应标成 `NEEDS_REVIEW` 或 `NO_SOURCE`，并允许用户查看原因。AI 推断必须明确标为推断，即使它引用了原文。
-
-点击证据时至少能打开对应 PDF 页面。只有解析器可靠提供了坐标时才提供文本高亮；否则不伪称有精确段落高亮。
-
-### 2.5 首版技术边界与最小接口
-
-首版采用 Python、Pydantic 和 SQLite。PDF 解析默认使用 Docling，保留 PyMuPDF 作为轻量后备和回归测试路径；解析器边界保持可替换。原始 PDF 和解析产物放在项目数据目录，SQLite 保存元数据、文本块、Paper Card、证据引用、用户笔记及运行状态。首版为单机研究原型，不设计多用户并发或云同步。
-
-首版只定义足以隔离变化的边界：
-
-- `DocumentParser`：输入 PDF，输出带页码和可用位置的文本块及解析状态。
-- `ResearchRepository`：保存和读取论文、解析块、卡片、证据和用户笔记。
-- `PaperAnalysisPipeline`：组织 Lite 提取、Pro 分析、缓存和证据校验。
-- `OpenAICompatibleClient`：使用 Agent Plan Chat Completions 协议发送请求；只保留一个客户端，不做多供应商插件系统。
-
-当前首个模型服务使用火山方舟 Agent Plan 的 OpenAI-compatible Chat Completions；通过单一轻量客户端调用 Lite 与 Pro 两个配置模型，不建设多供应商适配框架。`SRA_LITE_MODEL` 和 `SRA_PRO_MODEL` 按用户配置原样传递。
-
-此时不定义公共 HTTP API、SSE 事件协议或检索 API。只有评估证明按页/章节组织上下文不足时，才设计 Retrieval Interface 并评估词法检索、向量检索或重排；RAG、嵌入模型和 pgvector 都不是首版前提。首版用普通函数组织管线，不引入 LangGraph；当出现可恢复的长流程、条件分支或人工暂停需求时再评估编排框架。
-
-### 2.5.1 两阶段论文分析
-
-首版的模型调用采用火山方舟 Agent Plan 的 OpenAI-compatible 协议。代码只保留一个轻量客户端边界；阶段差异由模型 ID、提示词和输出 schema 决定，不建立多供应商适配层。
-
-```text
-PDF SourceBlocks + 页面证据
-  → Lite 模型
-    元数据、摘要、方法、数据集、指标、表格、关键数字
-  → 基础事实卡片（结构化、紧凑、逐项带证据）
-  → Pro 模型
-    创新点、方法合理性、实验可信度、局限、阅读价值
-  → 最终 Paper Card
-```
-
-Lite 的结果是 Pro 的输入，Pro 不应重新猜测基础事实。为了控制成本，按页/章节分块，要求紧凑 JSON，缓存 Lite 结果，并只把 Lite 卡片和精选证据块传给 Pro；不得在第二阶段再次发送整篇 PDF。事实提取和评价性判断使用不同字段与来源类型，评价性判断统一标为 `AI_INFERRED` 并进入人工复核。
-
-CLI 分析默认只生成本地调用预览；必须显式传 `--run` 才发送模型请求。超时不自动重试。研究上下文是可选项，只影响阅读相关性判断，不作为提取论文事实、方法或结果的前提。用户可通过 `--exclude-after-text` 指定同页后续文章的边界标记。
-
-模型名从环境变量原样读取：`SRA_LITE_MODEL` 和 `SRA_PRO_MODEL`。不得自行拼接、简化或改写用户配置的完整模型名；当前项目配置为 `doubao-seed-2.1-lite` 和 `doubao-seed-2.1-pro`。
-
-### 2.6 首版验收条件
-
-单篇论文原型只有在以下条件都满足时才算通过：
-
-1. 对支持范围内的 PDF，能够导入、解析、生成结构合法的 Paper Card 并持久保存。
-2. 每条实质性 AI 判断具有明确来源类型；作者陈述能定位原文，AI 推断明确标注，用户笔记与模型输出分开。
-3. 用户能从 Finding 或其他判断打开关联 PDF 页；解析失败、无证据和不确定定位均有明确状态，不伪装成成功。
-4. 字段缺失或格式错误可被识别并报告；不能静默丢失或编造内容。
-5. 对人工标注的评估语料逐字段核查准确性、遗漏、证据定位与归因；评估记录保留失败案例和类别。通过门槛应在查看基准结果后、扩大开发范围前设定，不预先编造准确率数字。
+- Evidence First；
+- Traceability 与 Semantic Support 分开；
+- 作者陈述、AI 推断、用户笔记分开；
+- 确定性任务由代码处理；
+- Pro 可以独立回源，不受 Lite 已选 evidence 的封闭世界限制；
+- 论文类型不同，方法学审读 rubric 不同；
+- Paper Card 当前是兼容视图，不是最终 ontology。
 
 ---
 
-### 2.7 批量 PDF 入库（下一阶段）
+## 3. 为什么现在需要架构调整
 
-批量提交首先解决“把一组本地 PDF 安全地纳入研究库”的问题，不把导入和模型分析绑定成一个不可控的长任务。批量流程必须复用单篇导入的哈希、存储、解析和 SQLite 写入规则：
+早期设计故意避免公共 API 和桌面 IDE，以验证研究引擎是否值得继续开发。这个目标已经基本达成。
 
-```text
-目录 / 多选文件
-  → 发现 PDF 与扩展名校验
-  → SHA-256 去重
-  → 每个文件独立复制和解析
-  → 每个文件写入 imported / duplicate / needs_review / failed 状态
-  → 批量结果报告
-  → 用户确认后再运行分析
-```
+当前下一阶段需求包括：
 
-批量任务的最小结果对象应包含输入路径、原始文件名、SHA-256、论文 ID（若已入库）、解析状态、错误信息、警告和耗时。任务必须允许部分成功；重跑时依靠哈希幂等，不因同一个文件被重新扫描而产生重复论文。批量导入默认不调用 Lite/Pro 模型，分析必须是显式的第二步。
+- Avalonia 桌面 UI；
+- PDF 阅读与 Claim/Evidence 联动；
+- 长任务进度；
+- 模型设置；
+- 未来书籍阅读；
+- 项目与多文献比较。
 
-批量阶段的验收条件：
+因此产品现在需要一个稳定的 **Presentation Boundary**。
 
-- 递归目录中的 PDF 可以逐个处理，并为每个文件返回独立结果。
-- 同一文件内容只对应一个 Paper 记录；重命名不产生重复记录。
-- 一个文件失败不会回滚同批次已成功的文件。
-- 扫描件、损坏文件和解析异常保留明确状态，不能伪装成普通成功。
-- 批量分析可以按状态、标签或用户选择筛选，且不会隐式重复消耗已缓存的模型结果。
-
-### 2.8 参考文献与文内引用（下一阶段）
-
-参考文献功能不是“把论文最后一页抄成一串字符串”，而是把三个层次分开保存：
-
-1. **ReferenceEntry**：参考文献表中的一条记录。保存原始文本、规范化字段和来源证据；字段缺失时保持为空。
-2. **CitationMention**：正文或脚注中一次引用出现的位置。保存引用标记、页码、文本块、附近句子和能指向的 `ReferenceEntry`。
-3. **ReferenceLink**：参考文献条目与本地论文、DOI 或外部元数据的候选匹配。保存匹配方式、置信度、状态和人工修订记录。
-
-建议的状态机是：
+架构调整不是重写 Python，而是增加：
 
 ```text
-RAW → STRUCTURED → CANDIDATE_MATCH → CONFIRMED
-                    ↘ NEEDS_REVIEW
+Avalonia Desktop
+  → Local Application API
+  → Application Services
+  → existing Python Research Core
 ```
 
-其中 `RAW` 永远保留；`STRUCTURED` 只表示解析器识别出了字段；`CANDIDATE_MATCH` 只是候选，不等于同一篇论文；`CONFIRMED` 需要 DOI、稳定元数据或人工确认。任何解析器都可能在双栏、脚注、连字符和跨页参考文献上出错，因此每条记录都要能回到 PDF 页和 `SourceBlock`。
+---
 
-首个可交付范围应是：
+## 4. Desktop Foundation 架构
 
-- 找到参考文献区段并逐条切分。
-- 提取原始引用字符串和页级证据。
-- 解析作者、年份、标题、期刊、卷期、页码、DOI 等常用字段。
-- 识别正文引用标记与参考文献条目的候选对应关系。
-- 对缺字段、无法切分、匹配冲突和跨页记录标记 `NEEDS_REVIEW`。
-
-首个阶段不承诺自动构建完整引文网络、推断学术影响、用引用次数替代理论重要性，也不把模型生成的引用当成原文事实。跨论文综合仍然只能引用已经保存并经过人工检查的 `ReferenceEntry` 和 `CitationMention`。
-
-## 3. 长期架构方向与数据演进
-
-### 3.1 长期模块
-
-长期可演进为以下分层结构：
+### 4.1 层次
 
 ```text
-Windows Research IDE（后期）
-  → Application API（需要产品化时）
-  → Research Workflows（需要循环与人工闸门时）
-  → Literature / Document / LLM 工具
-  → Research Memory 与来源文件
+Desktop Presentation
+  Avalonia / MVVM
+        ↓
+Local API
+  localhost / versioned DTO / job status
+        ↓
+Application Services
+  import / analyze / export / settings / review
+        ↓
+Research Core
+  parser / analyzer / references / reports
+        ↓
+Infrastructure
+  SQLite / files / model providers
 ```
 
-未来桌面端方向为 C#、.NET、WPF、MVVM 和 WebView2；API 可评估 FastAPI 与 HTTP/SSE；多用户或规模化持久化可评估 PostgreSQL 与 pgvector。它们都是后续决策，不是首版承诺。WPF 不应依赖工作流内部状态；未来 API 负责稳定的项目、论文、证据和研究任务接口。
+### 4.2 桌面端规则
 
-LangGraph 适用于需要显式状态、条件路径、检查点和人工暂停恢复的多步骤研究循环。使用它的前提是普通函数编排已经遇到真实限制，而不是因为项目名称里有 Agent。
+- Avalonia 不直接访问 SQLite；
+- Avalonia 不直接调用 Docling；
+- Avalonia 不依赖 analyzer 内部状态；
+- API DTO 与 Pydantic domain model 分开；
+- 后端只监听 loopback；
+- 分析等长任务使用 job API；首版使用 polling；
+- 后端进程由桌面端启动和关闭；
+- Python 研究引擎保持独立可测试、可 CLI 调用。
 
-### 3.2 研究记忆的演进
+### 4.3 API 技术选择
 
-首版核心数据概念仅包括：
+当前项目已经进入产品化本地 API 的合理时点。FastAPI 可作为适配层候选，原因是：
+
+- 与 Pydantic schema 自然结合；
+- 自动 OpenAPI；
+- 便于生成或维护 C# typed client；
+- route / validation / error handling 比手写 HTTP server 更适合长期维护。
+
+这不代表研究逻辑依赖 FastAPI。API 只是 adapter。
+
+---
+
+## 5. 当前 Python 模块的演进
+
+现有模块继续保留：
+
+```text
+parser.py
+analyzer.py
+models.py
+repository.py
+library.py
+references.py
+llm_client.py
+config.py
+cli.py
+```
+
+新增：
+
+```text
+services/
+  analysis_service.py
+  library_service.py
+  settings_service.py
+  export_service.py
+
+api/
+  app.py
+  schemas.py
+  routes/
+
+legacy_web/
+  app.py
+```
+
+第一轮不进行全面 package rename。优先把 `ui.py` 中的业务编排移入 services，再让 legacy web 和 Avalonia 共用同一应用层。
+
+---
+
+## 6. 模型服务边界
+
+Lite 与 Pro 是独立 stage，应允许使用不同模型供应商：
+
+```text
+LiteConnection
+  api_key
+  base_url
+  model
+
+ProConnection
+  api_key
+  base_url
+  model
+```
+
+环境变量：
+
+```text
+SRA_LITE_API_KEY
+SRA_LITE_API_BASE_URL
+SRA_LITE_MODEL
+
+SRA_PRO_API_KEY
+SRA_PRO_API_BASE_URL
+SRA_PRO_MODEL
+```
+
+旧的 `SRA_API_KEY / SRA_API_BASE_URL` 作为兼容 fallback。
+
+这仍然不是“多供应商插件系统”：当前只需要 OpenAI-compatible 的统一轻量 client + 两套独立连接。
+
+---
+
+## 7. Desktop v1 产品界面
+
+第一版 Avalonia 采用三栏研究工作台：
+
+```text
+Library      Reader                    Inspector
+Papers       PDF                       Claim
+Books        Deep Reading              Evidence
+Projects     later: Book Reader        Scope
+Reading                               Semantic Support
+                                      Notes / Review
+```
+
+首个垂直切片必须打通：
+
+1. 查看论文库；
+2. 导入 PDF；
+3. 运行分析并看到进度；
+4. 阅读 Paper Understanding / Deep Reading；
+5. 点击 Claim → Evidence → PDF page/bbox；
+6. 修改模型设置；
+7. 导出结果。
+
+只有这个闭环稳定后，才扩大到书籍。
+
+---
+
+## 8. Human Review 与评估
+
+“可审计”必须逐渐从机器状态升级为研究者闭环。
+
+需要增加：
+
+```text
+ReviewDecision
+  claim_id
+  user_status: confirmed | corrected | rejected | unresolved
+  corrected_statement
+  note
+  updated_at
+```
+
+用户修正不能在重新分析时被覆盖。
+
+同时建立 Eval Harness：
+
+- 多种论文类型；
+- claim / scope / semantic support / method-risk 人工参考；
+- parser / model / prompt version；
+- failure cases；
+- 与“直接把 PDF 交给通用 LLM”的对照。
+
+---
+
+## 9. 书籍阅读：Book Understanding v1
+
+书籍不是“一篇很长的论文”。
+
+### 9.1 共享基础
+
+未来增加：
+
+```text
+SourceDocument
+  kind: PAPER | BOOK | BOOK_CHAPTER | REPORT
+
+DocumentSection
+SourceBlock
+EvidenceSpan
+Claim
+UserNote
+ReviewDecision
+```
+
+### 9.2 书籍专属理解结构
+
+```text
+central_thesis
+chapter_argument
+concept
+definition
+argument
+supporting_example
+counterargument
+important_quote
+author_position
+```
+
+输出为 Book Reading Report，而不是复用 Paper method-review 模板。
+
+首版重点：
+
+- EPUB / PDF；
+- 目录与章节树；
+- 全书中心论题；
+- 章节论点；
+- 核心概念；
+- 论据 / 案例 / 反论点；
+- 重要引文；
+- 原文位置；
+- 用户笔记。
+
+---
+
+## 10. Research Projects
+
+论文和书籍通过 Project 聚合：
 
 ```text
 Project
-Paper / PaperMetadata
-SourceDocument / SourceBlock
-PaperCard / Finding
-EvidenceReference
-UserNote
-ExtractionRun
+  research_question
+  reading_list
+    papers
+    books / chapters
+  notes
+  evidence_matrix
+  synthesis
 ```
 
-后续根据多论文研究需求再增加：
+Project 阶段才引入真正跨文档的 normalized research memory：
 
 ```text
-Concept / Theory / Mechanism / Debate
-ResearchQuestion / Gap / Puzzle / Argument
-LiteratureMap / Draft
-ReferenceEntry / CitationMention / ReferenceLink
+Claim
+ClaimEvidenceLink
+ProjectDocument
+ResearchQuestionVersion
+ReviewDecision
 ```
 
-研究问题应允许版本演进，并能记录哪些论文、争论或判断促成变化。不要在没有真实使用案例前设计完整 ontology 或数十张表。
-
-### 3.3 多论文综合与社会学研究地图
-
-达到多论文阶段后，系统逐步形成：
-
-- **Classification Map**：领域中的研究主题和方向。
-- **Development Map**：领域随时间的发展与重要节点。
-- **Theory / Concept Map**：理论、概念及其关系。
-- **Debate Map**：研究者之间的赞同、反驳、延伸与分歧。
-
-文献角色未来可包括奠基文献、关键节点、高影响、前沿、反方观点、直接对话、方法和背景文献。角色判断必须给出依据，不能只用引用量或单一相关性分数替代学术解释。
-
-系统需区分人口/情境/方法/理论空缺、矛盾、未解机制和理论 Puzzle。“很少研究某群体”不能自动成为有意义的研究问题。候选 Gap/Puzzle 要经由进一步检索和批判性审查，最终由研究者决定。
-
-### 3.4 写作与引用
-
-写作是后续能力。输入应来自经人审查的研究问题、论证、文献地图、争论地图和证据矩阵，而不是一批未经整理的 PDF。未来流程为：
-
-```text
-Approved Argument → Outline → Human Approval → Draft
-                  → Citation / Evidence Check → Human Revision
-```
-
-最终文本中的重要主张应能沿着“句子 → 主张 → 证据 → 论文 → PDF 页面/原文”追踪。系统不得把 AI 推断伪装成作者观点，也不得将自动引文检查描述为学术正确性的最终认证。
+不要在 Book/Desktop 之前提前设计完整 ontology。
 
 ---
 
-## 4. 评估方法
+## 11. 多文献综合
 
-评估从首版开始，不能只以生成内容读起来流畅作为成功标准。建立由研究者人工核对的社会科学论文语料和字段级参考答案；样本应覆盖首版声明支持的论文类型，并记录 PDF 版式与解析难点。
+多文献阶段首先输出 Evidence Matrix，不直接生成长综述。
 
-首版逐字段评估：
+比较维度包括：
 
-- 元数据与研究问题是否忠实于原文。
-- 理论、概念、对象、方法、发现、机制和局限是否准确，是否遗漏或混淆。
-- 每条判断的来源类型是否正确，证据页码/文本块是否能回到原文。
-- 证据是否真正支持所关联的陈述；不能定位时是否正确标记。
-- 解析异常是否如实暴露，而非产生看似完整的卡片。
+- population / setting / time；
+- theory / concept；
+- method / identification；
+- finding / mechanism；
+- semantic support；
+- scope condition；
+- methodological risk；
+- contradiction / qualification。
 
-保留人工评分说明、争议字段、失败样例、模型/提示版本、解析器版本和语料版本。首版数据用于建立基线；只有基线稳定后，再设量化门槛和比较不同模型、解析器或检索方法。后续再评估筛选精确率/召回率、跨论文综合质量、引用正确性和专家体验，并与“相同 PDF 直接交给通用 LLM”建立对照。
+然后再形成：
 
----
+- 共识；
+- 冲突；
+- 理论关系；
+- 方法差异；
+- 研究缺口；
+- Puzzle。
 
-## 5. 分阶段路线图
-
-每阶段完成后根据评估结果决定是否继续；后续阶段不是自动承诺。
-
-### Milestone 0 — 首版范围与评估基线
-
-确定支持的 PDF 范围、Paper Card 字段、证据格式和错误状态；收集一组经人工核对的评估论文与字段参考答案。明确首个模型供应商和运行方式后，冻结首版验收条件。
-
-### Milestone 1 — One Paper
-
-实现本地 PDF 导入、Docling 版面/表格/OCR 解析、Lite 事实提取、Pro 深度分析、Pydantic 输出校验、证据关联、SQLite 持久化与结果缓存、薄 CLI。Lite 按来源块分段；Pro 只接收 Lite 结果和精选证据，不重复发送全文。通过单篇端到端用例与字段级评估检查首版验收条件。
-
-### Milestone 1.5 — Batch Intake
-
-在不改变单篇导入语义的前提下，加入目录扫描、哈希去重、逐文件结果、部分成功和批量任务报告。导入和分析分成两个明确动作；先验证本地论文库能稳定承载几十到几百篇 PDF，再扩大分析范围。
-
-### Milestone 2 — Multiple Papers
-
-支持用户导入一组论文，解析参考文献表和正文引用位置，并对 Paper Card 进行主题、理论、方法、共同发现和冲突发现的比较。所有综合判断仍须关联到各自来源论文与证据；先验证参考文献结构化记忆是否足以支持跨论文综合，再考虑引文网络。
-
-### Milestone 3 — Literature Discovery
-
-加入查询扩展、OpenAlex/Crossref 等来源的文献发现、候选筛选和元数据规范化。验证去重、来源标注和筛选质量；后续再按需要把已确认的 `ReferenceLink` 用于引文滚雪球、作者扩展或其他数据库查询。
-
-### Milestone 4 — Iterative Research Loop
-
-加入“阅读 → 综合 → 追问 → 补充搜索 → 再阅读”的循环，保存研究状态与问题版本，并在人类决策点设置审核闸门。只有当持久检查点、分支和暂停恢复有实际价值时再采用 LangGraph。
-
-### Milestone 5 — Sociology Engine
-
-逐步加入概念、理论、机制、发展脉络、争论、矛盾、Gap/Puzzle 批判和研究问题演化。用领域专家评估判断其是否帮助研究者形成更好的解释，而不只看图谱数量。
-
-### Milestone 6 — Writing Support
-
-从经研究者批准的论证、证据矩阵与文献地图生成提纲和草稿，加入证据/引文核查与人工修订流程。不得提供“一键生成即可提交”的产品承诺。
-
-### Milestone 7 — Backend Productization
-
-当需要稳定 API、后台长任务、多项目管理或更强并发时，再引入 FastAPI、后台任务机制和 PostgreSQL；需要语义检索且评估证明有效时再加入 pgvector。提供 HTTP/SSE 进度接口前先明确任务状态与恢复语义。
-
-### Milestone 8 — Windows Research IDE
-
-最后开发 Windows-first 桌面工作台，评估 WPF、MVVM、WebView2、PDF 阅读器、证据高亮、项目库、研究地图和写作空间。桌面端通过稳定 API 或明确的本地服务边界访问研究引擎，不直接绑定 LangGraph 内部结构。
+所有综合项仍需链接回各文献 Claim / Evidence。
 
 ---
 
-## 6. 明确不做与决策规则
+## 12. 写作与文献综述
 
-首版不做：
+写作输入必须来自经研究者审查的研究记忆：
 
 ```text
-Multi-agent swarm
-Neo4j、复杂知识图谱或 GraphRAG
-独立 Vector Database、嵌入检索与重排
-自动文献搜索、全网下载和筛选
-完整引文网络、自动影响力判断和“引用越多越重要”的排序
-FastAPI、SSE、后台任务队列或 PostgreSQL
-WPF/Web 前端、SaaS、云同步、认证或移动端
-完整 Zotero replacement
-自动生成可直接提交的论文或综述
+Approved Evidence Matrix
+  → Outline
+  → Human Approval
+  → Draft
+  → Citation / Evidence Check
+  → Human Revision
 ```
 
-以后是否加入功能，依据可复现的使用需求和评估结果决定。优先选择能改善证据忠实度、研究可追溯性或研究者工作效率的最小改动；未经验证的架构偏好不构成引入基础设施的理由。
+最终重要句子应可追踪：
+
+```text
+Draft sentence
+  → synthesis claim
+  → source claim
+  → evidence
+  → source document
+  → page / location / quote
+```
+
+不提供“一键生成即可提交”的承诺。
 
 ---
 
-## 7. 给 Codex 的当前任务
+## 13. 数据库演进
 
-阅读本文件后，先检查仓库现状与项目约束，再提出并实现 Milestone 0/1 所需的最小单篇论文垂直切片。不得据此实现多论文综述、文献搜索、完整数据库、LangGraph 工作流、API 或 WPF。
+当前继续使用 SQLite。
 
-实现首版时优先保证：
+进入 Book / Project milestone 前增加显式 schema migration 机制。可使用简单 SQL migration + `schema_version`，不需要为了迁移而强制引入 ORM。
+
+原则：
+
+- 原 PDF / EPUB 永远保留；
+- parser/model 派生产物可重新构建；
+- user note / review decision 不因模型重跑而丢失；
+- schema 变更必须有版本和迁移路径。
+
+---
+
+## 14. 分阶段路线图
+
+### Milestone A — Desktop Foundation
+
+- 抽离 application services；
+- 建立 `/api/v1` local API；
+- legacy Web UI 改为共用 services；
+- Avalonia Desktop shell；
+- Library / Reader / Evidence Inspector / Settings / Jobs；
+- Windows-first 开发版打包。
+
+### Milestone B — Paper Reader Completion
+
+- Claim/Evidence 与 PDF 跳转 / 高亮；
+- Human Review Loop；
+- Eval Harness；
+- 更完整的用户笔记与修正。
+
+### Milestone C — Book Understanding v1
+
+- EPUB/PDF 书籍；
+- 章节树；
+- Book-specific claim schema；
+- Book Reading Report。
+
+### Milestone D — Research Projects
+
+- Project / Reading List；
+- Research Question versions；
+- normalized cross-document Claim/Evidence；
+- Evidence Matrix。
+
+### Milestone E — Literature Synthesis
+
+- consensus / conflict / scope / debate；
+- external metadata and citation context；
+- Gap / Puzzle candidates。
+
+### Milestone F — Literature Review & Writing
+
+- evidence-backed outline；
+- draft；
+- citation/evidence check；
+- human revision。
+
+---
+
+## 15. 当前不做
 
 ```text
-PDF → 结构解析 → 结构化 Paper Card → 证据可追溯 → 人工可核查
+重写 Python research core 为 C#
+PostgreSQL / cloud sync / multi-user auth
+LangGraph 多 Agent 编排
+Neo4j / GraphRAG
+独立 Vector DB（没有评估前）
+复杂完整 ontology
+自动全网搜文献并一键生成可提交综述
 ```
 
-通过标准不是功能数量，而是对真实社会科学论文的判断可解释、可定位、可纠错；任何评估结果都应包含失败和不确定项。
+这些能力必须由真实需求和评估结果证明其必要性。
+
+---
+
+## 16. 当前开发任务
+
+当前任务从旧版“只完成 Milestone 0/1”调整为：
+
+> **在不破坏 Paper Understanding v2 的前提下建立 Desktop Foundation。**
+
+实现顺序：
+
+```text
+1. ui.py 业务逻辑抽离
+2. Application Services
+3. Local API + contract tests
+4. Avalonia Library / Reader / Inspector
+5. PDF evidence navigation
+6. model settings / jobs / exports
+7. Windows-first packaging
+8. Human Review + Eval Harness
+9. Book Understanding
+```
+
+通过标准不是 UI 控件数量，而是：
+
+> 研究者能否从桌面工作台完成“导入 → 分析 → 阅读 → 检查证据 → 修正 → 保存”的可靠闭环。

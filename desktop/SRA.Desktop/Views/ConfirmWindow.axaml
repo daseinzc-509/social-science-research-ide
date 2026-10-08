@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SRA.Desktop.Views.ConfirmWindow"
+        Width="520"
+        Height="260"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="22">
+    <TextBlock x:Name="TitleText" Grid.Row="0" Classes="h1" />
+    <TextBlock x:Name="MessageText" Grid.Row="1" Margin="0,14,0,14" TextWrapping="Wrap" Classes="muted" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="取消" Classes="secondary" Click="Cancel_Click" />
+      <Button x:Name="ConfirmButton" Content="确认" Classes="danger" Click="Confirm_Click" />
+    </StackPanel>
+  </Grid>
+</Window>

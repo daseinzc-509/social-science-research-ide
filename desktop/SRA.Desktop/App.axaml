@@ -1,0 +1,33 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SRA.Desktop.App"
+             RequestedThemeVariant="Light">
+  <Application.Resources>
+    <SolidColorBrush x:Key="CanvasBrush" Color="#F5F6F7" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#F1F3F5" />
+    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#FAFBFC" />
+    <SolidColorBrush x:Key="InkBrush" Color="#20252B" />
+    <SolidColorBrush x:Key="InkSecondaryBrush" Color="#69727D" />
+    <SolidColorBrush x:Key="LineBrush" Color="#DFE3E8" />
+    <SolidColorBrush x:Key="LineStrongBrush" Color="#C9CFD6" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#39766A" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#2F655A" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E7F1EE" />
+    <SolidColorBrush x:Key="BlueSoftBrush" Color="#EDF3F8" />
+    <SolidColorBrush x:Key="BlueInkBrush" Color="#3D6078" />
+    <SolidColorBrush x:Key="PurpleSoftBrush" Color="#F0ECF7" />
+    <SolidColorBrush x:Key="PurpleInkBrush" Color="#665783" />
+    <SolidColorBrush x:Key="AmberSoftBrush" Color="#FBF2DD" />
+    <SolidColorBrush x:Key="AmberInkBrush" Color="#8A5C16" />
+    <SolidColorBrush x:Key="RedSoftBrush" Color="#F7E9E7" />
+    <SolidColorBrush x:Key="RedInkBrush" Color="#8C4B43" />
+    <SolidColorBrush x:Key="CodeBrush" Color="#1D2428" />
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://SRA.Desktop/Styles/ControlStyles.axaml" />
+    <StyleInclude Source="avares://SRA.Desktop/Styles/ShellStyles.axaml" />
+  </Application.Styles>
+</Application>

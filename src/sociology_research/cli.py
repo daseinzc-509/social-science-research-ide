@@ -143,9 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
     prune_cmd.add_argument("--all", action="store_true", help="Target all model cache rows instead of only old prompt versions")
     prune_cmd.add_argument("--yes", action="store_true", help="Actually delete the selected cache rows; without this flag the command is a dry run")
     prune_cmd.add_argument("--vacuum", action="store_true", help="Compact the SQLite file after deletion; requires --yes")
-    ui_cmd = commands.add_parser("ui", help="Open the local browser workspace")
+    ui_cmd = commands.add_parser("ui", help="Open the legacy local browser workspace")
     ui_cmd.add_argument("--port", type=int, default=8765, help="Preferred local port; falls forward if busy (default: 8765)")
     ui_cmd.add_argument("--no-browser", action="store_true", help="Start the UI without opening a browser tab")
+    api_cmd = commands.add_parser("api", help="Run the localhost API for the Avalonia desktop client")
+    api_cmd.add_argument("--host", default="127.0.0.1", help="Loopback host only (default: 127.0.0.1)")
+    api_cmd.add_argument("--port", type=int, default=8766, help="Local API port (default: 8766)")
     return parser
 
 
@@ -299,6 +302,26 @@ def main(argv: list[str] | None = None) -> int:
             if not 0 <= args.port <= 65535:
                 raise ValueError("--port must be between 0 and 65535")
             serve_ui(data_dir, repository, port=args.port, open_browser=not args.no_browser)
+            return 0
+        if args.command == "api":
+            if args.host not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError("the desktop API is local-only; --host must be 127.0.0.1, localhost, or ::1")
+            if not 0 <= args.port <= 65535:
+                raise ValueError("--port must be between 0 and 65535")
+            try:
+                import uvicorn
+                import fastapi  # noqa: F401
+                import multipart  # noqa: F401 - required by FastAPI UploadFile routes
+            except ImportError:
+                print(
+                    "FastAPI server dependencies are missing. Install fastapi, uvicorn, and python-multipart in the project environment.",
+                    file=sys.stderr,
+                )
+                return 2
+            from .api import create_app
+
+            app = create_app(data_dir=data_dir, repository=repository)
+            uvicorn.run(app, host=args.host, port=args.port, log_level="info")
             return 0
         if args.command == "analyze":
             pipeline = PaperAnalysisPipeline(repository, progress=_progress)

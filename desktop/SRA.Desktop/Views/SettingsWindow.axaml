@@ -1,0 +1,124 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SRA.Desktop.ViewModels"
+        x:Class="SRA.Desktop.Views.SettingsWindow"
+        x:DataType="vm:SettingsWindowViewModel"
+        Title="模型设置"
+        Width="760"
+        Height="720"
+        MinWidth="650"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{StaticResource CanvasBrush}">
+    <Border Grid.Row="0"
+            Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource LineBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="24,20">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="4">
+          <TextBlock Text="模型设置" Classes="h1" FontSize="22" />
+          <TextBlock Text="Lite 负责事实索引，Pro 负责独立方法学审读；两阶段可以使用不同服务。"
+                     Classes="muted" FontSize="11" />
+        </StackPanel>
+        <Border Grid.Column="1" Background="{StaticResource SurfaceSoftBrush}" CornerRadius="999" Padding="9,4" VerticalAlignment="Center">
+          <TextBlock Text="v0.1.0" Classes="muted" FontSize="10" />
+        </Border>
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="24" Spacing="16">
+        <Border Classes="card" Padding="20">
+          <Grid ColumnDefinitions="46,*">
+            <Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource AccentSoftBrush}" VerticalAlignment="Top">
+              <TextBlock Text="1" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="12">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Lite · 事实提取" Classes="h2" />
+                <TextBlock Text="提取 metadata、研究问题、方法、样本、测量与核心发现。" Classes="muted" FontSize="10" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding LiteApiKey}" PasswordChar="●" PlaceholderText="{Binding LiteKeyHint}" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Base URL" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding LiteApiBaseUrl}" PlaceholderText="https://.../v1" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Model" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding LiteModel}" PlaceholderText="Lite model name" />
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="11" Padding="14,12">
+          <CheckBox IsChecked="{Binding UseLiteConnection}"
+                    Content="Pro 使用与 Lite 相同的 API Key 和 Base URL"
+                    FontWeight="SemiBold" />
+        </Border>
+
+        <Border Classes="card" Padding="20">
+          <Grid ColumnDefinitions="46,*">
+            <Border Width="34" Height="34" CornerRadius="10" Background="#EEEAF6" VerticalAlignment="Top">
+              <TextBlock Text="2" Foreground="#665783" FontWeight="Bold"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="12">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Pro · 深度审读" Classes="h2" />
+                <TextBlock Text="独立回到全文取证，形成 StudyProfile、方法学审查与 ClaimAudit。" Classes="muted" FontSize="10" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding ProApiKey}"
+                         PasswordChar="●"
+                         PlaceholderText="{Binding ProKeyHint}"
+                         IsEnabled="{Binding IsProConnectionEditable}" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Base URL" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding ProApiBaseUrl}"
+                         PlaceholderText="https://.../v1"
+                         IsEnabled="{Binding IsProConnectionEditable}" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Model" FontWeight="SemiBold" FontSize="11" />
+                <TextBox Text="{Binding ProModel}" PlaceholderText="Pro model name" />
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Background="{StaticResource BlueSoftBrush}" CornerRadius="11" Padding="14">
+          <StackPanel Spacing="4">
+            <TextBlock Text="隐私说明" Foreground="{StaticResource BlueInkBrush}" FontWeight="SemiBold" FontSize="10" />
+            <TextBlock Text="桌面端只读取被掩码的 Key 状态；保存时由本地 API 写入项目 .env，UI 不回传现有明文 Key。"
+                       Foreground="{StaticResource BlueInkBrush}" FontSize="10" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AmberInkBrush}" TextWrapping="Wrap" FontSize="11" />
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Row="2"
+            Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource LineBrush}"
+            BorderThickness="0,1,0,0"
+            Padding="24,14">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="OpenAI-compatible endpoints" Classes="muted" FontSize="10" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Content="取消" Classes="ghost" Click="Cancel_Click" />
+          <Button Content="保存设置" Classes="primary" Click="Save_Click" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
