@@ -1,6 +1,5 @@
 name: CI / Windows + macOS Desktop
 
-run-name: "CI · ${{ github.ref_name }} · ${{ github.event_name }}"
 on:
   push:
     branches: ['**']
@@ -40,7 +39,8 @@ jobs:
             tests/test_secure_distribution.py \
             tests/test_desktop_release_pipeline.py \
             tests/test_crossplatform_desktop.py \
-            tests/test_release_safety_false_positives.py
+            tests/test_release_safety_false_positives.py \
+            tests/test_storage_transparency.py
 
   desktop-compile:
     name: Compile ${{ matrix.target }}

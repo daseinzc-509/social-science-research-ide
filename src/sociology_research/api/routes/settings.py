@@ -18,3 +18,11 @@ def update_model_settings(
     services: ApplicationServices = Depends(get_services),
 ):
     return services.settings.save_model_settings(payload.model_dump(exclude_unset=True))
+
+
+@router.get("/storage")
+def get_storage(services: ApplicationServices = Depends(get_services)):
+    """Display actual paths used by this running backend; never exposes secrets."""
+    from ...storage_inventory import storage_inventory
+
+    return storage_inventory(services.data_dir)

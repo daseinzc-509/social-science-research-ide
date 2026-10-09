@@ -551,6 +551,39 @@
               </Grid>
             </Border>
 
+            <!-- Storage management: the paths are returned by the running
+                 Python backend; never guess a PDF location from the UI. -->
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="存储与卸载" Classes="h2"/>
+                  <TextBlock Text="准确查看程序、论文库、设置与缓存的位置。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="12">
+                  <TextBlock Text="程序安装位置" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="InstalledProgramPathText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
+                  <Button Content="打开程序目录" HorizontalAlignment="Left" Classes="secondary" Click="OpenProgramDir_Click"/>
+                  <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"/>
+                  <TextBlock Text="研究数据：PDF / SQLite / 笔记" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="DataStoragePathText" FontSize="11" TextWrapping="Wrap" Classes="muted" Text="正在获取路径..."/>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="打开研究库" Classes="secondary" Click="OpenDataDir_Click"/>
+                    <Button Content="打开配置目录" Classes="secondary" Click="OpenConfigDir_Click"/>
+                  </StackPanel>
+                  <TextBlock Text="模型缓存（SRA 管理）" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="CacheStoragePathText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="打开缓存目录" Classes="secondary" Click="OpenCacheDir_Click"/>
+                    <Button Content="刷新占用信息" Classes="ghost" Click="RefreshStorage_Click"/>
+                  </StackPanel>
+                  <TextBlock x:Name="StorageSizeText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
+                  <Border Background="{DynamicResource SurfaceSoftBrush}" CornerRadius="8" Padding="12">
+                    <TextBlock Text="普通卸载仅移除程序。Windows 交互式卸载可选择清除当前账户的 SRA 专属目录；不会删除其他文件夹里的原始 PDF 或自定义研究库。macOS 请参见清理说明。外部模型缓存不保证能由 SRA 卸载器清除。" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
+                  </Border>
+                </StackPanel>
+              </Grid>
+            </Border>
+
             <Border Classes="settings-card" Padding="22">
               <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
                 <StackPanel Spacing="4"><TextBlock Text="工作区" Classes="h2"/><TextBlock Text="桌面端只通过 localhost API 调用研究核心。" Classes="muted" FontSize="10" TextWrapping="Wrap"/></StackPanel>

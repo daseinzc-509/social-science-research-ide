@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -16,6 +18,10 @@ public partial class MainWindow : Window
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+    private string? _dataFolder;
+    private string? _configFolder;
+    private string? _cacheFolder;
+
 
 
     private void NavigateTo(string page)
@@ -61,6 +67,7 @@ public partial class MainWindow : Window
     {
         NavigateTo("settings");
         if (ViewModel is not null) await ViewModel.LoadSettingsAsync();
+        await RefreshStorageInventoryAsync();
     }
 
     private void MinimizeWindow_Click(object? sender, RoutedEventArgs e)
@@ -137,6 +144,91 @@ public partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         await ViewModel.Settings.SaveAsync();
+    }
+
+    private async void RefreshStorage_Click(object? sender, RoutedEventArgs e)
+        => await RefreshStorageInventoryAsync();
+
+    private async Task RefreshStorageInventoryAsync()
+    {
+        InstalledProgramPathText.Text = AppContext.BaseDirectory;
+        _dataFolder = null;
+        _configFolder = null;
+        _cacheFolder = null;
+        DataStoragePathText.Text = "正在查询后端实际存储位置...";
+        CacheStoragePathText.Text = "—";
+        StorageSizeText.Text = "";
+        if (ViewModel is null) return;
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var result = await ViewModel.Api.GetStorageInventoryAsync(cancellation.Token);
+            _dataFolder = result.GetProperty("data_dir").GetString();
+            _configFolder = result.GetProperty("config_dir").GetString();
+            _cacheFolder = result.GetProperty("cache_dir").GetString();
+            var managed = result.GetProperty("data_managed").GetBoolean();
+            DataStoragePathText.Text = (_dataFolder ?? "—") +
+                (managed ? "  [SRA 专属位置]" : "  [自定义/旧版目录，卸载不会删除]");
+            CacheStoragePathText.Text = _cacheFolder ?? "—";
+            var usage = result.GetProperty("usage");
+            StorageSizeText.Text = $"论文库 {PrettyBytes(usage.GetProperty("data").GetProperty("bytes").GetInt64())} · " +
+                $"配置 {PrettyBytes(usage.GetProperty("config").GetProperty("bytes").GetInt64())} · " +
+                $"SRA 缓存 {PrettyBytes(usage.GetProperty("cache").GetProperty("bytes").GetInt64())}";
+        }
+        catch (Exception ex)
+        {
+            DataStoragePathText.Text = "暂时无法从运行中的 Python 后端获取实际存储路径。";
+            CacheStoragePathText.Text = "连接后端后点击「刷新占用信息」。";
+            StorageSizeText.Text = ex.Message.Length > 160 ? ex.Message[..160] : ex.Message;
+        }
+    }
+
+    private static string PrettyBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / 1048576.0:F1} MB";
+        return $"{bytes / 1073741824.0:F2} GB";
+    }
+
+    private void OpenProgramDir_Click(object? sender, RoutedEventArgs e)
+        => OpenFolder(AppContext.BaseDirectory);
+
+    private void OpenDataDir_Click(object? sender, RoutedEventArgs e)
+        => OpenFolder(_dataFolder);
+
+    private void OpenConfigDir_Click(object? sender, RoutedEventArgs e)
+        => OpenFolder(_configFolder);
+
+    private void OpenCacheDir_Click(object? sender, RoutedEventArgs e)
+        => OpenFolder(_cacheFolder);
+
+    private void OpenFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            if (ViewModel is not null) ViewModel.StatusText = "请先刷新存储信息。";
+            return;
+        }
+        try
+        {
+            // Open the requested directory via an argument list; never run a shell
+            // or interpolate a server-controlled path into a command string.
+            if (!Directory.Exists(path))
+            {
+                if (ViewModel is not null) ViewModel.StatusText = "目录尚未创建：" + path;
+                return;
+            }
+            var opener = OperatingSystem.IsWindows() ? "explorer.exe" :
+                OperatingSystem.IsMacOS() ? "open" : "xdg-open";
+            var start = new ProcessStartInfo(opener) { UseShellExecute = false };
+            start.ArgumentList.Add(path);
+            using var process = Process.Start(start);
+        }
+        catch (Exception ex)
+        {
+            if (ViewModel is not null) ViewModel.StatusText = "无法打开目录：" + ex.Message;
+        }
     }
 
     private async void ImportPdf_Click(object? sender, RoutedEventArgs e)

@@ -45,7 +45,7 @@ public sealed class SraApiClient : IDisposable
     /// </summary>
     public async Task<string> DownloadPdfForOpenAsync(string paperId, CancellationToken cancellationToken = default)
     {
-        var folder = Path.Combine(Path.GetTempPath(), "SRA-PDF-Viewer", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(DesktopStoragePaths.Cache, "pdf-viewer", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         if (!OperatingSystem.IsWindows())
             new DirectoryInfo(folder).UnixFileMode =
@@ -70,6 +70,9 @@ public sealed class SraApiClient : IDisposable
             throw;
         }
     }
+
+    public Task<JsonElement> GetStorageInventoryAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>("api/v1/settings/storage", cancellationToken);
 
     public Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync<HealthResponse>("api/v1/health", cancellationToken);

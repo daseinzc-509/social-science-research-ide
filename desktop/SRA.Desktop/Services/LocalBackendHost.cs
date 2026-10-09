@@ -58,6 +58,16 @@ public sealed class LocalBackendHost : IDisposable
             info.ArgumentList.Add("--port");
             info.ArgumentList.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
             info.Environment["SRA_DESKTOP_TOKEN"] = token;
+            // Confine caches we own to the same per-user SRA root. Respect
+            // explicit user overrides and never redirect developer-mode APIs.
+            var cacheRoot = DesktopStoragePaths.Cache;
+            Directory.CreateDirectory(cacheRoot);
+            SetEnvIfMissing(info, "HF_HOME", Path.Combine(cacheRoot, "huggingface"));
+            SetEnvIfMissing(info, "TORCH_HOME", Path.Combine(cacheRoot, "torch"));
+            SetEnvIfMissing(info, "XDG_CACHE_HOME", Path.Combine(cacheRoot, "xdg"));
+            // DOCLING_ARTIFACTS_PATH is intentionally not forced to an empty
+            // folder: it may require pre-fetched model layout and break OCR.
+
             // The backend resolves its own per-user private storage directory.
             // Never point it at a Program Files/.app resource folder.
             var process = new Process { StartInfo = info, EnableRaisingEvents = true };
@@ -75,6 +85,12 @@ public sealed class LocalBackendHost : IDisposable
             return new LocalBackendHost(baseUri, token, null,
                 Task.FromException(new InvalidOperationException("Unable to launch the bundled Python backend: " + ex.Message)));
         }
+    }
+
+    private static void SetEnvIfMissing(ProcessStartInfo info, string name, string value)
+    {
+        if (!info.Environment.TryGetValue(name, out var existing) || string.IsNullOrWhiteSpace(existing))
+            info.Environment[name] = value;
     }
 
     private static string? FindBundledExecutable()

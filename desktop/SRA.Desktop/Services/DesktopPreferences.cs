@@ -17,10 +17,21 @@ public sealed class DesktopPreferencesService
 
     public DesktopPreferencesService()
     {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var directory = Path.Combine(root, "SRA");
+        var directory = DesktopStoragePaths.UserRoot;
         Directory.CreateDirectory(directory);
         _path = Path.Combine(directory, "desktop-preferences.json");
+        // Prior macOS previews stored this file in the platform's .NET-specific
+        // LocalApplicationData path. Import it without removing the original.
+        if (OperatingSystem.IsMacOS() && !File.Exists(_path))
+        {
+            var legacy = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SRA", "desktop-preferences.json");
+            if (File.Exists(legacy) && !Path.GetFullPath(legacy).Equals(Path.GetFullPath(_path), StringComparison.Ordinal))
+            {
+                try { File.Copy(legacy, _path, overwrite: false); } catch (IOException) { }
+            }
+        }
     }
 
     public DesktopPreferences Load()
