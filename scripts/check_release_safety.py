@@ -10,6 +10,7 @@ Paths are printed for failures, NEVER the contents of a potential secret.
 from __future__ import annotations
 
 import argparse
+from itertools import chain
 import re
 import subprocess
 import sys
@@ -23,9 +24,35 @@ ENV_SECRET_ASSIGNMENT = re.compile(
     rb"(?im)^[ \t]*(?:export[ \t]+)?SRA_(?:LITE_|PRO_)?API_KEY[ \t]*=[ \t]*[\x22\x27]?([A-Za-z0-9_./+\-=]{20,})"
 )
 JSON_SECRET_ASSIGNMENT = re.compile(
-    rb"(?im)^[ \t]*[\x22\x27]SRA_(?:LITE_|PRO_)?API_KEY[\x22\x27][ \t]*:[ \t]*[\x22\x27]([A-Za-z0-9_./+\-=]{20,})"
+    rb"(?i)[\x22\x27]SRA_(?:LITE_|PRO_)?API_KEY[\x22\x27][ \t]*:[ \t]*[\x22\x27]([A-Za-z0-9_./+\-=]{20,})"
 )
-GENERIC_TOKEN = re.compile(rb'(?i)(?:sk-[A-Za-z0-9_\-]{24,}|AKLT[A-Za-z0-9]{20,})')
+# A provider token must start at a lexical boundary. Scanning for `sk-` anywhere
+# in raw bytes flags unrelated base64 hashes and compiled .NET assemblies.
+# Also detect credential assignments embedded within a configuration line,
+# not only at the beginning of a .env file. In particular, a wheel RECORD with
+# a forged non-digest second field must *not* evade the scan.
+INLINE_SECRET_ASSIGNMENT = re.compile(
+    rb"(?i)(?<![A-Za-z0-9_])SRA_(?:LITE_|PRO_)?API_KEY[ \t]*=[ \t]*[\x22\x27]?([A-Za-z0-9_./+\-=]{20,})"
+)
+GENERIC_TOKEN = re.compile(
+    rb"(?i)(?<![A-Za-z0-9_\-])(?:sk-[A-Za-z0-9_\-]{24,}|AKLT[A-Za-z0-9]{20,})(?![A-Za-z0-9_\-])"
+)
+# Binary runtime assets can include coincidental token-looking byte sequences.
+# We still inspect their bytes for explicit SRA_*API_KEY assignments; the loose
+# standalone provider-token heuristic applies only to readable text.
+BINARY_SUFFIXES = frozenset({
+    ".dll", ".exe", ".so", ".dylib", ".pyd", ".a", ".o", ".obj",
+    ".pyc", ".pyo", ".class", ".wasm", ".bin", ".dat", ".pak",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff",
+    ".ico", ".icns", ".otf", ".ttf", ".woff", ".woff2", ".mp3",
+    ".wav", ".mp4", ".mov", ".zip", ".gz", ".xz", ".whl",
+})
+# Wheel RECORD files contain URL-safe base64 hashes of installed dependencies.
+# Those digests are *not* credentials, but their random bytes sometimes include
+# `sk-` followed by many base64 characters. Strip ONLY the digest column;
+# filenames remain scanned for accidental credential exposure.
+RECORD_DIGEST = re.compile(rb"^(?:sha256|sha384|sha512)=[A-Za-z0-9_-]{20,}$")
+MAX_RECORD_LINE_BYTES = 2 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024 * 1024  # 1 GiB; memory usage remains bounded
 
 
@@ -59,11 +86,69 @@ def disallowed_path(name: str) -> str | None:
     return None
 
 
-def _binary_contains_token(reader: Iterable[bytes]) -> bool:
-    tail = b""
+def _wheel_record(name: str) -> bool:
+    parts = PurePosixPath(name.replace("\\", "/")).parts
+    return bool(parts and parts[-1] == "RECORD" and any(part.endswith(".dist-info") for part in parts[:-1]))
+
+
+def _record_line_without_hash(line: bytes) -> bytes:
+    fields = line.rsplit(b",", 2)
+    if len(fields) == 3 and RECORD_DIGEST.fullmatch(fields[1]):
+        return fields[0] + b",<redacted-digest>," + fields[2]
+    return line
+
+
+def _wheel_record_without_hashes(reader: Iterable[bytes]) -> Iterable[bytes]:
+    """Remove RECORD's cryptographic digest column, not the package filenames.
+
+    RECORD format: relative/path,sha256=urlsafe-base64,size. The split-once-
+    per-chunk approach keeps parsing time linear for large bundled environments.
+    """
+    pending = b""
     for chunk in reader:
+        lines = (pending + chunk).split(b"\n")
+        pending = lines.pop()
+        for line in lines:
+            if len(line) > MAX_RECORD_LINE_BYTES:
+                raise ValueError("Unexpectedly long Python wheel RECORD line")
+            yield _record_line_without_hash(line) + b"\n"
+        if len(pending) > MAX_RECORD_LINE_BYTES:
+            raise ValueError("Unexpectedly long Python wheel RECORD line")
+    if pending:
+        yield _record_line_without_hash(pending)
+
+
+def _looks_binary(name: str, prefix: bytes) -> bool:
+    if PurePosixPath(name.replace("\\", "/")).suffix.lower() in BINARY_SUFFIXES:
+        return True
+    if prefix.startswith((b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe")):
+        return True
+    return b"\x00" in prefix[:8192]
+
+
+def _binary_contains_token(reader: Iterable[bytes], name: str = "") -> bool:
+    """Conservative secret scan for source and release bundles.
+
+    Block explicit SRA credential assignments even in binary files. Scan plain
+    provider-style tokens only when the file is text; otherwise third-party
+    compiled runtimes and wheel RECORD hashes create noisy false positives.
+    """
+    chunks = iter(reader)
+    prefix = next(chunks, b"")
+    if not prefix:
+        return False
+    check_generic = not _looks_binary(name, prefix)
+    full_reader: Iterable[bytes] = chain((prefix,), chunks)
+    if _wheel_record(name):
+        full_reader = _wheel_record_without_hashes(full_reader)
+        check_generic = True
+    tail = b""
+    for chunk in full_reader:
         subject = tail + chunk
-        if GENERIC_TOKEN.search(subject) or ENV_SECRET_ASSIGNMENT.search(subject) or JSON_SECRET_ASSIGNMENT.search(subject):
+        if (ENV_SECRET_ASSIGNMENT.search(subject) or JSON_SECRET_ASSIGNMENT.search(subject)
+                or INLINE_SECRET_ASSIGNMENT.search(subject)):
+            return True
+        if check_generic and GENERIC_TOKEN.search(subject):
             return True
         tail = subject[-200:]
     return False
@@ -104,7 +189,7 @@ def check_source(root: Path) -> list[str]:
         if path.is_symlink():
             failures.append(f"{name}: symlink in tracked source")
             continue
-        if path.is_file() and _binary_contains_token(_file_chunks(path)):
+        if path.is_file() and _binary_contains_token(_file_chunks(path), name):
             failures.append(f"{name}: suspected embedded API credential")
     return failures
 
@@ -128,7 +213,7 @@ def check_artifact(root: Path) -> list[str]:
         if reason:
             failures.append(f"{name}: {reason}")
             continue
-        if _binary_contains_token(_file_chunks(path)):
+        if _binary_contains_token(_file_chunks(path), name):
             failures.append(f"{name}: suspected embedded API credential")
     return failures
 
@@ -146,7 +231,7 @@ def check_zip(file: Path) -> list[str]:
             if reason:
                 failures.append(f"{name}: {reason}")
                 continue
-            if _binary_contains_token(_zip_chunks(z, member)):
+            if _binary_contains_token(_zip_chunks(z, member), name):
                 failures.append(f"{name}: suspected embedded API credential")
     return failures
 
