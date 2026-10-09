@@ -177,16 +177,48 @@ jobs:
         shell: bash
         run: |
           python scripts/write_checksums.py dist "${{ matrix.target }}"
-      - uses: actions/upload-artifact@v4
+      # Keep installer and portable outputs separate: the combined artifacts used to
+      # download two copies of the same large Python/Docling backend per platform.
+      - name: Upload Windows setup (recommended for Windows testing)
+        if: matrix.installer == 'windows'
+        uses: actions/upload-artifact@v4
         with:
-          name: SRA-bundle-${{ matrix.target }}
+          name: SRA-bundle-win-x64-setup
           path: |
-            dist/*.zip
-            dist/*.dmg
             dist/SRA-Desktop-Setup-*.exe
-            dist/SHA256SUMS-*.txt
+            dist/SHA256SUMS-win-x64.txt
           if-no-files-found: error
           retention-days: 21
+          compression-level: 0
+      - name: Upload Windows portable ZIP (optional)
+        if: matrix.installer == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRA-bundle-win-x64-portable
+          path: dist/SRA-win-x64-*.zip
+          if-no-files-found: error
+          retention-days: 21
+          compression-level: 0
+      - name: Upload macOS DMG (recommended for Mac testing)
+        if: matrix.installer == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRA-bundle-osx-arm64-dmg
+          path: |
+            dist/SRA-osx-arm64-*.dmg
+            dist/SHA256SUMS-osx-arm64.txt
+          if-no-files-found: error
+          retention-days: 21
+          compression-level: 0
+      - name: Upload macOS app ZIP (optional)
+        if: matrix.installer == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRA-bundle-osx-arm64-appzip
+          path: dist/SRA-osx-arm64-*.zip
+          if-no-files-found: error
+          retention-days: 21
+          compression-level: 0
 
   github-release:
     if: github.event_name == 'push'
