@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SRA.Desktop;
 using SRA.Desktop.Models;
 using SRA.Desktop.Services;
 
@@ -10,16 +11,28 @@ namespace SRA.Desktop.ViewModels;
 public partial class MainWindowViewModel : ObservableObject
 {
     private readonly SraApiClient _api;
+    private readonly DesktopPreferencesService _preferences;
     private readonly List<PaperSummary> _allPapers = [];
     private CancellationTokenSource? _selectionCts;
 
-    public MainWindowViewModel(SraApiClient api)
+    public MainWindowViewModel(
+        SraApiClient api,
+        DesktopPreferencesService? preferences = null,
+        DesktopPreferences? snapshot = null)
     {
         _api = api;
+        _preferences = preferences ?? new DesktopPreferencesService();
+        snapshot ??= _preferences.Load();
+        themeMode = snapshot.ThemeMode;
+        showInspector = snapshot.ShowInspector;
+        Settings = new SettingsWindowViewModel(api);
+        App.ApplyThemeMode(themeMode);
         _ = InitializeAsync();
     }
 
     public SraApiClient Api => _api;
+    public SettingsWindowViewModel Settings { get; }
+    public IReadOnlyList<string> ThemeModes { get; } = ["跟随系统", "浅色", "深色"];
     public ObservableCollection<PaperSummary> Papers { get; } = [];
     public ObservableCollection<string> Keywords { get; } = [];
     public ObservableCollection<ClaimItem> MetadataClaims { get; } = [];
@@ -76,6 +89,15 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool jobIndeterminate;
     [ObservableProperty] private string researchContext = "";
     [ObservableProperty] private string excludeAfterText = "";
+    [ObservableProperty] private string themeMode = "跟随系统";
+    [ObservableProperty] private bool showInspector = true;
+    [ObservableProperty] private string dashboardPapers = "—";
+    [ObservableProperty] private string dashboardAnalyzed = "—";
+    [ObservableProperty] private string dashboardPending = "—";
+    [ObservableProperty] private string dashboardReview = "—";
+    [ObservableProperty] private string dashboardReferences = "—";
+    [ObservableProperty] private string dashboardOutput = "任务中心尚未加载。";
+    [ObservableProperty] private string maintenanceOutput = "数据库健康状态尚未加载。";
 
     public bool HasSelection => SelectedPaper is not null;
     public bool HasCard => SelectedPaper?.HasCard == true;
@@ -116,6 +138,26 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnSearchTextChanged(string value)
     {
         ApplyFilter(value);
+    }
+
+    partial void OnThemeModeChanged(string value)
+    {
+        App.ApplyThemeMode(value);
+        SaveDesktopPreferences();
+    }
+
+    partial void OnShowInspectorChanged(bool value)
+    {
+        SaveDesktopPreferences();
+    }
+
+    private void SaveDesktopPreferences()
+    {
+        _preferences.Save(new DesktopPreferences
+        {
+            ThemeMode = ThemeMode,
+            ShowInspector = ShowInspector,
+        });
     }
 
     private void RaiseSelectionState()
@@ -452,6 +494,129 @@ public partial class MainWindowViewModel : ObservableObject
             return null;
         }
         return ClaimItem.FromJson(node);
+    }
+
+    public async Task LoadSettingsAsync()
+    {
+        await Settings.LoadAsync();
+    }
+
+    public async Task LoadDashboardAsync()
+    {
+        try
+        {
+            var data = await _api.GetDashboardAsync();
+            DashboardPapers = JsonValue(data, "papers");
+            DashboardAnalyzed = JsonValue(data, "analyzed");
+            DashboardPending = JsonValue(data, "pending_analysis");
+            DashboardReview = JsonValue(data, "needs_review");
+            DashboardReferences = JsonValue(data, "references");
+            DashboardOutput = "批量分析会逐篇执行 Lite → Pro；单篇失败不会中断整个队列。";
+        }
+        catch (Exception exc)
+        {
+            DashboardOutput = exc.Message;
+        }
+    }
+
+    public async Task RunBatchAnalysisAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        DashboardOutput = "正在启动批量分析…";
+        try
+        {
+            var accepted = await _api.StartBatchAnalysisAsync();
+            await _api.WaitForJobAsync(accepted.JobId, snapshot =>
+            {
+                DashboardOutput = snapshot.Messages.Count == 0
+                    ? $"{snapshot.Kind}: {snapshot.Status}"
+                    : string.Join(Environment.NewLine, snapshot.Messages);
+            });
+            var papers = await _api.GetPapersAsync();
+            _allPapers.Clear();
+            _allPapers.AddRange(papers);
+            ApplyFilter(SearchText, SelectedPaper?.Id);
+            await LoadDashboardAsync();
+        }
+        catch (Exception exc)
+        {
+            DashboardOutput += Environment.NewLine + Environment.NewLine + exc.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public async Task RunBatchReferencesAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        DashboardOutput = "正在批量提取参考文献…";
+        try
+        {
+            var result = await _api.ExtractReferencesBatchAsync();
+            DashboardOutput = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+            var papers = await _api.GetPapersAsync();
+            _allPapers.Clear();
+            _allPapers.AddRange(papers);
+            ApplyFilter(SearchText, SelectedPaper?.Id);
+            await LoadDashboardAsync();
+        }
+        catch (Exception exc)
+        {
+            DashboardOutput = exc.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public async Task RunDoctorAsync(bool deep)
+    {
+        try
+        {
+            MaintenanceOutput = deep ? "正在执行深度检查…" : "正在检查数据库…";
+            var result = await _api.GetDoctorAsync(deep);
+            MaintenanceOutput = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception exc)
+        {
+            MaintenanceOutput = exc.Message;
+        }
+    }
+
+    public async Task PreviewPruneCacheAsync()
+    {
+        try
+        {
+            var result = await _api.PruneCacheAsync(false, false);
+            MaintenanceOutput = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception exc)
+        {
+            MaintenanceOutput = exc.Message;
+        }
+    }
+
+    public async Task ApplyPruneCacheAsync()
+    {
+        try
+        {
+            var result = await _api.PruneCacheAsync(true, true);
+            MaintenanceOutput = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception exc)
+        {
+            MaintenanceOutput = exc.Message;
+        }
+    }
+
+    private static string JsonValue(JsonElement element, string name)
+    {
+        return element.TryGetProperty(name, out var value) ? value.ToString() : "—";
     }
 
     public async Task AnalyzeAsync(AnalysisRequest request)

@@ -3,45 +3,52 @@
              xmlns:models="using:SRA.Desktop.Models"
              x:Class="SRA.Desktop.Controls.ClaimCard"
              x:DataType="models:ClaimItem">
-  <Border Classes="soft-card" Padding="14" Margin="0,0,0,10">
-    <StackPanel Spacing="9">
-      <WrapPanel ItemSpacing="6" LineSpacing="6">
-        <Border Classes="badge-accent">
-          <TextBlock Text="{Binding SourceLabel}" Foreground="{StaticResource AccentBrush}" FontSize="9" FontWeight="SemiBold" />
-        </Border>
-        <Border Classes="badge">
-          <TextBlock Text="{Binding FieldLabel}" Classes="muted" FontSize="9" FontWeight="SemiBold" />
-        </Border>
-        <Border Classes="badge">
-          <TextBlock Text="{Binding AuditLine}" Classes="muted" FontSize="9" />
-        </Border>
-      </WrapPanel>
+  <Border Classes="claim-card" Padding="22,19" Margin="0,0,0,13">
+    <StackPanel Spacing="13">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <WrapPanel ItemSpacing="7" LineSpacing="6" VerticalAlignment="Center">
+          <Border Background="{DynamicResource BlueSoftBrush}" CornerRadius="99" Padding="9,4">
+            <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
+          </Border>
+          <Border Classes="badge" Padding="9,4">
+            <TextBlock Text="{Binding FieldLabel}" Classes="muted" FontSize="10" FontWeight="SemiBold" />
+          </Border>
+        </WrapPanel>
+        <TextBlock Grid.Column="1" Text="{Binding AuditLine}" Classes="tertiary" FontSize="10" VerticalAlignment="Center" />
+      </Grid>
 
-      <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontSize="13" LineHeight="20" />
+      <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontSize="14" LineHeight="24" />
 
-      <Border IsVisible="{Binding HasScope}" Background="#F6F8F7" CornerRadius="7" Padding="9,7">
-        <TextBlock Text="{Binding Scope}" Classes="muted" FontSize="10" TextWrapping="Wrap" />
-      </Border>
-
-      <Border IsVisible="{Binding HasRationale}" Background="{StaticResource PurpleSoftBrush}" CornerRadius="8" Padding="10,8">
-        <StackPanel Spacing="3">
-          <TextBlock Text="审读理由" Foreground="{StaticResource PurpleInkBrush}" FontSize="9" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding Rationale}" Foreground="{StaticResource PurpleInkBrush}" FontSize="11" TextWrapping="Wrap" />
+      <Border IsVisible="{Binding HasScope}" Classes="claim-scope" Padding="13,10">
+        <StackPanel Spacing="6">
+          <TextBlock Text="适用范围 / 限定条件" Foreground="{DynamicResource InkSecondaryBrush}" FontSize="10" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Scope}" Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="20" />
         </StackPanel>
       </Border>
 
-      <ItemsControl ItemsSource="{Binding Evidence}" IsVisible="{Binding HasEvidence}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="models:EvidenceItem">
-            <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,2,0,0">
-              <StackPanel Spacing="4">
-                <TextBlock Text="{Binding MetaLine}" Foreground="{StaticResource BlueInkBrush}" FontSize="9" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding Quote}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      <Border IsVisible="{Binding HasRationale}" Classes="claim-rationale" Padding="13,11">
+        <StackPanel Spacing="6">
+          <TextBlock Text="AI 审读说明" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Rationale}" Foreground="{DynamicResource InkBrush}" FontSize="12" LineHeight="20" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Expander Header="{Binding EvidenceSummary}" IsVisible="{Binding HasEvidence}" IsExpanded="False" Classes="evidence-expander">
+        <ItemsControl ItemsSource="{Binding Evidence}" Margin="0,8,0,3">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="models:EvidenceItem">
+              <Border Classes="evidence-block" Padding="14,12" Margin="0,0,0,8">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="{Binding MetaLine}" ToolTip.Tip="{Binding SourceBlockId}"
+                             Foreground="{DynamicResource BlueInkBrush}" FontSize="11" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Quote}" Foreground="{DynamicResource InkSecondaryBrush}" FontSize="12"
+                             LineHeight="20" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Expander>
     </StackPanel>
   </Border>
 </UserControl>

@@ -9,10 +9,10 @@
         MinWidth="650"
         MinHeight="620"
         WindowStartupLocation="CenterOwner">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{StaticResource CanvasBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CanvasBrush}">
     <Border Grid.Row="0"
-            Background="{StaticResource SurfaceBrush}"
-            BorderBrush="{StaticResource LineBrush}"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource LineBrush}"
             BorderThickness="0,0,0,1"
             Padding="24,20">
       <Grid ColumnDefinitions="*,Auto">
@@ -21,7 +21,7 @@
           <TextBlock Text="Lite 负责事实索引，Pro 负责独立方法学审读；两阶段可以使用不同服务。"
                      Classes="muted" FontSize="11" />
         </StackPanel>
-        <Border Grid.Column="1" Background="{StaticResource SurfaceSoftBrush}" CornerRadius="999" Padding="9,4" VerticalAlignment="Center">
+        <Border Grid.Column="1" Background="{DynamicResource SurfaceSoftBrush}" CornerRadius="999" Padding="9,4" VerticalAlignment="Center">
           <TextBlock Text="v0.1.0" Classes="muted" FontSize="10" />
         </Border>
       </Grid>
@@ -31,8 +31,8 @@
       <StackPanel Margin="24" Spacing="16">
         <Border Classes="card" Padding="20">
           <Grid ColumnDefinitions="46,*">
-            <Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource AccentSoftBrush}" VerticalAlignment="Top">
-              <TextBlock Text="1" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"
+            <Border Width="34" Height="34" CornerRadius="10" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Top">
+              <TextBlock Text="1" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold"
                          HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Grid.Column="1" Spacing="12">
@@ -56,7 +56,7 @@
           </Grid>
         </Border>
 
-        <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="11" Padding="14,12">
+        <Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="11" Padding="14,12">
           <CheckBox IsChecked="{Binding UseLiteConnection}"
                     Content="Pro 使用与 Lite 相同的 API Key 和 Base URL"
                     FontWeight="SemiBold" />
@@ -94,22 +94,22 @@
           </Grid>
         </Border>
 
-        <Border Background="{StaticResource BlueSoftBrush}" CornerRadius="11" Padding="14">
+        <Border Background="{DynamicResource BlueSoftBrush}" CornerRadius="11" Padding="14">
           <StackPanel Spacing="4">
-            <TextBlock Text="隐私说明" Foreground="{StaticResource BlueInkBrush}" FontWeight="SemiBold" FontSize="10" />
+            <TextBlock Text="隐私说明" Foreground="{DynamicResource BlueInkBrush}" FontWeight="SemiBold" FontSize="10" />
             <TextBlock Text="桌面端只读取被掩码的 Key 状态；保存时由本地 API 写入项目 .env，UI 不回传现有明文 Key。"
-                       Foreground="{StaticResource BlueInkBrush}" FontSize="10" TextWrapping="Wrap" />
+                       Foreground="{DynamicResource BlueInkBrush}" FontSize="10" TextWrapping="Wrap" />
           </StackPanel>
         </Border>
 
-        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AmberInkBrush}" TextWrapping="Wrap" FontSize="11" />
+        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource AmberInkBrush}" TextWrapping="Wrap" FontSize="11" />
         <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" />
       </StackPanel>
     </ScrollViewer>
 
     <Border Grid.Row="2"
-            Background="{StaticResource SurfaceBrush}"
-            BorderBrush="{StaticResource LineBrush}"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource LineBrush}"
             BorderThickness="0,1,0,0"
             Padding="24,14">
       <Grid ColumnDefinitions="*,Auto">

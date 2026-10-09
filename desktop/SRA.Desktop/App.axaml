@@ -1,33 +1,80 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="SRA.Desktop.App"
-             RequestedThemeVariant="Light">
+             RequestedThemeVariant="Default">
   <Application.Resources>
-    <SolidColorBrush x:Key="CanvasBrush" Color="#F5F6F7" />
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#F1F3F5" />
-    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#FAFBFC" />
-    <SolidColorBrush x:Key="InkBrush" Color="#20252B" />
-    <SolidColorBrush x:Key="InkSecondaryBrush" Color="#69727D" />
-    <SolidColorBrush x:Key="LineBrush" Color="#DFE3E8" />
-    <SolidColorBrush x:Key="LineStrongBrush" Color="#C9CFD6" />
-    <SolidColorBrush x:Key="AccentBrush" Color="#39766A" />
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#2F655A" />
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E7F1EE" />
-    <SolidColorBrush x:Key="BlueSoftBrush" Color="#EDF3F8" />
-    <SolidColorBrush x:Key="BlueInkBrush" Color="#3D6078" />
-    <SolidColorBrush x:Key="PurpleSoftBrush" Color="#F0ECF7" />
-    <SolidColorBrush x:Key="PurpleInkBrush" Color="#665783" />
-    <SolidColorBrush x:Key="AmberSoftBrush" Color="#FBF2DD" />
-    <SolidColorBrush x:Key="AmberInkBrush" Color="#8A5C16" />
-    <SolidColorBrush x:Key="RedSoftBrush" Color="#F7E9E7" />
-    <SolidColorBrush x:Key="RedInkBrush" Color="#8C4B43" />
-    <SolidColorBrush x:Key="CodeBrush" Color="#1D2428" />
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="CanvasBrush" Color="#F7F6FA" />
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#FAF9FD" />
+          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F0EEF5" />
+          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#F1EEF8" />
+          <SolidColorBrush x:Key="InkBrush" Color="#1D2529" />
+          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#657078" />
+          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#8A949B" />
+          <SolidColorBrush x:Key="LineBrush" Color="#E3E7E9" />
+          <SolidColorBrush x:Key="LineStrongBrush" Color="#CDD4D8" />
+          <SolidColorBrush x:Key="RailBrush" Color="#20282B" />
+          <SolidColorBrush x:Key="RailHoverBrush" Color="#2A3437" />
+          <SolidColorBrush x:Key="RailInkBrush" Color="#DCE6E4" />
+          <SolidColorBrush x:Key="RailMutedBrush" Color="#8FA09D" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#7464AD" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#63549D" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#534584" />
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#F0ECFA" />
+          <SolidColorBrush x:Key="AccentLineBrush" Color="#D9D1EF" />
+          <SolidColorBrush x:Key="BlueSoftBrush" Color="#EEF4F8" />
+          <SolidColorBrush x:Key="BlueInkBrush" Color="#496B82" />
+          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#F1EEF7" />
+          <SolidColorBrush x:Key="PurpleInkBrush" Color="#695C82" />
+          <SolidColorBrush x:Key="AmberSoftBrush" Color="#FBF3E3" />
+          <SolidColorBrush x:Key="AmberInkBrush" Color="#8D641D" />
+          <SolidColorBrush x:Key="RedSoftBrush" Color="#FAECEA" />
+          <SolidColorBrush x:Key="RedInkBrush" Color="#9A5148" />
+          <SolidColorBrush x:Key="CodeBrush" Color="#182125" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="CanvasBrush" Color="#16141C" />
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#1D1B25" />
+          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#22202B" />
+          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2C2936" />
+          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#302C3D" />
+          <SolidColorBrush x:Key="InkBrush" Color="#EDF2F3" />
+          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#ADB7BC" />
+          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#7F8B91" />
+          <SolidColorBrush x:Key="LineBrush" Color="#373342" />
+          <SolidColorBrush x:Key="LineStrongBrush" Color="#494357" />
+          <SolidColorBrush x:Key="RailBrush" Color="#0E1113" />
+          <SolidColorBrush x:Key="RailHoverBrush" Color="#202629" />
+          <SolidColorBrush x:Key="RailInkBrush" Color="#E0ECE8" />
+          <SolidColorBrush x:Key="RailMutedBrush" Color="#879794" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#B8A5EC" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#C7B7F2" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#9D88DC" />
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#302A42" />
+          <SolidColorBrush x:Key="AccentLineBrush" Color="#514667" />
+          <SolidColorBrush x:Key="BlueSoftBrush" Color="#1B2932" />
+          <SolidColorBrush x:Key="BlueInkBrush" Color="#9CC6E0" />
+          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#292438" />
+          <SolidColorBrush x:Key="PurpleInkBrush" Color="#C2B7DD" />
+          <SolidColorBrush x:Key="AmberSoftBrush" Color="#332918" />
+          <SolidColorBrush x:Key="AmberInkBrush" Color="#E6C179" />
+          <SolidColorBrush x:Key="RedSoftBrush" Color="#351F1D" />
+          <SolidColorBrush x:Key="RedInkBrush" Color="#E5A29A" />
+          <SolidColorBrush x:Key="CodeBrush" Color="#0B0E10" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
   </Application.Resources>
 
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://SRA.Desktop/Styles/ControlStyles.axaml" />
     <StyleInclude Source="avares://SRA.Desktop/Styles/ShellStyles.axaml" />
+    <StyleInclude Source="avares://SRA.Desktop/Styles/LibraryStyles.axaml" />
+    <StyleInclude Source="avares://SRA.Desktop/Styles/ReadingStyles.axaml" />
+    <StyleInclude Source="avares://SRA.Desktop/Styles/InspectorStyles.axaml" />
   </Application.Styles>
 </Application>

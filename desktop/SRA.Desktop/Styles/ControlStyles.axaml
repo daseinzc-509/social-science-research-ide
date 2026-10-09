@@ -1,105 +1,132 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Style Selector="Window">
-    <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Background" Value="{DynamicResource CanvasBrush}" />
+    <Setter Property="FontSize" Value="14" />
   </Style>
 
   <Style Selector="TextBlock">
-    <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
   </Style>
   <Style Selector="TextBlock.display">
-    <Setter Property="FontSize" Value="27" />
+    <Setter Property="FontSize" Value="28" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LineHeight" Value="35" />
+  </Style>
+  <Style Selector="TextBlock.document-title">
+    <Setter Property="FontSize" Value="25" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LineHeight" Value="33" />
   </Style>
   <Style Selector="TextBlock.h1">
-    <Setter Property="FontSize" Value="22" />
+    <Setter Property="FontSize" Value="21" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.h2">
-    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontSize" Value="17" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.eyebrow">
     <Setter Property="FontSize" Value="10" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="{StaticResource InkSecondaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkTertiaryBrush}" />
   </Style>
   <Style Selector="TextBlock.muted">
-    <Setter Property="Foreground" Value="{StaticResource InkSecondaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+  </Style>
+  <Style Selector="TextBlock.tertiary">
+    <Setter Property="Foreground" Value="{DynamicResource InkTertiaryBrush}" />
   </Style>
 
   <Style Selector="Border.card">
-    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
-  </Style>
-  <Style Selector="Border.soft-card">
-    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="10" />
   </Style>
+  <Style Selector="Border.soft-card">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="9" />
+  </Style>
   <Style Selector="Border.badge">
-    <Setter Property="Background" Value="{StaticResource SurfaceSoftBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
     <Setter Property="CornerRadius" Value="999" />
-    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="Padding" Value="7,2" />
   </Style>
   <Style Selector="Border.badge-accent">
-    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
     <Setter Property="CornerRadius" Value="999" />
-    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="Padding" Value="7,2" />
   </Style>
 
   <Style Selector="Button">
     <Setter Property="Padding" Value="13,7" />
     <Setter Property="MinHeight" Value="34" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
+  <Style Selector="Button:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+  </Style>
   <Style Selector="Button.primary">
-    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
     <Setter Property="Foreground" Value="White" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
   <Style Selector="Button.primary:pointerover">
-    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentHoverBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+  </Style>
+  <Style Selector="Button.primary:pressed">
+    <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
   </Style>
   <Style Selector="Button.secondary">
-    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource LineStrongBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineStrongBrush}" />
   </Style>
   <Style Selector="Button.ghost">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="{StaticResource InkSecondaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
   <Style Selector="Button.danger">
-    <Setter Property="Background" Value="{StaticResource RedSoftBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource RedInkBrush}" />
-    <Setter Property="BorderBrush" Value="#E8C9C4" />
+    <Setter Property="Background" Value="{DynamicResource RedSoftBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource RedInkBrush}" />
+    <Setter Property="BorderBrush" Value="#E8C8C4" />
   </Style>
   <Style Selector="Button.compact">
     <Setter Property="Padding" Value="10,5" />
     <Setter Property="MinHeight" Value="30" />
     <Setter Property="FontSize" Value="11" />
   </Style>
+  <Style Selector="Button.icon">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="MinWidth" Value="34" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
 
   <Style Selector="TextBox">
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
-    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
     <Setter Property="Padding" Value="10,8" />
   </Style>
   <Style Selector="TextBox:focus">
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
 
   <Style Selector="TabItem">
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Padding" Value="14,12" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+  </Style>
+  <Style Selector="TabItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Padding" Value="13,9" />
   </Style>
 </Styles>

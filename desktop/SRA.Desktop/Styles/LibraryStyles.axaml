@@ -1,0 +1,39 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Border.library-pane">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+  </Style>
+  <Style Selector="ListBox.library-list">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0,0,0,6" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="MinHeight" Value="74" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected">
+    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="Border.paper-list-card">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:pointerover Border.paper-list-card">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected Border.paper-list-card">
+    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+  </Style>
+  <Style Selector="Border.paper-selection-marker">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected Border.paper-selection-marker">
+    <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+  </Style>
+</Styles>

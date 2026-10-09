@@ -12,9 +12,118 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        NavigateTo("papers");
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+
+    private void NavigateTo(string page)
+    {
+        PapersPage.IsVisible = page == "papers";
+        BooksPage.IsVisible = page == "books";
+        ProjectsPage.IsVisible = page == "projects";
+        TasksPage.IsVisible = page == "tasks";
+        HealthPage.IsVisible = page == "health";
+        SettingsPage.IsVisible = page == "settings";
+
+        SetSelected(PapersNav, page == "papers");
+        SetSelected(TasksNav, page == "tasks");
+        SetSelected(HealthNav, page == "health");
+        SetSelected(SettingsNav, page == "settings");
+
+        bool showLibrary = page == "papers";
+        SidebarPane.IsVisible = showLibrary;
+        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 280 : 0);
+    }
+
+    private static void SetSelected(Button button, bool selected)
+    {
+        button.Classes.Remove("selected");
+        if (selected) button.Classes.Add("selected");
+    }
+
+    private void PapersNav_Click(object? sender, RoutedEventArgs e) => NavigateTo("papers");
+
+    private async void TasksNav_Click(object? sender, RoutedEventArgs e)
+    {
+        NavigateTo("tasks");
+        if (ViewModel is not null) await ViewModel.LoadDashboardAsync();
+    }
+
+    private async void HealthNav_Click(object? sender, RoutedEventArgs e)
+    {
+        NavigateTo("health");
+        if (ViewModel is not null) await ViewModel.RunDoctorAsync(false);
+    }
+
+    private async void SettingsNav_Click(object? sender, RoutedEventArgs e)
+    {
+        NavigateTo("settings");
+        if (ViewModel is not null) await ViewModel.LoadSettingsAsync();
+    }
+
+    // Content-first mode. The preference is saved by the view model.
+    private void ToggleInspector_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.ShowInspector = !ViewModel.ShowInspector;
+    }
+
+    private void MinimizeWindow_Click(object? sender, RoutedEventArgs e)
+        => WindowState = WindowState.Minimized;
+
+    private void ToggleMaximizeWindow_Click(object? sender, RoutedEventArgs e)
+        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CloseWindow_Click(object? sender, RoutedEventArgs e) => Close();
+
+    private async void RefreshDashboard_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.LoadDashboardAsync();
+    }
+
+    private async void BatchAnalyzePage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.RunBatchAnalysisAsync();
+    }
+
+    private async void BatchReferencesPage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.RunBatchReferencesAsync();
+    }
+
+    private async void QuickDoctorPage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.RunDoctorAsync(false);
+    }
+
+    private async void DeepDoctorPage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.RunDoctorAsync(true);
+    }
+
+    private async void PreviewPrunePage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.PreviewPruneCacheAsync();
+    }
+
+    private async void ApplyPrunePage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var confirm = new ConfirmWindow(
+            "清理旧模型缓存",
+            "只删除旧 prompt 版本的模型缓存，不删除 PDF、Paper Card、source blocks 或 notes。继续？",
+            "清理缓存"
+        );
+        if (!await confirm.ShowDialog<bool>(this)) return;
+        await ViewModel.ApplyPruneCacheAsync();
+    }
+
+    private async void SaveEmbeddedSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        await ViewModel.Settings.SaveAsync();
+    }
 
     private async void ImportPdf_Click(object? sender, RoutedEventArgs e)
     {

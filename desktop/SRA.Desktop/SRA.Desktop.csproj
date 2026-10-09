@@ -10,7 +10,18 @@
     <Version>0.1.0</Version>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
     <FileVersion>0.1.0.0</FileVersion>
+    <ApplicationIcon>Assets\sra.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- Explicitly embed App.axaml as an Avalonia XAML resource.
+       The XAML class must be present in the compiled assembly before App.Initialize
+       calls AvaloniaXamlLoader.Load(this). Remove it from the SDK's default XAML
+       item list first to avoid a duplicate x:Class build error. -->
+  <ItemGroup>
+    <AvaloniaXaml Remove="App.axaml" />
+    <AvaloniaResource Include="App.axaml" />
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.3" />

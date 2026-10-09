@@ -8,7 +8,16 @@ public sealed class EvidenceItem
     public string Quote { get; init; } = "";
     public string SourceBlockId { get; init; } = "";
     public string Role { get; init; } = "ANCHOR";
-    public string MetaLine => $"PDF p.{Page} · {Role}" + (string.IsNullOrWhiteSpace(SourceBlockId) ? "" : $" · {SourceBlockId}");
+    // The underlying source block identifier remains in SourceBlockId and raw Card.
+    // It should not interrupt reading with a UUID in the visible quote header.
+    public string MetaLine => $"PDF 第 {Page} 页 · " + (Role switch
+    {
+        "ANCHOR" => "核心引文",
+        "CONTEXT" => "上下文",
+        "QUALIFIER" => "限定证据",
+        "TABLE" => "表格",
+        _ => Role,
+    });
 
     public static EvidenceItem FromJson(JsonElement node)
     {
@@ -36,6 +45,7 @@ public sealed class ClaimItem
     public List<EvidenceItem> Evidence { get; init; } = [];
 
     public bool HasEvidence => Evidence.Count > 0;
+    public string EvidenceSummary => $"查看原文证据（{Evidence.Count} 段）";
     public bool HasRationale => !string.IsNullOrWhiteSpace(Rationale);
     public bool HasScope => !string.IsNullOrWhiteSpace(Scope);
     public bool HasSemanticSupport => !string.IsNullOrWhiteSpace(SemanticSupport);
@@ -86,7 +96,17 @@ public sealed class ClaimItem
             return "";
         }
         var items = new List<string>();
-        foreach (var name in new[] { "population", "setting", "time", "subgroup", "treatment_or_exposure", "outcome", "conditions" })
+        var scopeLabels = new Dictionary<string, string>
+        {
+            ["population"] = "研究群体",
+            ["setting"] = "情境",
+            ["time"] = "时间",
+            ["subgroup"] = "子群体",
+            ["treatment_or_exposure"] = "处理 / 暴露",
+            ["outcome"] = "结果",
+            ["conditions"] = "成立条件",
+        };
+        foreach (var name in scopeLabels.Keys)
         {
             if (!scope.TryGetProperty(name, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             {
@@ -95,10 +115,10 @@ public sealed class ClaimItem
             var text = value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
             if (!string.IsNullOrWhiteSpace(text))
             {
-                items.Add($"{name}: {text}");
+                items.Add($"{scopeLabels[name]}：{text}");
             }
         }
-        return string.Join(" · ", items);
+        return string.Join("  ·  ", items);
     }
 }
 

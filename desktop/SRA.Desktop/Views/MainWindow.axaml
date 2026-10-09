@@ -6,179 +6,302 @@
         x:Class="SRA.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Social Science Research IDE"
-        Width="1540"
+        Icon="/Assets/sra.ico"
+        Width="1560"
         Height="960"
-        MinWidth="1240"
-        MinHeight="760"
+        MinWidth="1080"
+        MinHeight="720"
+        WindowDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="54"
+        CanResize="True"
         WindowStartupLocation="CenterScreen">
-  <Grid RowDefinitions="62,50,*">
-    <!-- Application bar -->
-    <Border Grid.Row="0" Classes="appbar" Padding="20,0">
-      <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
-        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center">
-          <Border Width="34" Height="34" CornerRadius="9" Background="{StaticResource AccentBrush}">
-            <TextBlock Text="S" Foreground="White" FontWeight="Bold" FontSize="17"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
-          <StackPanel Spacing="0">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <TextBlock Text="Social Science Research IDE" FontSize="15" FontWeight="SemiBold" />
-              <Border Classes="badge"><TextBlock Text="v0.1.0" Classes="muted" FontSize="9" /></Border>
-            </StackPanel>
-            <TextBlock Text="Evidence-first local research workspace" Classes="muted" FontSize="10" />
-          </StackPanel>
-        </StackPanel>
-
-        <Border Grid.Column="1" HorizontalAlignment="Center" Classes="badge-accent" Padding="10,4">
-          <StackPanel Orientation="Horizontal" Spacing="7">
-            <Border Width="7" Height="7" CornerRadius="99" Background="{StaticResource AccentBrush}" VerticalAlignment="Center" />
-            <TextBlock Text="{Binding ApiStatusText}" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold" />
+  <!-- The only title bar is this 54 px application chrome. Windows does not draw a second one. -->
+  <Grid RowDefinitions="54,*,26">
+    <Border Grid.Row="0" Classes="unified-titlebar">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" VerticalAlignment="Stretch">
+        <Border Grid.Column="0" Padding="13,0,18,0"
+                Background="Transparent"
+                WindowDecorationProperties.ElementRole="TitleBar">
+          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True">
+              <Image Source="/Assets/sra-logo.png" Stretch="UniformToFill"/>
+            </Border>
+            <TextBlock Text="Social Science Research IDE" FontSize="13"
+                       VerticalAlignment="Center" FontWeight="SemiBold"/>
+            <TextBlock Text="0.1" VerticalAlignment="Center" FontSize="9"
+                       Foreground="{DynamicResource InkTertiaryBrush}"/>
           </StackPanel>
         </Border>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-          <Button Content="刷新" Classes="ghost compact" Command="{Binding RefreshCommand}" />
-          <Button Content="模型设置" Classes="secondary compact" Click="ModelSettings_Click" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2">
+          <Button x:Name="PapersNav" Content="论文库" Classes="chrome-nav selected" Click="PapersNav_Click" />
+          <Button x:Name="TasksNav" Content="任务" Classes="chrome-nav" Click="TasksNav_Click" />
+          <Button x:Name="HealthNav" Content="数据" Classes="chrome-nav" Click="HealthNav_Click" />
+          <Button x:Name="SettingsNav" Content="设置" Classes="chrome-nav" Click="SettingsNav_Click" />
+        </StackPanel>
+
+        <Border Grid.Column="2" Background="Transparent"
+                WindowDecorationProperties.ElementRole="TitleBar"/>
+
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="0,0,12,0">
+          <Border VerticalAlignment="Center" ToolTip.Tip="{Binding ApiStatusText}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Border Background="{DynamicResource AccentBrush}" Width="7" Height="7"
+                      CornerRadius="99" VerticalAlignment="Center"/>
+              <TextBlock Text="本地 API" Foreground="{DynamicResource InkSecondaryBrush}"
+                         VerticalAlignment="Center" FontSize="10"/>
+            </StackPanel>
+          </Border>
+          <Button Content="＋ 导入 PDF" Classes="primary chrome-import" ToolTip.Tip="导入 PDF">
+            <Button.Flyout>
+              <MenuFlyout>
+                <MenuItem Header="导入单个 PDF" Click="ImportPdf_Click" />
+                <MenuItem Header="批量选择 PDF" Click="BatchImport_Click" />
+                <MenuItem Header="导入 PDF 文件夹" Click="FolderImport_Click" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
+        </StackPanel>
+
+        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Stretch">
+          <Button Content="—" Classes="window-caption" FontSize="15" ToolTip.Tip="最小化" Click="MinimizeWindow_Click"/>
+          <Button Content="□" Classes="window-caption" FontSize="17" ToolTip.Tip="最大化 / 还原" Click="ToggleMaximizeWindow_Click"/>
+          <Button Content="×" Classes="window-caption close" FontSize="20" ToolTip.Tip="关闭窗口" Click="CloseWindow_Click"/>
         </StackPanel>
       </Grid>
     </Border>
 
-    <!-- Web-UI-compatible command strip -->
-    <Border Grid.Row="1" Classes="commandbar" Padding="18,7">
-      <Grid ColumnDefinitions="Auto,*,Auto">
-        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
-          <Button Content="总控制面板" Classes="secondary compact" Click="Dashboard_Click" />
-          <Button Content="数据库健康" Classes="secondary compact" Click="Maintenance_Click" />
-        </StackPanel>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-          <Button Content="批量选择 PDF" Classes="secondary compact" Click="BatchImport_Click" />
-          <Button Content="导入 PDF 文件夹" Classes="secondary compact" Click="FolderImport_Click" />
-          <Button Content="＋ 导入 PDF" Classes="primary compact" Click="ImportPdf_Click" />
-        </StackPanel>
-      </Grid>
-    </Border>
-
-    <Grid Grid.Row="2" ColumnDefinitions="292,*,318">
-      <!-- Library -->
-      <Border Grid.Column="0" Background="{StaticResource SurfaceSoftBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+    <Grid x:Name="WorkspaceBody" Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="280"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Border x:Name="SidebarPane" Grid.Column="0" Classes="sidebar-pane">
         <Grid RowDefinitions="Auto,Auto,*">
-          <StackPanel Grid.Row="0" Margin="16,18,16,14" Spacing="10">
-            <TextBlock Text="WORKSPACE" Classes="eyebrow" />
-            <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="9" Padding="10,8">
-              <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="▤" Foreground="{StaticResource AccentBrush}" />
-                  <TextBlock Text="Papers" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
-                </StackPanel>
-                <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Foreground="{StaticResource AccentBrush}" FontSize="10" />
-              </Grid>
-            </Border>
-            <Grid ColumnDefinitions="*,Auto" Margin="10,0" Opacity="0.52">
-              <TextBlock Text="▥  Books" Classes="muted" />
-              <TextBlock Grid.Column="1" Text="soon" Classes="muted" FontSize="9" />
-            </Grid>
-            <Grid ColumnDefinitions="*,Auto" Margin="10,0" Opacity="0.52">
-              <TextBlock Text="▣  Projects" Classes="muted" />
-              <TextBlock Grid.Column="1" Text="soon" Classes="muted" FontSize="9" />
+          <StackPanel Grid.Row="0" Margin="18,22,18,14" Spacing="7">
+            <TextBlock Text="文献库" Classes="h1"/>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Border Classes="badge-accent"><TextBlock Text="论文" Foreground="{DynamicResource AccentBrush}" FontSize="10" FontWeight="SemiBold" /></Border>
+              <Border Classes="badge"><TextBlock Text="书籍 · 即将支持" Classes="tertiary" FontSize="9"/></Border>
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="14,0,14,12" Spacing="10">
+            <TextBox Text="{Binding SearchText, Mode=TwoWay}" PlaceholderText="搜索论文、作者、期刊…"/>
+            <Grid ColumnDefinitions="*,Auto" Margin="6,3,5,0">
+              <TextBlock Text="全部论文" FontWeight="SemiBold" FontSize="10"/>
+              <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="tertiary" FontSize="9"/>
             </Grid>
           </StackPanel>
-
-          <Border Grid.Row="1" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Margin="16,0" />
-
-          <Grid Grid.Row="2" RowDefinitions="Auto,Auto,*" Margin="12,14,12,12">
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="4,0,4,8">
-              <TextBlock Text="LIBRARY" Classes="eyebrow" />
-              <TextBlock Grid.Column="1" Text="Local" Classes="muted" FontSize="9" />
-            </Grid>
-            <TextBox Grid.Row="1" Text="{Binding SearchText, Mode=TwoWay}" PlaceholderText="搜索题名、作者、期刊…" Margin="0,0,0,10" />
-            <Grid Grid.Row="2">
-              <ListBox ItemsSource="{Binding Papers}" SelectedItem="{Binding SelectedPaper}" Classes="library-list" SelectionMode="Single">
-                <ListBox.ItemTemplate>
-                  <DataTemplate x:DataType="models:PaperSummary">
-                    <Border Padding="11,10" Background="Transparent">
-                      <StackPanel Spacing="4">
-                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxLines="3" />
-                        <TextBlock Text="{Binding AuthorLine}" Classes="muted" FontSize="10" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding StatusLine}" Classes="muted" FontSize="9" />
+          <Grid Grid.Row="2" Margin="9,0,9,14">
+            <ListBox ItemsSource="{Binding Papers}" SelectedItem="{Binding SelectedPaper}"
+                     Classes="library-list" SelectionMode="Single">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="models:PaperSummary">
+                  <Border Classes="paper-list-card" Padding="12,11">
+                    <Grid ColumnDefinitions="3,*" ColumnSpacing="10">
+                      <Border Grid.Column="0" Width="3" Classes="paper-selection-marker" CornerRadius="99"/>
+                      <StackPanel Grid.Column="1" Spacing="5">
+                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" MaxLines="2" LineHeight="19"/>
+                        <TextBlock Text="{Binding AuthorLine}" Classes="muted" FontSize="11"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding StatusLine}" Classes="tertiary" FontSize="10"/>
+                          <Border Grid.Column="1" Classes="badge-accent" IsVisible="{Binding HasCard}">
+                            <TextBlock Text="已分析" Foreground="{DynamicResource AccentBrush}" FontSize="9"/>
+                          </Border>
+                        </Grid>
                       </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-              <StackPanel IsVisible="{Binding IsLibraryEmpty}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" MaxWidth="210">
-                <TextBlock Text="还没有匹配的论文" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                <TextBlock Text="导入 PDF，或调整搜索条件。" Classes="muted" TextWrapping="Wrap" TextAlignment="Center" FontSize="10" />
-              </StackPanel>
-            </Grid>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel IsVisible="{Binding IsLibraryEmpty}" VerticalAlignment="Center"
+                        HorizontalAlignment="Center" MaxWidth="240" Spacing="8">
+              <TextBlock Text="没有匹配的论文" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+              <TextBlock Text="导入 PDF，或调整搜索条件。" Classes="muted"
+                         HorizontalAlignment="Center" TextAlignment="Center"/>
+              <Button Content="导入 PDF" Classes="primary compact" Click="ImportPdf_Click" HorizontalAlignment="Center"/>
+            </StackPanel>
           </Grid>
         </Grid>
       </Border>
+      <!-- Papers -->
+      <DockPanel x:Name="PapersPage" Grid.Column="1" LastChildFill="True">
+<Border DockPanel.Dock="Right" Width="282" Classes="inspector-pane" IsVisible="{Binding ShowInspector}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="18,20,18,22" Spacing="16">
+            <StackPanel Spacing="3">
+              <TextBlock Text="研究画像" Classes="h2" />
+              <TextBlock Text="依据已提取的论文结构" Classes="tertiary" FontSize="11" />
+            </StackPanel>
 
-      <!-- Main document area -->
-      <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="22,18,22,22">
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="2,0,2,12">
-          <StackPanel Spacing="6">
-            <StackPanel Orientation="Horizontal" Spacing="7">
-              <Border Background="{StaticResource BlueSoftBrush}" CornerRadius="99" Padding="8,3">
-                <TextBlock Text="PAPER" Foreground="{StaticResource BlueInkBrush}" FontSize="9" FontWeight="SemiBold" />
-              </Border>
-              <TextBlock Text="{Binding SelectedAnalysisState}" Classes="muted" FontSize="10" VerticalAlignment="Center" />
-              <Border IsVisible="{Binding HasManualMetadata}" Background="{StaticResource AmberSoftBrush}" CornerRadius="99" Padding="8,3">
-                <TextBlock Text="含手动修订" Foreground="{StaticResource AmberInkBrush}" FontSize="9" FontWeight="SemiBold" />
-              </Border>
-            </StackPanel>
-            <TextBlock Text="{Binding SelectedTitle}" Classes="display" TextWrapping="Wrap" MaxLines="3" />
-            <TextBlock Text="{Binding SelectedSubtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
-          </StackPanel>
-        </Grid>
+            <Border Classes="inspector-section" Padding="13">
+              <StackPanel Spacing="9">
+                <StackPanel Spacing="3"><TextBlock Text="STUDY TYPE" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyType}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="13"/></StackPanel>
+                <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" />
+                <StackPanel Spacing="3"><TextBlock Text="METHOD" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyMethod}" TextWrapping="Wrap" FontSize="12" LineHeight="18" MaxLines="4" TextTrimming="CharacterEllipsis"/></StackPanel>
+                <StackPanel Spacing="3"><TextBlock Text="IDENTIFICATION" Classes="eyebrow"/><TextBlock Text="{Binding SelectedIdentification}" Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="18" MaxLines="4" TextTrimming="CharacterEllipsis"/></StackPanel>
+              </StackPanel>
+            </Border>
 
-        <!-- Paper action bar mirrors the legacy web UI -->
-        <Border Grid.Row="1" Classes="soft-card" Padding="10" Margin="0,0,0,12">
-          <StackPanel Spacing="7">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Button Content="{Binding AnalyzeButtonText}" Classes="primary compact" IsEnabled="{Binding CanRunPaperActions}" Click="Analyze_Click" />
-              <Button Content="重建解析" Classes="secondary compact" IsEnabled="{Binding CanRunPaperActions}" Click="Reparse_Click" />
-              <Button Content="编辑元数据" Classes="secondary compact" IsEnabled="{Binding CanRunPaperActions}" Click="EditMetadata_Click" />
-              <Button Content="提取参考文献" Classes="secondary compact" IsEnabled="{Binding CanRunPaperActions}" Click="ExtractReferences_Click" />
-              <Button Content="打开 PDF" Classes="secondary compact" IsEnabled="{Binding HasSelection}" Click="OpenPdf_Click" />
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+              <Border Grid.Column="0" Classes="metric-cell" Padding="9"><StackPanel Spacing="1"><TextBlock Text="FACTS" Classes="eyebrow"/><TextBlock Text="{Binding SelectedFactsCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="1" Classes="metric-cell" Padding="9"><StackPanel Spacing="1"><TextBlock Text="EVIDENCE" Classes="eyebrow"/><TextBlock Text="{Binding SelectedEvidenceCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="2" Classes="metric-cell" Padding="9"><StackPanel Spacing="1"><TextBlock Text="REVIEW" Classes="eyebrow"/><TextBlock Text="{Binding SelectedReviewsCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
+            </Grid>
+
+            <StackPanel Spacing="6">
+              <TextBlock Text="审读计划" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding ReviewPlanText}" Classes="muted" TextWrapping="Wrap" FontSize="12" LineHeight="19" MaxLines="5" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <TextBlock Text="导出" Classes="eyebrow" VerticalAlignment="Center" Margin="2,0,3,0" />
-              <Button Content="Card JSON" Classes="ghost compact" IsEnabled="{Binding HasCard}" Click="ExportCard_Click" />
-              <Button Content="精读报告" Classes="ghost compact" IsEnabled="{Binding HasCard}" Click="ExportReading_Click" />
-              <Button Content="解析文本" Classes="ghost compact" IsEnabled="{Binding HasSelection}" Click="ExportText_Click" />
-              <Button Content="Zotero BibTeX" Classes="ghost compact" IsEnabled="{Binding HasSelection}" Click="ExportBibtex_Click" />
-              <Button Content="删除论文" Classes="danger compact" IsEnabled="{Binding CanRunPaperActions}" Click="DeletePaper_Click" />
+
+            <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" />
+
+            <StackPanel Spacing="7">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="运行状态" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="{Binding JobStage}" Foreground="{DynamicResource AccentBrush}" FontSize="9" FontWeight="SemiBold" />
+              </Grid>
+              <ProgressBar Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" Height="4" />
+              <TextBlock Text="{Binding SelectedParseStatus}" Classes="tertiary" TextWrapping="Wrap" FontSize="11" />
+              <TextBlock Text="{Binding StatusText}" Classes="muted" TextWrapping="Wrap" FontSize="11" />
+            </StackPanel>
+
+            <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" />
+
+            <StackPanel Spacing="7">
+              <TextBlock Text="来源" FontWeight="SemiBold" />
+              <TextBlock Text="作者、AI 与个人笔记分别标记来源。" Classes="muted" TextWrapping="Wrap" FontSize="11" />
+              <WrapPanel ItemSpacing="5" LineSpacing="5">
+                <Border Background="{DynamicResource BlueSoftBrush}" CornerRadius="99" Padding="7,3"><TextBlock Text="AUTHOR" Foreground="{DynamicResource BlueInkBrush}" FontSize="8" FontWeight="SemiBold"/></Border>
+                <Border Background="{DynamicResource PurpleSoftBrush}" CornerRadius="99" Padding="7,3"><TextBlock Text="AI REVIEW" Foreground="{DynamicResource PurpleInkBrush}" FontSize="8" FontWeight="SemiBold"/></Border>
+                <Border Classes="badge"><TextBlock Text="MY NOTE" Classes="muted" FontSize="8" FontWeight="SemiBold"/></Border>
+              </WrapPanel>
             </StackPanel>
           </StackPanel>
+        </ScrollViewer>
+      </Border>
+<Grid RowDefinitions="Auto,*" Background="{DynamicResource CanvasBrush}">
+        <Border Grid.Row="0" Classes="workspace-header" Padding="26,18,26,18">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+            <StackPanel Grid.Column="0" Spacing="6">
+              <WrapPanel ItemSpacing="7" LineSpacing="5">
+                <TextBlock Text="PAPER" Classes="eyebrow" Foreground="{DynamicResource AccentBrush}" />
+                <TextBlock Text="•" Classes="tertiary" FontSize="9" />
+                <TextBlock Text="{Binding SelectedAnalysisState}" Classes="tertiary" FontSize="9" />
+                <Border IsVisible="{Binding HasManualMetadata}" Background="{DynamicResource AmberSoftBrush}" CornerRadius="99" Padding="7,2">
+                  <TextBlock Text="手动修订" Foreground="{DynamicResource AmberInkBrush}" FontSize="8" FontWeight="SemiBold" />
+                </Border>
+              </WrapPanel>
+              <TextBlock Text="{Binding SelectedTitle}" Classes="document-title" TextWrapping="Wrap" MaxLines="2" />
+              <TextBlock Text="{Binding SelectedSubtitle}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center" Margin="0,0,0,0">
+              <Button Content="{Binding AnalyzeButtonText}" Classes="primary" IsEnabled="{Binding CanRunPaperActions}" Click="Analyze_Click" />
+              <Button Content="打开 PDF" Classes="secondary" IsEnabled="{Binding HasSelection}" Click="OpenPdf_Click" />
+              <Button Content="专注阅读" Classes="ghost focus-toggle" ToolTip.Tip="显示或收起右侧研究画像" Click="ToggleInspector_Click" />
+              <Button Content="•••" Classes="secondary icon" IsEnabled="{Binding HasSelection}" ToolTip.Tip="更多论文操作">
+                <Button.Flyout>
+                  <MenuFlyout>
+                    <MenuItem Header="编辑元数据" Click="EditMetadata_Click" />
+                    <MenuItem Header="重建 PDF 解析" Click="Reparse_Click" />
+                    <MenuItem Header="提取参考文献" Click="ExtractReferences_Click" />
+                    <MenuItem Header="-" />
+                    <MenuItem Header="导出 Paper Card JSON" Click="ExportCard_Click" />
+                    <MenuItem Header="导出精读报告" Click="ExportReading_Click" />
+                    <MenuItem Header="导出解析文本" Click="ExportText_Click" />
+                    <MenuItem Header="导出 Zotero BibTeX" Click="ExportBibtex_Click" />
+                    <MenuItem Header="-" />
+                    <MenuItem Header="删除论文" Click="DeletePaper_Click" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+            </StackPanel>
+          </Grid>
         </Border>
 
-        <Border Grid.Row="2" Classes="card">
+        <Border Grid.Row="1" Classes="workspace-surface" Margin="12,12,12,14">
           <TabControl Classes="paper-tabs">
+            <!-- Product focus: deep reading first -->
+            <TabItem Header="精读">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="30,30,30,50" Spacing="34" MaxWidth="910" HorizontalAlignment="Center">
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="论文定位" Classes="section-title" />
+                    <Border Classes="reading-lead" Padding="24,22">
+                      <TextBlock Text="{Binding AbstractText}" TextWrapping="Wrap" FontSize="14" LineHeight="25" />
+                    </Border>
+                  </StackPanel>
+
+                  <StackPanel Spacing="9">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="研究设计画像" Classes="section-title" />
+                      <TextBlock Grid.Column="1" Text="STUDY PROFILE" Classes="eyebrow" VerticalAlignment="Center" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="9">
+                      <Border Grid.Column="0" Classes="design-cell" Padding="13">
+                        <StackPanel Spacing="4"><TextBlock Text="研究类型" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyType}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="13"/></StackPanel>
+                      </Border>
+                      <Border Grid.Column="1" Classes="design-cell" Padding="13">
+                        <StackPanel Spacing="4"><TextBlock Text="方法" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyMethod}" TextWrapping="Wrap"/></StackPanel>
+                      </Border>
+                      <Border Grid.Column="2" Classes="design-cell" Padding="13">
+                        <StackPanel Spacing="4"><TextBlock Text="识别 / 推断策略" Classes="eyebrow"/><TextBlock Text="{Binding SelectedIdentification}" TextWrapping="Wrap"/></StackPanel>
+                      </Border>
+                    </Grid>
+                    <Border Classes="reading-lead" Padding="13,10" IsVisible="{Binding HasStudyRationale}">
+                      <TextBlock Text="{Binding StudyRationale}" Classes="muted" TextWrapping="Wrap" FontSize="12" LineHeight="20" />
+                    </Border>
+                  </StackPanel>
+
+                  <StackPanel Spacing="9"><TextBlock Text="研究问题" Classes="section-title"/><ItemsControl ItemsSource="{Binding ResearchQuestions}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="理论与概念" Classes="section-title"/><ItemsControl ItemsSource="{Binding TheoryConcepts}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="研究设计" Classes="section-title"/><ItemsControl ItemsSource="{Binding ResearchDesignClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="核心发现" Classes="section-title"/><ItemsControl ItemsSource="{Binding MajorFindings}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="作者解释 / 机制" Classes="section-title"/><ItemsControl ItemsSource="{Binding AuthorExplanations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="方法学审读" Classes="section-title"/><ItemsControl ItemsSource="{Binding AnalysisClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="11"><TextBlock Text="作者自述局限" Classes="section-title"/><ItemsControl ItemsSource="{Binding AuthorLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="11"><TextBlock Text="AI 发现局限" Classes="section-title"/><ItemsControl ItemsSource="{Binding AiLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="阅读建议" Classes="section-title"/><ItemsControl ItemsSource="{Binding ReadingRecommendations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="概览">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="16">
-                  <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="9" Padding="12" IsVisible="{Binding HasWarnings}">
-                    <TextBlock Text="{Binding WarningsText}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" FontSize="11" />
+                <StackPanel Margin="30,28,30,45" Spacing="24">
+                  <Border Background="{DynamicResource AmberSoftBrush}" CornerRadius="8" Padding="12" IsVisible="{Binding HasWarnings}">
+                    <TextBlock Text="{Binding WarningsText}" Foreground="{DynamicResource AmberInkBrush}" TextWrapping="Wrap" FontSize="11" />
                   </Border>
 
-                  <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
-                    <Border Grid.Column="0" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="期刊" Classes="eyebrow"/><TextBlock Text="{Binding MetadataJournal}" TextWrapping="Wrap"/></StackPanel></Border>
-                    <Border Grid.Column="1" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="年份" Classes="eyebrow"/><TextBlock Text="{Binding MetadataYear}"/></StackPanel></Border>
-                    <Border Grid.Column="2" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="卷 / 期" Classes="eyebrow"/><TextBlock Text="{Binding MetadataVolumeIssue}"/></StackPanel></Border>
-                    <Border Grid.Column="3" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="页码" Classes="eyebrow"/><TextBlock Text="{Binding MetadataPages}"/></StackPanel></Border>
+                  <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                    <Border Grid.Column="0" Classes="card" Padding="16">
+                      <StackPanel Spacing="11">
+                        <TextBlock Text="书目信息" Classes="section-title" />
+                        <Grid ColumnDefinitions="82,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="9">
+                          <TextBlock Grid.Row="0" Text="题名" Classes="eyebrow"/><TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding MetadataTitle}" TextWrapping="Wrap"/>
+                          <TextBlock Grid.Row="1" Text="作者" Classes="eyebrow"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding MetadataAuthors}" TextWrapping="Wrap"/>
+                          <TextBlock Grid.Row="2" Text="期刊" Classes="eyebrow"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MetadataJournal}" TextWrapping="Wrap"/>
+                          <TextBlock Grid.Row="3" Text="年份" Classes="eyebrow"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding MetadataYear}"/>
+                          <TextBlock Grid.Row="4" Text="卷 / 期 / 页" Classes="eyebrow"/><StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="8"><TextBlock Text="{Binding MetadataVolumeIssue}"/><TextBlock Text="{Binding MetadataPages}" Classes="muted"/></StackPanel>
+                          <TextBlock Grid.Row="5" Text="DOI" Classes="eyebrow"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding MetadataDoi}" TextWrapping="Wrap"/>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Classes="card" Padding="16">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="摘要" Classes="section-title" />
+                        <TextBlock Text="{Binding AbstractText}" TextWrapping="Wrap" LineHeight="23" FontSize="13" Classes="muted" />
+                      </StackPanel>
+                    </Border>
                   </Grid>
 
-                  <Border Classes="soft-card" Padding="14">
-                    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="7">
-                      <TextBlock Grid.Row="0" Grid.Column="0" Text="题名" Classes="eyebrow"/><TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding MetadataTitle}" TextWrapping="Wrap"/>
-                      <TextBlock Grid.Row="1" Grid.Column="0" Text="作者" Classes="eyebrow"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding MetadataAuthors}" TextWrapping="Wrap"/>
-                      <TextBlock Grid.Row="2" Grid.Column="0" Text="DOI" Classes="eyebrow"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MetadataDoi}" TextWrapping="Wrap"/>
-                    </Grid>
-                  </Border>
-
-                  <StackPanel Spacing="7">
-                    <TextBlock Text="关键词" Classes="h2" />
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="关键词" Classes="section-title" />
                     <ItemsControl ItemsSource="{Binding Keywords}">
                       <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                       <ItemsControl.ItemTemplate>
@@ -188,96 +311,57 @@
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
                   </StackPanel>
-
-                  <StackPanel Spacing="7">
-                    <TextBlock Text="摘要" Classes="h2" />
-                    <Border Classes="soft-card" Padding="15"><TextBlock Text="{Binding AbstractText}" TextWrapping="Wrap" FontSize="12"/></Border>
-                  </StackPanel>
-
-                  <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-                    <Border Grid.Column="0" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="BASIC FACTS" Classes="eyebrow"/><TextBlock Text="{Binding SelectedFactsCount}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-                    <Border Grid.Column="1" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="EVIDENCE SPANS" Classes="eyebrow"/><TextBlock Text="{Binding SelectedEvidenceCount}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-                    <Border Grid.Column="2" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="AI ANALYSIS" Classes="eyebrow"/><TextBlock Text="{Binding SelectedReviewsCount}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-                  </Grid>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="精读报告">
+            <TabItem Header="事实证据">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="18">
-                  <StackPanel Spacing="7">
-                    <TextBlock Text="论文定位" Classes="h2" />
-                    <Border Classes="soft-card" Padding="15"><TextBlock Text="{Binding AbstractText}" TextWrapping="Wrap" /></Border>
-                  </StackPanel>
-
-                  <StackPanel Spacing="7">
-                    <TextBlock Text="研究设计画像" Classes="h2" />
-                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-                      <Border Grid.Column="0" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="研究类型" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyType}" TextWrapping="Wrap"/></StackPanel></Border>
-                      <Border Grid.Column="1" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="方法" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyMethod}" TextWrapping="Wrap"/></StackPanel></Border>
-                      <Border Grid.Column="2" Classes="soft-card" Padding="12"><StackPanel Spacing="3"><TextBlock Text="识别 / 推断策略" Classes="eyebrow"/><TextBlock Text="{Binding SelectedIdentification}" TextWrapping="Wrap"/></StackPanel></Border>
-                    </Grid>
-                    <Border Classes="soft-card" Padding="12" IsVisible="{Binding HasStudyRationale}"><TextBlock Text="{Binding StudyRationale}" Classes="muted" TextWrapping="Wrap"/></Border>
-                  </StackPanel>
-
-                  <StackPanel Spacing="7"><TextBlock Text="研究问题" Classes="h2"/><ItemsControl ItemsSource="{Binding ResearchQuestions}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="理论与概念" Classes="h2"/><ItemsControl ItemsSource="{Binding TheoryConcepts}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="研究设计" Classes="h2"/><ItemsControl ItemsSource="{Binding ResearchDesignClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="核心发现与语义支持" Classes="h2"/><ItemsControl ItemsSource="{Binding MajorFindings}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="作者解释 / 机制" Classes="h2"/><ItemsControl ItemsSource="{Binding AuthorExplanations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="方法学审读" Classes="h2"/><ItemsControl ItemsSource="{Binding AnalysisClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="局限：作者自述" Classes="h2"/><ItemsControl ItemsSource="{Binding AuthorLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="局限：AI 审读" Classes="h2"/><ItemsControl ItemsSource="{Binding AiLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="阅读建议" Classes="h2"/><ItemsControl ItemsSource="{Binding ReadingRecommendations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="审读计划" Classes="h2"/><Border Classes="soft-card" Padding="12"><TextBlock Text="{Binding ReviewPlanText}" Classes="muted" TextWrapping="Wrap"/></Border></StackPanel>
-                </StackPanel>
-              </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="事实与证据">
-              <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="18">
-                  <StackPanel Spacing="7"><TextBlock Text="书目信息证据" Classes="h2"/><ItemsControl ItemsSource="{Binding MetadataClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="基础事实" Classes="h2"/><ItemsControl ItemsSource="{Binding BasicFacts}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                <StackPanel Margin="30,28,30,40" Spacing="24">
+                  <StackPanel Spacing="9"><TextBlock Text="书目信息证据" Classes="section-title"/><ItemsControl ItemsSource="{Binding MetadataClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="基础事实" Classes="section-title"/><ItemsControl ItemsSource="{Binding BasicFacts}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
             <TabItem Header="AI 审读">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="18">
-                  <StackPanel Spacing="7"><TextBlock Text="方法与贡献审读" Classes="h2"/><ItemsControl ItemsSource="{Binding AnalysisClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="潜在局限" Classes="h2"/><ItemsControl ItemsSource="{Binding AiLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-                  <StackPanel Spacing="7"><TextBlock Text="阅读建议" Classes="h2"/><ItemsControl ItemsSource="{Binding ReadingRecommendations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                <StackPanel Margin="30,28,30,40" Spacing="24">
+                  <StackPanel Spacing="9"><TextBlock Text="方法与贡献审读" Classes="section-title"/><ItemsControl ItemsSource="{Binding AnalysisClaims}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="潜在局限" Classes="section-title"/><ItemsControl ItemsSource="{Binding AiLimitations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                  <StackPanel Spacing="9"><TextBlock Text="阅读建议" Classes="section-title"/><ItemsControl ItemsSource="{Binding ReadingRecommendations}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ClaimItem"><controls:ClaimCard/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
 
             <TabItem Header="参考文献">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="12">
+                <StackPanel Margin="24" Spacing="13">
                   <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="2"><TextBlock Text="参考文献" Classes="h2"/><TextBlock Text="{Binding ReferenceStatusText}" Classes="muted" FontSize="10"/></StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                      <Button Content="导出 JSON" Classes="secondary compact" IsEnabled="{Binding HasSelection}" Click="ExportReferencesJson_Click" />
-                      <Button Content="导出 BibTeX" Classes="secondary compact" IsEnabled="{Binding HasSelection}" Click="ExportBibtex_Click" />
-                      <Button Content="重新提取" Classes="primary compact" IsEnabled="{Binding CanRunPaperActions}" Click="ExtractReferences_Click" />
-                    </StackPanel>
+                    <StackPanel Spacing="3"><TextBlock Text="参考文献" Classes="section-title"/><TextBlock Text="{Binding ReferenceStatusText}" Classes="muted" FontSize="10"/></StackPanel>
+                    <Button Grid.Column="1" Content="导出" Classes="secondary compact" IsEnabled="{Binding HasSelection}">
+                      <Button.Flyout>
+                        <MenuFlyout>
+                          <MenuItem Header="导出 JSON" Click="ExportReferencesJson_Click" />
+                          <MenuItem Header="导出 BibTeX" Click="ExportBibtex_Click" />
+                          <MenuItem Header="重新提取参考文献" Click="ExtractReferences_Click" />
+                        </MenuFlyout>
+                      </Button.Flyout>
+                    </Button>
                   </Grid>
                   <ItemsControl ItemsSource="{Binding References}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="models:ReferenceItem">
-                        <Border Classes="soft-card" Padding="13" Margin="0,0,0,8">
-                          <StackPanel Spacing="5">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <Border Classes="badge-accent"><StackPanel Orientation="Horizontal"><TextBlock Text="#" Foreground="{StaticResource AccentBrush}" FontSize="9"/><TextBlock Text="{Binding Ordinal}" Foreground="{StaticResource AccentBrush}" FontSize="9"/></StackPanel></Border>
-                              <Border Classes="badge"><TextBlock Text="{Binding ParseStatus}" Classes="muted" FontSize="9"/></Border>
-                              <Border Classes="badge"><TextBlock Text="{Binding Year}" Classes="muted" FontSize="9"/></Border>
+                        <Border Classes="card" Padding="13" Margin="0,0,0,7">
+                          <Grid ColumnDefinitions="42,*" ColumnSpacing="11">
+                            <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource SurfaceMutedBrush}" VerticalAlignment="Top">
+                              <TextBlock Text="{Binding Ordinal}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Classes="muted" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                              <TextBlock Text="{Binding RawText}" TextWrapping="Wrap" />
+                              <WrapPanel ItemSpacing="6"><TextBlock Text="{Binding MetaLine}" Classes="tertiary" FontSize="9"/><TextBlock Text="{Binding ParseStatus}" Classes="tertiary" FontSize="9"/></WrapPanel>
                             </StackPanel>
-                            <TextBlock Text="{Binding RawText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding MetaLine}" Classes="muted" FontSize="9" />
-                          </StackPanel>
+                          </Grid>
                         </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -288,12 +372,12 @@
 
             <TabItem Header="表格">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="20" Spacing="10">
+                <StackPanel Margin="24" Spacing="10">
                   <ItemsControl ItemsSource="{Binding Tables}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="models:TableItem">
-                        <Border Classes="soft-card" Padding="13" Margin="0,0,0,9">
-                          <StackPanel Spacing="6">
+                        <Border Classes="card" Padding="13" Margin="0,0,0,8">
+                          <StackPanel Spacing="7">
                             <StackPanel Orientation="Horizontal"><TextBlock Text="PDF p." Classes="eyebrow"/><TextBlock Text="{Binding Page}" Classes="eyebrow"/></StackPanel>
                             <TextBox Text="{Binding DisplayText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" />
                           </StackPanel>
@@ -307,59 +391,149 @@
 
             <TabItem Header="原始 Card">
               <TextBox Text="{Binding RawCardJson}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
-                       Margin="20" Padding="14" Background="{StaticResource CodeBrush}" Foreground="#E7EFEC"
-                       BorderThickness="0" CornerRadius="9" FontFamily="Consolas" FontSize="10"
+                       Margin="18" Padding="14" Background="{DynamicResource CodeBrush}" Foreground="#E7EFEC"
+                       BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10"
                        ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
             </TabItem>
 
-            <TabItem Header="任务日志">
-              <Grid Margin="20" RowDefinitions="Auto,*">
+            <TabItem Header="日志">
+              <Grid Margin="22" RowDefinitions="Auto,*">
                 <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-                  <StackPanel Spacing="2"><TextBlock Text="{Binding JobStage}" Classes="h2"/><TextBlock Text="{Binding StatusText}" Classes="muted" FontSize="10"/></StackPanel>
+                  <StackPanel Spacing="2"><TextBlock Text="{Binding JobStage}" Classes="section-title"/><TextBlock Text="{Binding StatusText}" Classes="muted" FontSize="10"/></StackPanel>
                   <ProgressBar Grid.Column="1" Width="180" Height="5" Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" VerticalAlignment="Center" />
                 </Grid>
                 <TextBox Grid.Row="1" Text="{Binding JobLog}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                         Padding="14" Background="{StaticResource CodeBrush}" Foreground="#D7E9E2" BorderThickness="0" CornerRadius="9" FontFamily="Consolas" FontSize="10" />
+                         Padding="14" Background="{DynamicResource CodeBrush}" Foreground="#D7E9E2" BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10" />
               </Grid>
             </TabItem>
           </TabControl>
         </Border>
       </Grid>
+      </DockPanel>
 
-      <!-- Inspector -->
-      <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel Margin="18,18,18,22" Spacing="14">
-            <StackPanel Spacing="2"><TextBlock Text="INSPECTOR" Classes="eyebrow"/><TextBlock Text="研究画像与运行状态" Classes="h2"/></StackPanel>
+      <!-- Books -->
+      <Grid x:Name="BooksPage" Grid.Column="1" IsVisible="False" Background="{DynamicResource CanvasBrush}">
+        <StackPanel MaxWidth="680" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+          <TextBlock Text="书籍理解" Classes="display" HorizontalAlignment="Center" />
+          <TextBlock Text="这里会成为 Book / Chapter / Reading Session 工作区。v0.1 先保留入口，不伪装成已经完成的功能。" Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
+        </StackPanel>
+      </Grid>
 
-            <Border Classes="soft-card" Padding="13"><StackPanel Spacing="6"><TextBlock Text="STUDY TYPE" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyType}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding SelectedParseStatus}" Classes="muted" FontSize="9" TextWrapping="Wrap"/></StackPanel></Border>
-            <Border Classes="soft-card" Padding="13"><StackPanel Spacing="6"><TextBlock Text="METHOD" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyMethod}" TextWrapping="Wrap" FontSize="11"/><TextBlock Text="{Binding SelectedIdentification}" Classes="muted" FontSize="9" TextWrapping="Wrap"/></StackPanel></Border>
+      <!-- Projects -->
+      <Grid x:Name="ProjectsPage" Grid.Column="1" IsVisible="False" Background="{DynamicResource CanvasBrush}">
+        <StackPanel MaxWidth="680" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+          <TextBlock Text="研究项目" Classes="display" HorizontalAlignment="Center" />
+          <TextBlock Text="后续将承载 Reading List、Evidence Matrix、多论文比较与 Literature Review。" Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
+        </StackPanel>
+      </Grid>
 
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-              <Border Grid.Column="0" Classes="soft-card" Padding="10"><StackPanel Spacing="2"><TextBlock Text="FACTS" Classes="eyebrow"/><TextBlock Text="{Binding SelectedFactsCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
-              <Border Grid.Column="1" Classes="soft-card" Padding="10"><StackPanel Spacing="2"><TextBlock Text="EVIDENCE" Classes="eyebrow"/><TextBlock Text="{Binding SelectedEvidenceCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
-              <Border Grid.Column="2" Classes="soft-card" Padding="10"><StackPanel Spacing="2"><TextBlock Text="REVIEW" Classes="eyebrow"/><TextBlock Text="{Binding SelectedReviewsCount}" FontSize="18" FontWeight="SemiBold"/></StackPanel></Border>
+      <!-- Tasks / dashboard, now a page instead of a modal -->
+      <Grid x:Name="TasksPage" Grid.Column="1" IsVisible="False" RowDefinitions="Auto,*" Background="{DynamicResource CanvasBrush}">
+        <Border Grid.Row="0" Classes="page-header" Padding="30,24">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4"><TextBlock Text="任务中心" Classes="display"/><TextBlock Text="批量处理、队列状态与最近一次任务输出。" Classes="muted"/></StackPanel>
+            <Button Grid.Column="1" Content="刷新" Classes="secondary compact" Click="RefreshDashboard_Click" VerticalAlignment="Center"/>
+          </Grid>
+        </Border>
+        <ScrollViewer Grid.Row="1">
+          <StackPanel Margin="30" MaxWidth="1080" Spacing="18">
+            <Grid ColumnDefinitions="*,*,*,*,*" ColumnSpacing="10">
+              <Border Grid.Column="0" Classes="metric-card" Padding="16"><StackPanel><TextBlock Text="论文" Classes="eyebrow"/><TextBlock Text="{Binding DashboardPapers}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="1" Classes="metric-card" Padding="16"><StackPanel><TextBlock Text="已分析" Classes="eyebrow"/><TextBlock Text="{Binding DashboardAnalyzed}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="2" Classes="metric-card" Padding="16"><StackPanel><TextBlock Text="待分析" Classes="eyebrow"/><TextBlock Text="{Binding DashboardPending}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="3" Classes="metric-card" Padding="16"><StackPanel><TextBlock Text="待复核" Classes="eyebrow"/><TextBlock Text="{Binding DashboardReview}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="4" Classes="metric-card" Padding="16"><StackPanel><TextBlock Text="参考文献" Classes="eyebrow"/><TextBlock Text="{Binding DashboardReferences}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
             </Grid>
-
-            <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" />
-            <StackPanel Spacing="6"><TextBlock Text="审读计划" FontWeight="SemiBold"/><TextBlock Text="{Binding ReviewPlanText}" Classes="muted" TextWrapping="Wrap" FontSize="10"/></StackPanel>
-            <StackPanel Spacing="6"><TextBlock Text="最近任务" FontWeight="SemiBold"/><TextBlock Text="{Binding JobStage}" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold"/><ProgressBar Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" Height="4"/><TextBlock Text="{Binding StatusText}" Classes="muted" TextWrapping="Wrap" FontSize="9"/></StackPanel>
-
-            <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" />
-            <StackPanel Spacing="7">
-              <TextBlock Text="来源分离" FontWeight="SemiBold" />
-              <TextBlock Text="作者陈述、AI 审读与用户笔记保持独立来源。" Classes="muted" TextWrapping="Wrap" FontSize="9" />
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <Border Background="{StaticResource BlueSoftBrush}" CornerRadius="99" Padding="7,3"><TextBlock Text="AUTHOR" Foreground="{StaticResource BlueInkBrush}" FontSize="8" FontWeight="SemiBold"/></Border>
-                <Border Background="{StaticResource PurpleSoftBrush}" CornerRadius="99" Padding="7,3"><TextBlock Text="AI REVIEW" Foreground="{StaticResource PurpleInkBrush}" FontSize="8" FontWeight="SemiBold"/></Border>
-                <Border Classes="badge"><TextBlock Text="MY NOTE" Classes="muted" FontSize="8" FontWeight="SemiBold"/></Border>
+            <Border Classes="card" Padding="20">
+              <StackPanel Spacing="12">
+                <TextBlock Text="批量工作流" Classes="h2" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="分析待处理论文" Classes="primary" Click="BatchAnalyzePage_Click" />
+                  <Button Content="批量提取参考文献" Classes="secondary" Click="BatchReferencesPage_Click" />
+                </StackPanel>
+                <TextBox Text="{Binding DashboardOutput}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="240" FontFamily="Consolas" FontSize="10" />
               </StackPanel>
-            </StackPanel>
-
-            <TextBlock Text="Desktop → localhost /api/v1 → Application Services → Research Core" Classes="muted" TextWrapping="Wrap" FontSize="8" />
+            </Border>
           </StackPanel>
         </ScrollViewer>
-      </Border>
+      </Grid>
+
+      <!-- Health / maintenance -->
+      <Grid x:Name="HealthPage" Grid.Column="1" IsVisible="False" RowDefinitions="Auto,*" Background="{DynamicResource CanvasBrush}">
+        <Border Grid.Row="0" Classes="page-header" Padding="30,24">
+          <StackPanel Spacing="4"><TextBlock Text="数据与健康" Classes="display"/><TextBlock Text="检查 SQLite、PDF 存储、重复记录和模型缓存。" Classes="muted"/></StackPanel>
+        </Border>
+        <ScrollViewer Grid.Row="1">
+          <StackPanel Margin="30" MaxWidth="980" Spacing="16">
+            <Border Classes="card" Padding="20">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Repository Doctor" Classes="h2" />
+                <TextBlock Text="快速检查不会重新读取每个 PDF；深度检查会额外验证文件哈希。" Classes="muted" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="快速检查" Classes="primary" Click="QuickDoctorPage_Click" />
+                  <Button Content="深度检查" Classes="secondary" Click="DeepDoctorPage_Click" />
+                  <Button Content="预览缓存清理" Classes="secondary" Click="PreviewPrunePage_Click" />
+                  <Button Content="清理旧缓存" Classes="danger" Click="ApplyPrunePage_Click" />
+                </StackPanel>
+                <TextBox Text="{Binding MaintenanceOutput}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="360" FontFamily="Consolas" FontSize="10" ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+
+      <!-- Settings, inspired by Clash-style in-place preference pages -->
+      <Grid x:Name="SettingsPage" Grid.Column="1" IsVisible="False" RowDefinitions="Auto,*" Background="{DynamicResource CanvasBrush}">
+        <Border Grid.Row="0" Classes="page-header" Padding="30,24">
+          <StackPanel Spacing="4"><TextBlock Text="设置" Classes="display"/><TextBlock Text="外观、阅读工作区与模型连接。修改后保存在本机。" Classes="muted"/></StackPanel>
+        </Border>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="30" MaxWidth="980" Spacing="16">
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4"><TextBlock Text="外观" Classes="h2"/><TextBlock Text="跟随系统或固定明暗主题。" Classes="muted" FontSize="10" TextWrapping="Wrap"/></StackPanel>
+                <StackPanel Grid.Column="1" Spacing="14">
+                  <Grid ColumnDefinitions="*,240" ColumnSpacing="20"><StackPanel Spacing="3"><TextBlock Text="主题" FontWeight="SemiBold"/><TextBlock Text="深色 / 浅色 / 跟随 Windows。" Classes="muted" FontSize="10"/></StackPanel><ComboBox Grid.Column="1" ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding ThemeMode, Mode=TwoWay}"/></Grid>
+                  <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"/>
+                  <Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="3"><TextBlock Text="右侧研究画像" FontWeight="SemiBold"/><TextBlock Text="在论文阅读页显示 Inspector。" Classes="muted" FontSize="10"/></StackPanel><CheckBox Grid.Column="1" IsChecked="{Binding ShowInspector}" VerticalAlignment="Center"/></Grid>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4"><TextBlock Text="模型连接" Classes="h2"/><TextBlock Text="Lite 做事实索引，Pro 做独立审读。" Classes="muted" FontSize="10" TextWrapping="Wrap"/></StackPanel>
+                <StackPanel Grid.Column="1" Spacing="18">
+                  <StackPanel Spacing="9"><TextBlock Text="Lite" FontWeight="SemiBold"/><TextBox Text="{Binding Settings.LiteApiKey}" PasswordChar="●" PlaceholderText="{Binding Settings.LiteKeyHint}"/><TextBox Text="{Binding Settings.LiteApiBaseUrl}" PlaceholderText="Base URL"/><TextBox Text="{Binding Settings.LiteModel}" PlaceholderText="Model"/></StackPanel>
+                  <CheckBox IsChecked="{Binding Settings.UseLiteConnection}" Content="Pro 使用与 Lite 相同的 API Key 和 Base URL"/>
+                  <StackPanel Spacing="9"><TextBlock Text="Pro" FontWeight="SemiBold"/><TextBox Text="{Binding Settings.ProApiKey}" PasswordChar="●" PlaceholderText="{Binding Settings.ProKeyHint}" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProApiBaseUrl}" PlaceholderText="Base URL" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProModel}" PlaceholderText="Model"/></StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="10"><Button Content="保存模型设置" Classes="primary" Click="SaveEmbeddedSettings_Click"/><TextBlock Text="{Binding Settings.StatusText}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4"><TextBlock Text="工作区" Classes="h2"/><TextBlock Text="桌面端只通过 localhost API 调用研究核心。" Classes="muted" FontSize="10" TextWrapping="Wrap"/></StackPanel>
+                <StackPanel Grid.Column="1" Spacing="10">
+                  <Grid ColumnDefinitions="150,*"><TextBlock Text="Local API" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="http://127.0.0.1:8766/api/v1"/></Grid>
+                  <Grid ColumnDefinitions="150,*"><TextBlock Text="Desktop" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="v0.1.0 · Avalonia"/></Grid>
+                  <Grid ColumnDefinitions="150,*"><TextBlock Text="Core" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="Paper Understanding v2.2"/></Grid>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+
     </Grid>
+
+    <Border Grid.Row="2" Classes="statusbar" Padding="13,0">
+      <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+        <TextBlock Text="{Binding StatusText}" Classes="tertiary" FontSize="9"
+                   TextTrimming="CharacterEllipsis"/>
+        <TextBlock Grid.Column="1" Text="SRA · Local-first" Classes="tertiary" FontSize="9"/>
+      </Grid>
+    </Border>
   </Grid>
 </Window>

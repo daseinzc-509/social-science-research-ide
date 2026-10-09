@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SRA.Desktop")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+a4bcfd5078badcca5467abfa9393a5255d36f0c8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+9e829a1c46e70908b7aebcb10adfb9417eda2c56")]
 [assembly: System.Reflection.AssemblyProductAttribute("SRA.Desktop")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SRA.Desktop")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]
