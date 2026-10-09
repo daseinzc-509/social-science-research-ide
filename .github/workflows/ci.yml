@@ -40,7 +40,8 @@ jobs:
             tests/test_desktop_release_pipeline.py \
             tests/test_crossplatform_desktop.py \
             tests/test_release_safety_false_positives.py \
-            tests/test_storage_transparency.py
+            tests/test_storage_transparency.py \
+            tests/test_build_size_audit.py
 
   desktop-compile:
     name: Compile ${{ matrix.target }}

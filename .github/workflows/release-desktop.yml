@@ -172,6 +172,30 @@ jobs:
           hdiutil create -volname 'SRA Desktop' -srcfolder dist/dmg-root -ov -format UDZO "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.dmg"
           ditto -c -k --sequesterRsrc --keepParent dist/SRA.app "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
           python scripts/check_release_safety.py zip "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
+      - name: Generate backend / desktop / installer size audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=dist/SRA-Windows
+          if [ "${{ matrix.installer }}" = macos ]; then payload=dist/SRA.app; fi
+          python scripts/report_build_sizes.py \
+            --target "${{ matrix.target }}" --profile "$BUNDLE_PROFILE" \
+            --backend dist/backend/sra-backend --desktop dist/desktop \
+            --payload "$payload" \
+            --asset-glob 'dist/SRA-Desktop-Setup-*.exe' \
+            --asset-glob 'dist/SRA-win-x64-*.zip' \
+            --asset-glob 'dist/SRA-osx-arm64-*.dmg' \
+            --asset-glob 'dist/SRA-osx-arm64-*.zip' \
+            --output-dir dist/build-size-audit
+          cat "dist/build-size-audit/build-size-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload size audit (tiny reports only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRA-build-size-audit-${{ matrix.target }}
+          path: dist/build-size-audit/
+          if-no-files-found: warn
+          retention-days: 21
       - name: Enforce GitHub asset size limit before publishing
         shell: bash
         run: python scripts/check_asset_sizes.py dist
