@@ -212,6 +212,8 @@ PDF
 
 ## 🧪 开发与测试
 
+**日常修改源码无需下载安装包。** 请先阅读 [**源码开发指南（环境安装、双终端启动、热迭代与调试）**](docs/DEVELOPMENT.md)。
+
 Pull Request / push 的 CI 设计为：**Python/API 回归 → 源码隐私扫描 → Windows 与 Apple Silicon Avalonia 编译**。完整后端冻结及安装器构建在 Release 工作流中进行，二者不要混为一谈。
 
 ```powershell

@@ -38,7 +38,8 @@ jobs:
             tests/test_desktop_chrome.py \
             tests/test_secure_distribution.py \
             tests/test_desktop_release_pipeline.py \
-            tests/test_crossplatform_desktop.py
+            tests/test_crossplatform_desktop.py \
+            tests/test_release_safety_false_positives.py
 
   desktop-compile:
     name: Compile ${{ matrix.target }}
