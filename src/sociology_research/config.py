@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .user_storage import (read_user_preferences, read_user_secrets,
+                           write_user_preferences, write_user_secrets)
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -50,15 +53,29 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        # Process environment wins; then per-user DPAPI/config; then the legacy .env.
+        # Never publish secrets in the program directory or include them in artifacts.
+        preferences = read_user_preferences()
+        secrets = read_user_secrets()
+        legacy = _read_env_file(local_env_path())
+
+        def value(name: str) -> str | None:
+            return (
+                _optional_environment_value(name)
+                or (secrets.get(name) if name in _SECRET_FIELDS else preferences.get(name))
+                or legacy.get(name)
+                or None
+            )
+
         return cls(
-            api_key=_optional_environment_value("SRA_API_KEY"),
-            api_base_url=_optional_environment_value("SRA_API_BASE_URL"),
-            lite_model=_optional_environment_value("SRA_LITE_MODEL"),
-            pro_model=_optional_environment_value("SRA_PRO_MODEL"),
-            lite_api_key=_optional_environment_value("SRA_LITE_API_KEY"),
-            lite_api_base_url=_optional_environment_value("SRA_LITE_API_BASE_URL"),
-            pro_api_key=_optional_environment_value("SRA_PRO_API_KEY"),
-            pro_api_base_url=_optional_environment_value("SRA_PRO_API_BASE_URL"),
+            api_key=value("SRA_API_KEY"),
+            api_base_url=value("SRA_API_BASE_URL"),
+            lite_model=value("SRA_LITE_MODEL"),
+            pro_model=value("SRA_PRO_MODEL"),
+            lite_api_key=value("SRA_LITE_API_KEY"),
+            lite_api_base_url=value("SRA_LITE_API_BASE_URL"),
+            pro_api_key=value("SRA_PRO_API_KEY"),
+            pro_api_base_url=value("SRA_PRO_API_BASE_URL"),
         )
 
     @classmethod
@@ -119,49 +136,106 @@ def local_env_path() -> Path:
     return _PROJECT_ROOT / ".env"
 
 
-def save_local_environment(values: dict[str, str | None]) -> None:
-    """Persist model settings to the ignored project .env and current process.
+_SECRET_FIELDS = frozenset({"SRA_API_KEY", "SRA_LITE_API_KEY", "SRA_PRO_API_KEY"})
+_MODEL_FIELDS = frozenset({
+    "SRA_API_KEY", "SRA_API_BASE_URL", "SRA_LITE_MODEL", "SRA_PRO_MODEL",
+    "SRA_LITE_API_KEY", "SRA_LITE_API_BASE_URL", "SRA_PRO_API_KEY", "SRA_PRO_API_BASE_URL",
+})
 
-    Only keys supplied in ``values`` are changed. Unrelated .env entries and comments
-    are preserved so model-setting edits do not wipe other local configuration.
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    """Read the old developer .env, without copying its credentials into os.environ."""
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name, value = name.strip(), value.strip()
+        if name not in _MODEL_FIELDS:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if value:
+            values[name] = value
+    return values
+
+
+def _scrub_project_model_settings() -> None:
+    """After durable secure save, remove legacy key/value lines from repo .env.
+
+    Keep unrelated .env entries (e.g. SRA_DATA_DIR). We deliberately do not
+    create a plaintext backup in the project tree.
     """
-
     path = local_env_path()
-    updates = {name: str(value or "").strip() for name, value in values.items()}
-    for name, value in updates.items():
-        if not name or not name.replace("_", "").isalnum():
-            raise ValueError(f"Invalid environment variable name: {name!r}")
+    if not path.is_file():
+        return
+    original = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    retained: list[str] = []
+    for line in original:
+        if "=" in line and line.split("=", 1)[0].strip() in _MODEL_FIELDS:
+            continue
+        retained.append(line)
+    if retained != original:
+        # Preserve existing file permissions; don't create another secret-bearing file.
+        path.write_text("".join(retained), encoding="utf-8")
+
+
+def save_local_environment(values: dict[str, str | None]) -> None:
+    """Save model settings per-user, with keys encrypted by Windows DPAPI.
+
+    Legacy name retained so both the browser UI and FastAPI settings service work
+    unchanged. A failed DPAPI save leaves the original project .env untouched.
+    """
+    if set(values).difference(_MODEL_FIELDS):
+        raise ValueError("Unsupported SRA model setting in save request")
+    updates: dict[str, str] = {}
+    for name, raw in values.items():
+        value = str(raw or "").strip()
         if "\n" in value or "\r" in value:
             raise ValueError(f"Environment value for {name} must be one line")
+        updates[name] = value
 
-    original_lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-    written: set[str] = set()
-    output: list[str] = []
+    current = Settings.from_environment()
+    merged = {
+        "SRA_API_KEY": current.api_key or "",
+        "SRA_API_BASE_URL": current.api_base_url or "",
+        "SRA_LITE_MODEL": current.lite_model or "",
+        "SRA_PRO_MODEL": current.pro_model or "",
+        "SRA_LITE_API_KEY": current.lite_api_key or "",
+        "SRA_LITE_API_BASE_URL": current.lite_api_base_url or "",
+        "SRA_PRO_API_KEY": current.pro_api_key or "",
+        "SRA_PRO_API_BASE_URL": current.pro_api_base_url or "",
+    }
+    merged.update(updates)
 
-    for line in original_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in line:
-            output.append(line)
-            continue
-        raw_name, _ = line.split("=", maxsplit=1)
-        name = raw_name.strip()
-        if name in updates:
-            if name not in written:
-                output.append(f"{name}={updates[name]}")
-                written.add(name)
-            continue
-        output.append(line)
-
-    for name, value in updates.items():
-        if name not in written:
-            output.append(f"{name}={value}")
-
-    path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+    # Encrypt BEFORE writing anything else; failure must not degrade to plaintext.
+    write_user_secrets({name: merged[name] for name in _SECRET_FIELDS})
+    write_user_preferences({name: merged[name] for name in _MODEL_FIELDS - _SECRET_FIELDS if merged[name]})
+    _scrub_project_model_settings()
     for name, value in updates.items():
         if value:
             os.environ[name] = value
         else:
             os.environ.pop(name, None)
+
+
+def migrate_legacy_model_config(*, apply: bool = False) -> dict[str, object]:
+    """Explicitly move project .env model values to secure per-user storage."""
+    legacy = _read_env_file(local_env_path())
+    report: dict[str, object] = {
+        "source": str(local_env_path()),
+        "target": "per-user SRA configuration and Windows DPAPI secret store",
+        "model_fields_found": sorted(legacy),
+        "applied": False,
+    }
+    if apply and legacy:
+        # Save the full, resolved configuration; scrub only after encrypted save.
+        save_local_environment(legacy)
+        report["applied"] = True
+    return report
 
 
 @dataclass(frozen=True)
@@ -207,21 +281,19 @@ def _optional_environment_value(name: str) -> str | None:
     return value or None
 
 
-def _load_local_environment(path: Path) -> None:
-    """Load simple KEY=value lines without overriding the process environment."""
+def _load_nonsecret_legacy_options() -> None:
+    """Keep SRA_DATA_DIR from old .env working; never export model keys."""
+    path = local_env_path()
     if not path.is_file():
         return
     for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        if "=" not in raw_line or raw_line.lstrip().startswith("#"):
             continue
-        name, value = line.split("=", maxsplit=1)
-        name, value = name.strip(), value.strip()
-        if not name or not name.replace("_", "").isalnum():
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ.setdefault(name, value)
+        name, value = raw_line.split("=", 1)
+        if name.strip() == "SRA_DATA_DIR":
+            candidate = value.strip().strip('"').strip("'")
+            if candidate:
+                os.environ.setdefault("SRA_DATA_DIR", candidate)
 
 
-_load_local_environment(_PROJECT_ROOT / ".env")
+_load_nonsecret_legacy_options()

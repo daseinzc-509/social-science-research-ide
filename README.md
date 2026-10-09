@@ -1,397 +1,276 @@
-# Social Science Research IDE
+<p align="center">
+  <img src="desktop/SRA.Desktop/Assets/sra-logo.png" width="104" alt="Social Science Research IDE logo" />
+</p>
 
-这是一个 **local-first、evidence-first** 的社会科学研究阅读环境。
+<h1 align="center">Social Science Research IDE</h1>
 
-项目的目标不是把 PDF “总结得更长”，而是把论文中的**主张、证据、适用范围、语义支持关系和方法学风险**拆开保存，使研究者能够回到原文检查、比较和修正理解，并逐步把单篇阅读扩展为书籍阅读、研究项目、多文献比较和文献综述工作流。
+<p align="center">
+  <strong>From papers to auditable research understanding.</strong><br />
+  从 PDF 到可追溯的主张、证据与方法学审读，而不只是另一份 AI 摘要。
+</p>
 
-当前主线仍是 **Paper Understanding v2**；下一阶段进入 **Desktop Foundation**：保留 Python 研究引擎，建立稳定的本地 API，并以 Avalonia 构建桌面工作台。
+<p align="center">
+  <a href="https://github.com/daseinzc-509/social-science-research-ide/actions/workflows/ci.yml"><img src="https://github.com/daseinzc-509/social-science-research-ide/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--only-7969c6" alt="License AGPL-3.0-only" />
+  <img src="https://img.shields.io/badge/status-alpha%20%2F%20in%20development-7969c6" alt="Alpha / in development" />
+  <img src="https://img.shields.io/badge/Windows-x64-3478d6?logo=windows11&logoColor=white" alt="Windows x64" />
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-555555?logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  <img src="https://img.shields.io/badge/Avalonia-.NET%208-512bd4" alt="Avalonia / .NET 8" />
+  <img src="https://img.shields.io/badge/Python-3.12-3670a0?logo=python&logoColor=white" alt="Python 3.12" />
+</p>
 
----
+<p align="center">
+  <a href="#-为什么做-sra">为什么做 SRA</a> ·
+  <a href="#-核心能力">核心能力</a> ·
+  <a href="#-下载与使用">下载与使用</a> ·
+  <a href="#-系统架构">系统架构</a> ·
+  <a href="#-隐私与安全">隐私与安全</a> ·
+  <a href="#-开发与测试">开发与测试</a> ·
+  <a href="#-license--授权">License</a>
+</p>
 
-## 当前状态
-
-目前已经具备：
-
-- 单篇 / 批量 PDF 导入，本地 SQLite 存储；
-- Docling-first 解析，保留 page / bbox / block provenance；PyMuPDF 作为后备；
-- 文本质量检测与必要时 OCR；异常文本不会静默当作正常解析；
-- Lite 提取元数据与基础研究事实；
-- 元数据 layout recovery：front matter、重复页眉、页码范围等确定性恢复；
-- `title / authors / journal / DOI` 使用 metadata provenance 校验；
-- Paper Understanding v2：Study Profile、Claim Type、Claim Scope、Evidence Role、Semantic Support、Claim Audit；
-- Pro 独立从整篇 SourceBlock 定向取证，不只读取 Lite 已引用片段；
-- 按实验、观察性定量、质性、理论、混合方法、综述切换审读维度；
-- “来源已定位”和“语义支持”两层状态；
-- 精读报告：研究问题、研究设计、核心发现、作者解释、作者自述局限、AI 方法学审读、Claim/Evidence 审计；
-- Paper Card JSON、解析文本、参考文献 JSON / BibTeX、精读 Markdown 导出；
-- 本地模型缓存、数据库 doctor、手动元数据修订、重新解析；
-- Lite / Pro 可使用独立 API Key、Base URL 和模型，也兼容旧的共享连接配置。
-
-当前浏览器 UI 是**过渡界面**。它仍然可用，但后续主要用于调试和兼容；新的产品界面计划使用 Avalonia。
-
----
-
-## 产品方向
-
-项目正在从“单篇论文分析器”演进为：
-
-> **以证据为底层结构的个人研究阅读环境。**
-
-长期工作流：
-
-```text
-Sources
-  ├─ Papers
-  ├─ Books
-  └─ Reports / Chapters
-        ↓
-Document Understanding
-        ↓
-Claims / Evidence / Notes / Review Decisions
-        ↓
-Research Projects
-        ↓
-Evidence Matrix / Debate / Comparison
-        ↓
-Synthesis
-        ↓
-Literature Review / Research Writing
-```
-
-论文、书籍和后续其他文献类型共享 provenance、evidence、claim 和 note 等底层概念，但不强迫不同文献使用同一套阅读模板。
+> [!IMPORTANT]
+> **项目状态：Alpha / 持续开发。** Windows x64 与 macOS Apple Silicon 的桌面端、Python 后端联合打包流水线已加入仓库，但完整安装包仍须通过各平台原生构建、安装及真实 PDF 验收。不要将工作流存在等同于正式稳定版发布。**macOS Intel 暂不支持。**
 
 ---
 
-## 当前架构
+## ✨ 为什么做 SRA
 
-当前运行链路：
+研究阅读真正困难的地方，往往不在于得到一段摘要，而在于回答：**作者究竟主张了什么？原文证据在哪里？结论在什么条件下成立？AI 的判断又根据什么作出？**
 
-```text
-PDF
-  ↓
-Docling / PyMuPDF
-  ↓
-SourceBlock + page/bbox provenance
-  ↓
-Evidence ledger
-  ↓
-Lite
-  ├─ bibliographic metadata candidates
-  └─ basic author-stated claims
-  ↓
-metadata provenance resolver + deterministic verification
-  ↓
-Paper Understanding v2 router
-  ↓
-Pro independent retrieval from the whole paper
-  ├─ StudyProfile
-  ├─ methodology-specific review
-  ├─ ClaimAudit
-  └─ reading recommendation
-  ↓
-PaperCard
-  ↓
-Overview / Facts & Evidence / Deep Reading / AI Review / References / Tables
-```
+SRA（Social Science Research IDE）探索一种 **local-first、evidence-first** 的研究工作流：
 
-核心代码仍是 Python：解析、证据账本、Lite/Pro、SQLite、参考文献和研究记忆都不会因为桌面化而重写成 C#。
+- **保留可追溯来源**：让论文主张与 PDF 页码、段落、原文片段建立明确关联。
+- **区分三种声音**：作者陈述、AI 方法学审读、研究者笔记不相互冒充。
+- **分离两种“支持”**：找到来源（traceability）不等于该来源在语义上证明结论（semantic support）。
+- **为继续研究而组织信息**：先形成可审计的单篇理解，再逐步扩展到多文献比较与研究写作。
 
----
+**定位：个人研究阅读环境，而非自动生成可直接提交的论文综述。**
 
-## 目标架构：Avalonia Desktop + Python Core
+## 🔎 核心能力
 
-下一阶段采用明确的前后端边界：
+| 模块 | 当前能做什么 |
+| --- | --- |
+| **PDF 理解** | Docling-first 版式恢复，PyMuPDF 后备，文本质量检测、必要时 OCR；保留 page / bbox / source block 信息。 |
+| **结构化研究事实** | Lite 提取题名、作者、研究问题和论文事实；元数据按来源与版式规则核验。 |
+| **独立方法学审读** | Pro 不只评价 Lite 摘要，还会从整篇文档定向回源，依据研究类型审查方法、限定与风险。 |
+| **Claim × Evidence** | 记录主张类型、适用范围、证据角色与支持关系；可返回来源页和原文。 |
+| **论文精读** | 将已有 Paper Card 确定性重排为连续阅读报告，不为了排版再调用一次模型。 |
+| **研究工作台** | Avalonia 桌面端提供文献库、精读、事实证据、AI 审读、参考文献、设置与任务入口。 |
+| **本地研究库** | SQLite、原始 PDF、解析结果与分析缓存；支持批量导入、重新分析及导出。 |
 
-```text
-┌──────────────────────────────┐
-│ Avalonia Desktop (.NET)      │
-│                              │
-│ Library / Reader / Inspector │
-│ Projects / Settings / Jobs   │
-└──────────────┬───────────────┘
-               │ localhost HTTP/JSON
-               ▼
-┌──────────────────────────────┐
-│ Local Application API        │
-│ versioned DTO / job status   │
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Python Research Core         │
-│                              │
-│ parser / analyzer / library  │
-│ references / repository      │
-│ model clients / reports      │
-└──────────────┬───────────────┘
-               │
-               ▼
-        SQLite + local files
-```
+<details>
+<summary><strong>学术审读具体区分了什么？</strong></summary>
 
-### 架构规则
+| 层级 | 典型问题 | 说明 |
+| --- | --- | --- |
+| **Source location** | 这条论断是否准确指向 PDF 页与原文？ | `VerificationStatus` 只表示可定位性，不等于已证明。 |
+| **Semantic relationship** | 原文支持、部分支持、限定还是反驳该说法？ | `SemanticSupportStatus` 属于模型辅助判断，需保留人工核查可能性。 |
+| **Study profile** | 这是实验、观察性定量、质性、理论还是混合方法研究？ | 研究类型影响审读维度，而不是套用同一模板。 |
+| **Method review** | 测量、识别、抽样、解释与外推有什么限制？ | 作者陈述与 AI 审读明确分开。 |
 
-1. **Avalonia 只负责产品界面与桌面生命周期，不重写研究引擎。**
-2. **API 是桌面端唯一稳定入口。** Avalonia 不直接访问 SQLite，也不直接 import Python 内部模型。
-3. **Domain model 与 API DTO 分开。** 内部 Pydantic 模型可以演进，而桌面 API 保持版本化兼容。
-4. **先轮询任务状态，不急着引入 WebSocket/SSE。** 当前分析任务分钟级，简单 job polling 足够。
-5. **SQLite 继续作为单机默认存储。** 在真实规模证明有必要之前不迁移 PostgreSQL。
-6. **现有 Web UI 暂时保留为 legacy/debug adapter。** 新功能不再优先堆进内嵌 HTML。
+</details>
 
-详细架构见 `docs/ARCHITECTURE.md`。
+## 💻 下载与使用
 
----
+**[GitHub Releases](https://github.com/daseinzc-509/social-science-research-ide/releases)** · **[构建与测试状态](https://github.com/daseinzc-509/social-science-research-ide/actions)**
 
-## 推荐目录演进
+| 平台 | 计划发布格式 | 当前说明 |
+| --- | --- | --- |
+| **Windows x64** | `Setup.exe` 安装器、便携 ZIP | 原生 CI 构建 + Python 后端捆绑；实际发布状态以 Releases 为准。 |
+| **macOS Apple Silicon** | `.dmg`、`.app` ZIP | ARM64，macOS 14+；Alpha 包使用临时签名，**尚未完成 Apple Developer ID 公证**。 |
+| macOS Intel / Linux | — | **暂不提供安装包**，不在当前发布矩阵。 |
 
-不做一次性大搬家。先保持 `src/sociology_research` 包名稳定，再逐步形成：
+> 如果 Releases 还没有可下载的版本，请使用下方**开发方式运行**。不要下载一个仅含 .NET 前端的旧 ZIP 并误以为其中已包含 Python 研究引擎。
 
-```text
-.
-├─ src/
-│  └─ sociology_research/
-│     ├─ models.py              # 当前领域模型；后续再拆 domain/
-│     ├─ analyzer.py            # Paper Understanding v2
-│     ├─ parser.py
-│     ├─ repository.py
-│     ├─ library.py
-│     ├─ references.py
-│     ├─ config.py
-│     ├─ llm_client.py
-│     ├─ services/              # 新：面向 UI/API 的应用用例
-│     ├─ api/                   # 新：localhost API + DTO
-│     └─ legacy_web/            # 后续：旧 Web UI 迁入这里
-├─ desktop/
-│  ├─ SRA.Desktop/              # Avalonia 应用
-│  └─ SRA.Desktop.Tests/
-├─ tests/
-├─ docs/
-│  ├─ ARCHITECTURE.md
-│  └─ PROJECT_DESIGN.md
-├─ README.md
-└─ pyproject.toml
-```
+**正式的捆绑版**计划在启动桌面应用时自动启动本地 Python API，无须另开终端；**源码开发模式**仍可手动启动 `sra api`。模型分析需要用户自己的 Lite / Pro 服务配置，部分 Docling 模型权重可能在首次运行时下载。
 
-第一轮重构只需要新增 `services/`、`api/`、`desktop/`，不必马上把现有 Python 文件全部移动。
+### 快速开始：Windows 源码开发
 
----
-
-## 模型配置
-
-推荐 Lite 与 Pro 使用完全独立的连接：
-
-```text
-SRA_LITE_API_KEY=...
-SRA_LITE_API_BASE_URL=https://...
-SRA_LITE_MODEL=...
-
-SRA_PRO_API_KEY=...
-SRA_PRO_API_BASE_URL=https://...
-SRA_PRO_MODEL=...
-```
-
-如果 Lite / Pro 使用同一家服务商，可以填写相同 Key / Base URL。
-
-旧配置仍可作为兼容 fallback：
-
-```text
-SRA_API_KEY=...
-SRA_API_BASE_URL=https://...
-SRA_LITE_MODEL=...
-SRA_PRO_MODEL=...
-```
-
-不要提交真实 `.env` 或 API Key。
-
----
-
-## 快速开始
-
-### Python 环境
+准备 Python 3.12、Conda，以及可以构建 `net8.0` / Avalonia 12 的 .NET SDK（本项目开发流程使用 .NET 10 SDK）。在项目根目录运行：
 
 ```powershell
-conda create -p .conda-env --override-channels -c conda-forge python=3.12 "pydantic>=2.7,<3" "pymupdf>=1.24,<2" pip
+conda create -p .conda-env -c conda-forge python=3.12 pip "pydantic>=2.7,<3" "pymupdf>=1.24,<2"
 conda run -p .conda-env python -m pip install --no-build-isolation -e .
-conda run -p .conda-env python -m pip install "docling>=2.131,<3"
+conda run -p .conda-env python -m pip install "fastapi>=0.115,<1" "uvicorn>=0.30,<1" "python-multipart>=0.0.9,<1" "httpx>=0.27,<1" "docling>=2.131,<3"
 ```
 
-### 当前 Web 工作台
+复制 `.env.example` 为**本地、不提交**的 `.env` 并配置模型（或使用桌面端设置页）：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+在两个终端分别启动：
+
+```powershell
+# 终端 1：本地 API（开发模式）
+conda run --no-capture-output -p .conda-env sra api
+```
+
+```powershell
+# 终端 2：Avalonia 桌面应用
+dotnet run --project .\desktop\SRA.Desktop\SRA.Desktop.csproj
+```
+
+也可以用旧版浏览器工作台调试：
 
 ```powershell
 conda run --no-capture-output -p .conda-env sra ui
 ```
 
-这是当前可用入口；Avalonia Desktop 尚属于下一阶段实现目标。
+> 源码开发模式的本地 API 不等同于已加会话令牌保护的**捆绑版 API**；请只绑定回环地址，不要把开发端口公开到局域网或互联网。
 
 ### 常用 CLI
 
 ```powershell
 conda run -p .conda-env sra import-pdf "D:\papers\example.pdf"
 conda run -p .conda-env sra import-pdf-dir "D:\papers" --json
+conda run -p .conda-env sra list
 conda run --no-capture-output -p .conda-env sra analyze PAPER_ID
 conda run -p .conda-env sra export-card PAPER_ID --output paper-card.json
-conda run -p .conda-env sra export-text PAPER_ID --output parsed-paper.txt
-conda run -p .conda-env sra extract-references PAPER_ID --output references.json
-conda run -p .conda-env sra export-references PAPER_ID --output references.bib --format bibtex
+conda run -p .conda-env sra export-reading-report PAPER_ID --output deep-reading.md
+conda run -p .conda-env sra doctor --deep
 ```
 
-UI 中分析完成后可导出 `*-deep-reading.md` 精读报告。
+命令以当前开发分支实现为准；如版本有所差异，请运行 `sra --help` 查看已安装的 CLI。
 
----
+## 🧭 系统架构
 
-## 两层“支持”状态
+**Avalonia 负责交互；FastAPI 提供本地边界；Python 承担研究理解；SQLite 保存研究状态。** 桌面界面不直接读写数据库，不把证据校验逻辑移植到 C#。
 
-### VerificationStatus：来源是否可定位
+```mermaid
+flowchart TB
+    UI["Avalonia Desktop · .NET 8<br/>Library / Reader / Inspector / Settings"]
+    API["Versioned local API · FastAPI<br/>localhost HTTP/JSON · job polling"]
+    ENGINE["Python Research Core<br/>Docling / PyMuPDF · Lite / Pro · evidence verification"]
+    STORE[("SQLite + local PDF files<br/>Paper Cards · cache · notes")]
+    LLM["User-configured Lite / Pro providers"]
+    UI <-->|"/api/v1"| API
+    API --> ENGINE
+    ENGINE <--> STORE
+    ENGINE -->|"Selected paper excerpts for online analysis"| LLM
+```
 
-- `SUPPORTED`：来源已定位；
-- `NEEDS_REVIEW`：存在来源问题或该项本身为 AI 推断，需要人工复核；
-- `NO_SOURCE`：没有来源引用。
-
-### SemanticSupportStatus：原文与主张的语义关系
-
-- `SUPPORTS`
-- `PARTIALLY_SUPPORTS`
-- `QUALIFIES`
-- `CONTRADICTS`
-- `BACKGROUND_ONLY`
-- `UNCLEAR`
-
-因此可以合法出现：**“来源已定位，但原文只部分支持、限定或反驳该主张。”**
-
----
-
-## 精读报告
-
-精读报告不是第三次模型调用，而是 saved `PaperCard` 的确定性视图，避免“摘要的摘要”进一步损失证据链。
-
-当前包含：
-
-- 论文定位 / 摘要；
-- 研究设计画像；
-- 研究问题；
-- 理论与概念；
-- 研究方法、样本与测量；
-- 核心发现及 semantic support；
-- 作者解释 / 机制；
-- 作者自述局限；
-- AI 方法学审读与 AI 发现的局限；
-- 阅读建议；
-- Claim / Evidence 审计与 PDF 原文。
-
----
-
-## Book Understanding：下一类文献
-
-书籍不会被当作“一篇很长的论文”。
-
-预计共享：
+单篇论文处理流程：
 
 ```text
-SourceDocument
-SourceBlock
-EvidenceSpan
-Claim
-UserNote
-ReviewDecision
+PDF
+ └─ Parser / OCR → SourceBlock + page/bbox provenance
+     └─ Evidence ledger
+         ├─ Lite → metadata + author-stated claims
+         ├─ Metadata provenance / deterministic checks
+         └─ Research-type router → Pro independent retrieval + method review
+              └─ PaperCard / ClaimAudit / SemanticSupport
+                   ├─ Desktop views
+                   └─ Deterministic deep-reading Markdown
 ```
 
-但书籍使用自己的理解结构，例如：
+### 设计约束
+
+1. **Evidence First** — 所有可定位的原文证据都应保留来源位置。
+2. **Traceability ≠ Entailment** — 一条证据被定位，不自动表示主张已获证明。
+3. **Source separation** — 作者主张、AI 评价与用户笔记保持不同来源身份。
+4. **Deterministic verification** — 页码、证据 ID、缓存与结构化校验优先交由代码处理。
+5. **Human researcher in control** — 方法学审读是辅助判断，不替代学术复核。
+
+### 主要目录
 
 ```text
-central_thesis
-chapter_argument
-concept
-argument
-supporting_example
-counterargument
-important_quote
-author_position
+.
+├── desktop/SRA.Desktop/       # Avalonia UI / desktop lifecycle
+├── src/sociology_research/    # Python models, parser, analyzer, library
+│   ├── api/                   # Local HTTP API and DTOs
+│   └── services/              # Application use cases
+├── scripts/                   # Build, smoke tests, privacy / migration tools
+├── installer/                 # Windows Inno Setup / macOS .app packaging
+├── .github/workflows/         # Continuous integration and release pipeline
+├── tests/                     # Parser / API / security / release regression
+├── docs/                      # Release and security documentation
+├── PROJECT_DESIGN.md          # Long-term product and research principles
+└── README.md
 ```
 
-目标输出是可审计的 **Book Reading Report**，并保留章节、位置和原文证据。
+## 🔐 隐私与安全
 
-在书籍能力开始实现前，不进行大规模数据库 ontology 重构；先把 Desktop / API 边界稳定下来。
+**本地保存**不等于**完全离线分析**。SRA 默认将论文、SQLite 数据库与模型配置留在当前用户的私有目录，但当用户启动在线 Lite / Pro 分析时，**选中的 PDF 文本片段会发送给所配置的模型服务商**。
 
----
+| 类别 | Windows 捆绑版 | macOS Apple Silicon 捆绑版 |
+| --- | --- | --- |
+| 私人 PDF / 数据库 | `%LOCALAPPDATA%\SRA\data` | `~/Library/Application Support/SRA/data` |
+| API Key | Windows DPAPI 当前用户加密 | macOS Keychain |
+| 后端通信 | `127.0.0.1`、随机端口、进程级会话令牌 | 同左 |
+| 公开发行包 | 不包含本人的 `.env`、PDF、SQLite | 同左 |
 
-## Roadmap
+- 构建流水线对源码和安装产物执行敏感文件检查；**不要直接压缩整个开发目录发给别人**。
+- `.env` 是旧源码开发兼容方式，可能包含明文凭据，**永远不要提交**。
+- 更新检测只访问官方 GitHub Release 信息，提示用户安装，不静默执行下载的程序。
+- 卸载默认保留个人研究数据，避免意外丢失；卸载程序与清除研究数据是两件事。
+- macOS Alpha 包未经过 Apple 公证；首次打开可能需要在系统“隐私与安全性”中人工确认。
 
-### Milestone A — Desktop Foundation（下一阶段）
+详细说明：[跨平台分发](docs/CROSS_PLATFORM_DISTRIBUTION.md) · [安全与私人数据](docs/SECURE_DISTRIBUTION.md) · [安装、更新与卸载](docs/INSTALL_UPDATE_UNINSTALL.md)
 
-- 从 `ui.py` 抽出应用服务与本地 API；
-- 建立版本化 localhost API；
-- 保留旧 Web UI 作为过渡；
-- 新建 Avalonia Desktop；
-- 完成 Library / Reader / Evidence Inspector / Settings / Jobs；
-- PDF 页码跳转和证据定位形成完整桌面闭环；
-- 完成 Windows-first 开发版打包。
+## 🧪 开发与测试
 
-### Milestone B — Paper Reader Completion
+Pull Request / push 的 CI 设计为：**Python/API 回归 → 源码隐私扫描 → Windows 与 Apple Silicon Avalonia 编译**。完整后端冻结及安装器构建在 Release 工作流中进行，二者不要混为一谈。
 
-- Human review loop：确认 / 修正 claim 与 semantic support；
-- 用户批注与证据联动；
-- Eval Harness 与回归集；
-- 改善 PDF/Claim/Evidence 并排阅读体验。
+```powershell
+# Python 核心、API 与安全发布回归
+conda run -p .conda-env python -m pytest -q tests\test_api_phase1.py tests\test_api_phase2.py tests\test_api_ui_parity.py tests\test_secure_distribution.py tests\test_desktop_release_pipeline.py tests\test_crossplatform_desktop.py
 
-### Milestone C — Book Understanding v1
+# 构建桌面端
+dotnet build .\desktop\SRA.Desktop\SRA.Desktop.csproj
 
-- EPUB / PDF 书籍导入；
-- 章节树；
-- 全书中心论题、章节论点、概念、案例、反论点、重要引文；
-- Book Reading Report；
-- 书籍证据定位与用户笔记。
-
-### Milestone D — Research Projects
-
-- Project / Reading List / Tag / Reading Status；
-- 论文与书籍统一加入研究项目；
-- Project-level research question；
-- normalized Claim / Evidence memory；
-- Evidence Matrix。
-
-### Milestone E — Synthesis
-
-- 多文献共识 / 冲突 / scope condition / 方法差异；
-- Debate / Concept / Theory 关系；
-- Research Gap / Puzzle 候选；
-- External challenge layer / citation context。
-
-### Milestone F — Literature Review & Writing
-
-```text
-Approved Evidence Matrix
-  → Outline
-  → Human Approval
-  → Draft
-  → Citation / Evidence Check
-  → Human Revision
+# 检查准备提交的源码是否包含私人材料
+conda run -p .conda-env python scripts\check_release_safety.py source .
 ```
 
-不提供“一键生成即可提交”的产品承诺。
+- [CI：自动测试与编译](https://github.com/daseinzc-509/social-science-research-ide/actions/workflows/ci.yml)
+- [Release：Windows + macOS 捆绑版](https://github.com/daseinzc-509/social-science-research-ide/actions/workflows/release-desktop.yml)
+- [提 Issue / 报告问题](https://github.com/daseinzc-509/social-science-research-ide/issues)
+
+如果要贡献代码，建议先阅读 `PROJECT_DESIGN.md` 的研究原则，保持**可追溯性、来源分离、迁移安全和向后兼容**；修改解析器、模型输出结构或打包流程时，同时提交对应回归测试。
+
+## 🗺️ 路线图
+
+| 方向 | 状态 |
+| --- | --- |
+| 论文导入、PDF provenance、Lite / Pro 审读、精读报告 | **已实现基础工作流** |
+| Avalonia 桌面工作台、本地 API、Windows + Apple Silicon 打包流水线 | **已实现 / Alpha 验证中** |
+| 安装器原生验收、Docling 真 PDF 打包测试、macOS 签名与公证 | **待完成** |
+| PDF × Claim/Evidence 双向定位、研究者确认与修正闭环 | **计划中** |
+| 可量化 Eval Harness、跨论文 Evidence Matrix | **计划中** |
+| Book Understanding、研究项目、多文献综合与综述辅助 | **远期方向** |
+
+> **范围边界：** `SemanticSupportStatus` 属于可复核的模型辅助判断，而不是因果识别、统计显著性或研究结论的数学证明。研究者应对重要引文、解释与外部模型处理政策独立复核。
+
+## 📚 项目文档
+
+- [`PROJECT_DESIGN.md`](PROJECT_DESIGN.md) — 目标、原则与研究工作流。
+- [`docs/CROSS_PLATFORM_DISTRIBUTION.md`](docs/CROSS_PLATFORM_DISTRIBUTION.md) — Windows/macOS 打包与发布限制。
+- [`docs/SECURE_DISTRIBUTION.md`](docs/SECURE_DISTRIBUTION.md) — API Key、PDF、数据隔离和安全门禁。
+- [`docs/INSTALL_UPDATE_UNINSTALL.md`](docs/INSTALL_UPDATE_UNINSTALL.md) — 更新、卸载与个人数据保留。
+- [`docs/REPOSITORY_HYGIENE.md`](docs/REPOSITORY_HYGIENE.md) — 哪些目录该保留、忽略或安全清理。
+
+## 📄 License / 授权
+
+Original source code that its contributors have the right to license is
+released under **[GNU AGPL-3.0-only](LICENSE)**. The license allows commercial
+use but requires covered downstream modifications to honor its copyleft
+obligations. It **does not** prohibit all commercial activity.
+
+Project identity and artwork are discussed in [TRADEMARKS.md](TRADEMARKS.md).
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Detailed notes:
+[docs/LICENSING.md](docs/LICENSING.md).
+
+**AI-assisted development.** SRA is maintained by a person and has been
+built with significant AI assistance. The maintainer leads product decisions,
+review and tests. The project makes no blanket claim of exclusive copyright
+in purely AI-generated or third-party material; see the licensing notes.
 
 ---
 
-## 当前边界
-
-- 当前核心能力仍以论文为主；
-- 论文身份元数据目前主要来自 PDF / layout recovery；外部 authority resolver 仍是后续能力；
-- `SemanticSupportStatus` 是模型辅助审读结果，不是统计学证明；
-- 完整 normalized research memory、跨论文 Evidence Matrix、书籍理解和文献综述尚未完成；
-- 当前 Web UI 是过渡产品界面；
-- Avalonia Desktop 与版本化 Local API 尚未实现。
-
----
-
-## 核心原则
-
-1. **Evidence First**：重要判断必须能回到来源页、block 或 evidence span。
-2. **Traceability ≠ Entailment**：找到原文不等于原文充分支持结论。
-3. **来源分离**：作者陈述、AI 推断、用户笔记不能混为一类。
-4. **确定性任务由代码做**：页码、source ID、证据 token、去重、缓存和 schema 边界由程序校验。
-5. **UI 不拥有研究逻辑**：桌面端只通过稳定应用接口访问研究引擎。
-6. **Paper / Book 使用不同阅读镜头，共享 Evidence 基础设施。**
-7. **先形成可审计研究记忆，再做多文献生成。**
-
-项目核心目标仍然是：
-
-> **可审计的学术理解，而不是更方便的摘要。**
+<p align="center">
+  <strong>Evidence before fluency. Researcher before automation.</strong><br />
+  <sub>Social Science Research IDE · 本地优先的可审计学术理解工作台</sub>
+</p>

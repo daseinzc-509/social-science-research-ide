@@ -34,7 +34,7 @@ public partial class MainWindow : Window
 
         bool showLibrary = page == "papers";
         SidebarPane.IsVisible = showLibrary;
-        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 280 : 0);
+        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 302 : 0);
     }
 
     private static void SetSelected(Button button, bool selected)
@@ -61,12 +61,6 @@ public partial class MainWindow : Window
     {
         NavigateTo("settings");
         if (ViewModel is not null) await ViewModel.LoadSettingsAsync();
-    }
-
-    // Content-first mode. The preference is saved by the view model.
-    private void ToggleInspector_Click(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is not null) ViewModel.ShowInspector = !ViewModel.ShowInspector;
     }
 
     private void MinimizeWindow_Click(object? sender, RoutedEventArgs e)
@@ -117,6 +111,26 @@ public partial class MainWindow : Window
         );
         if (!await confirm.ShowDialog<bool>(this)) return;
         await ViewModel.ApplyPruneCacheAsync();
+    }
+
+    private void ToggleInspector_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.ShowInspector = !ViewModel.ShowInspector;
+    }
+
+    private async void CheckForUpdates_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.CheckForUpdatesAsync();
+    }
+
+    private async void OpenUpdateRelease_Click(object? sender, RoutedEventArgs e)
+    {
+        var url = ViewModel?.UpdateReleaseUrl;
+        if (url is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return;
+        if (uri.Scheme != Uri.UriSchemeHttps ||
+            !uri.AbsoluteUri.StartsWith("https://github.com/daseinzc-509/social-science-research-ide/releases/tag/", StringComparison.OrdinalIgnoreCase))
+            return;
+        await Launcher.LaunchUriAsync(uri);
     }
 
     private async void SaveEmbeddedSettings_Click(object? sender, RoutedEventArgs e)
@@ -249,9 +263,20 @@ public partial class MainWindow : Window
 
     private async void OpenPdf_Click(object? sender, RoutedEventArgs e)
     {
-        var uri = ViewModel?.SelectedPdfUri;
-        if (uri is null) return;
-        await Launcher.LaunchUriAsync(uri);
+        if (ViewModel?.SelectedPaper is null) return;
+        try
+        {
+            var path = await ViewModel.Api.DownloadPdfForOpenAsync(ViewModel.SelectedPaper.Id);
+            await Launcher.LaunchUriAsync(new UriBuilder
+            {
+                Scheme = Uri.UriSchemeFile,
+                Path = path,
+            }.Uri);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "无法打开 PDF：" + exc.Message;
+        }
     }
 
     private async void DeletePaper_Click(object? sender, RoutedEventArgs e)

@@ -1,6 +1,14 @@
 * text=auto
-*.md text eol=lf
-*.py text eol=lf
-*.toml text eol=lf
+
+# Shell scripts must use LF
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+# GitHub Actions
 *.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows scripts
 *.bat text eol=crlf
+*.cmd text eol=crlf

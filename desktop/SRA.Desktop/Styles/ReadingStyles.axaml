@@ -17,6 +17,12 @@
     <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Transitions">
+      <Transitions><BrushTransition Property="BorderBrush" Duration="0:0:0.16" /></Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.claim-card:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
   </Style>
   <Style Selector="Border.claim-scope">
     <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />

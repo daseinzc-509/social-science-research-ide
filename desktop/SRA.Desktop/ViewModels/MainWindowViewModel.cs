@@ -11,23 +11,30 @@ namespace SRA.Desktop.ViewModels;
 public partial class MainWindowViewModel : ObservableObject
 {
     private readonly SraApiClient _api;
+    private readonly Task _backendReadyTask;
     private readonly DesktopPreferencesService _preferences;
+    private readonly DesktopUpdateService _updates = new();
     private readonly List<PaperSummary> _allPapers = [];
     private CancellationTokenSource? _selectionCts;
 
     public MainWindowViewModel(
         SraApiClient api,
         DesktopPreferencesService? preferences = null,
-        DesktopPreferences? snapshot = null)
+        DesktopPreferences? snapshot = null,
+        Task? backendReadyTask = null)
     {
         _api = api;
+        _backendReadyTask = backendReadyTask ?? Task.CompletedTask;
         _preferences = preferences ?? new DesktopPreferencesService();
         snapshot ??= _preferences.Load();
         themeMode = snapshot.ThemeMode;
         showInspector = snapshot.ShowInspector;
+        checkForUpdatesAtStartup = snapshot.CheckForUpdatesAtStartup;
+        includePrereleaseUpdates = snapshot.IncludePrereleaseUpdates;
         Settings = new SettingsWindowViewModel(api);
         App.ApplyThemeMode(themeMode);
         _ = InitializeAsync();
+        if (checkForUpdatesAtStartup) _ = CheckForUpdatesAsync(silent: true);
     }
 
     public SraApiClient Api => _api;
@@ -91,6 +98,12 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string excludeAfterText = "";
     [ObservableProperty] private string themeMode = "跟随系统";
     [ObservableProperty] private bool showInspector = true;
+    [ObservableProperty] private bool checkForUpdatesAtStartup = true;
+    [ObservableProperty] private bool includePrereleaseUpdates;
+    [ObservableProperty] private bool isCheckingForUpdates;
+    [ObservableProperty] private bool hasUpdateAvailable;
+    [ObservableProperty] private string updateStatusText = "尚未检查更新。";
+    [ObservableProperty] private string? updateReleaseUrl;
     [ObservableProperty] private string dashboardPapers = "—";
     [ObservableProperty] private string dashboardAnalyzed = "—";
     [ObservableProperty] private string dashboardPending = "—";
@@ -99,6 +112,8 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string dashboardOutput = "任务中心尚未加载。";
     [ObservableProperty] private string maintenanceOutput = "数据库健康状态尚未加载。";
 
+    public string InstalledDesktopVersion => _updates.InstalledVersionLabel;
+    public bool CanOpenUpdateRelease => !string.IsNullOrWhiteSpace(UpdateReleaseUrl);
     public bool HasSelection => SelectedPaper is not null;
     public bool HasCard => SelectedPaper?.HasCard == true;
     public bool HasStudyRationale => !string.IsNullOrWhiteSpace(StudyRationale);
@@ -110,6 +125,8 @@ public partial class MainWindowViewModel : ObservableObject
     {
         try
         {
+            if (!_backendReadyTask.IsCompleted) StatusText = "正在启动本地研究引擎…";
+            await _backendReadyTask;
             var health = await _api.GetHealthAsync();
             ApiStatusText = health.Status == "ok" ? $"API 已连接 · {health.ApiVersion}" : $"API 状态：{health.Status}";
             await RefreshAsync();
@@ -117,8 +134,8 @@ public partial class MainWindowViewModel : ObservableObject
         catch (Exception exc)
         {
             ApiStatusText = "API 未连接";
-            StatusText = "请先在项目根目录启动：sra api";
-            JobLog = exc.Message;
+            StatusText = "本地研究引擎启动失败：" + exc.Message;
+            JobLog = exc.ToString();
         }
     }
 
@@ -151,12 +168,44 @@ public partial class MainWindowViewModel : ObservableObject
         SaveDesktopPreferences();
     }
 
+    partial void OnCheckForUpdatesAtStartupChanged(bool value) => SaveDesktopPreferences();
+    partial void OnIncludePrereleaseUpdatesChanged(bool value) => SaveDesktopPreferences();
+    partial void OnUpdateReleaseUrlChanged(string? value) => OnPropertyChanged(nameof(CanOpenUpdateRelease));
+
+    /// <summary>Check the public GitHub release list only. Never install silently.</summary>
+    public async Task CheckForUpdatesAsync(bool silent = false)
+    {
+        if (IsCheckingForUpdates) return;
+        IsCheckingForUpdates = true;
+        if (!silent) UpdateStatusText = "正在检查 GitHub 版本…";
+        try
+        {
+            var latest = await _updates.FindUpdateAsync(IncludePrereleaseUpdates);
+            UpdateReleaseUrl = latest?.PageUri.AbsoluteUri;
+            HasUpdateAvailable = latest is not null;
+            UpdateStatusText = latest is null
+                ? $"已是最新的可用版本（当前 {InstalledDesktopVersion}）。"
+                : $"发现新版 {latest.Tag}，请在 GitHub 下载经校验的安装包。";
+        }
+        catch (Exception exception)
+        {
+            if (!silent) UpdateStatusText = $"检查失败：{exception.Message}";
+            // Offline/GitHub down must never prevent the research workspace from starting.
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
+        }
+    }
+
     private void SaveDesktopPreferences()
     {
         _preferences.Save(new DesktopPreferences
         {
             ThemeMode = ThemeMode,
             ShowInspector = ShowInspector,
+            CheckForUpdatesAtStartup = CheckForUpdatesAtStartup,
+            IncludePrereleaseUpdates = IncludePrereleaseUpdates,
         });
     }
 

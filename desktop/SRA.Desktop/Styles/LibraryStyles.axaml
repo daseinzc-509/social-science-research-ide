@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Paper library: selected color is painted by us, never by the OS accent. -->
   <Style Selector="Border.library-pane">
     <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
@@ -13,25 +14,63 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="Margin" Value="0,0,0,6" />
     <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="MinHeight" Value="74" />
+    <Setter Property="MinHeight" Value="76" />
   </Style>
-  <Style Selector="ListBox.library-list ListBoxItem:selected">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+  <!-- Fluent's built-in selected state sets its ContentPresenter to Windows' accent.
+       Overriding ListBoxItem.Background alone does not clear that red highlight. -->
+  <Style Selector="ListBox.library-list ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
   </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- Smooth card-level hover / selection transition, including purple selection bar. -->
   <Style Selector="Border.paper-list-card">
     <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.16" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.16" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="ListBox.library-list ListBoxItem:pointerover Border.paper-list-card">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
   </Style>
   <Style Selector="ListBox.library-list ListBoxItem:selected Border.paper-list-card">
     <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
+  </Style>
+  <Style Selector="ListBox.library-list ListBoxItem:selected:pointerover Border.paper-list-card">
+    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
   <Style Selector="Border.paper-selection-marker">
     <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.16" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="ListBox.library-list ListBoxItem:selected Border.paper-selection-marker">
     <Setter Property="Background" Value="{DynamicResource AccentBrush}" />

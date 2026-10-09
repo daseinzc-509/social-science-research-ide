@@ -1,0 +1,73 @@
+name: CI / Windows + macOS Desktop
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sra-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Privacy gate for Git-tracked source
+        run: python scripts/check_release_safety.py source .
+      - name: Install Python API and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install 'fastapi>=0.115,<1' 'uvicorn>=0.30,<1' 'python-multipart>=0.0.9,<1' 'httpx>=0.27,<1' 'pytest>=8,<10'
+      - name: Compile Python + run regressions
+        run: |
+          python -m compileall -q src scripts installer/macos
+          python -m pytest -q \
+            tests/test_api_phase1.py \
+            tests/test_api_phase2.py \
+            tests/test_api_ui_parity.py \
+            tests/test_desktop_chrome.py \
+            tests/test_secure_distribution.py \
+            tests/test_desktop_release_pipeline.py \
+            tests/test_crossplatform_desktop.py
+
+  desktop-compile:
+    name: Compile ${{ matrix.target }}
+    needs: python-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+          - target: osx-arm64
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Avalonia desktop
+        shell: bash
+        run: |
+          dotnet restore desktop/SRA.Desktop/SRA.Desktop.csproj
+          dotnet build desktop/SRA.Desktop/SRA.Desktop.csproj -c Release --no-restore
+          dotnet publish desktop/SRA.Desktop/SRA.Desktop.csproj -c Release -r "${{ matrix.target }}" \
+            --self-contained true -p:PublishTrimmed=false -p:PublishSingleFile=false \
+            -o "build-ci/${{ matrix.target }}"
+      - name: Upload compiled Desktop smoke artifact (frontend only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRA-Frontend-CI-${{ matrix.target }}
+          path: build-ci/${{ matrix.target }}/
+          retention-days: 5

@@ -6,6 +6,8 @@ public sealed class DesktopPreferences
 {
     public string ThemeMode { get; set; } = "跟随系统";
     public bool ShowInspector { get; set; } = true;
+    public bool CheckForUpdatesAtStartup { get; set; } = true;
+    public bool IncludePrereleaseUpdates { get; set; } = false;
 }
 
 public sealed class DesktopPreferencesService

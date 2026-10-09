@@ -1,0 +1,215 @@
+name: Release / Windows + macOS bundled Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Preview version, e.g. 0.2.0-alpha.1 (no v prefix)'
+        required: true
+        default: '0.2.0-alpha.1'
+      backend_profile:
+        description: 'full includes Docling; core is a troubleshooting build'
+        required: true
+        default: 'full'
+        type: choice
+        options: [full, core]
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      assembly: ${{ steps.version.outputs.assembly }}
+      mac_short: ${{ steps.version.outputs.mac_short }}
+      profile: ${{ steps.version.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate release version + determine backend profile
+        id: version
+        shell: bash
+        env:
+          TRIGGER: ${{ github.event_name }}
+          REQUESTED: ${{ inputs.version }}
+          PROFILE: ${{ inputs.backend_profile }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGER" = "push" ]; then
+            tag="$REF_NAME"
+            profile=full
+          else
+            tag="v${REQUESTED#v}"
+            profile="$PROFILE"
+          fi
+          for field in tag version assembly mac_short; do
+            echo "$field=$(python scripts/release_version.py "$tag" --field "$field")" >> "$GITHUB_OUTPUT"
+          done
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+      - name: Prevent tracked credential / PDF leakage
+        run: python scripts/check_release_safety.py source .
+
+  bundle:
+    name: Bundle ${{ matrix.target }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+            installer: windows
+          - target: osx-arm64
+            runner: macos-26
+            installer: macos
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      ASSEMBLY_VERSION: ${{ needs.preflight.outputs.assembly }}
+      MAC_SHORT_VERSION: ${{ needs.preflight.outputs.mac_short }}
+      BUNDLE_PROFILE: ${{ needs.preflight.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Confirm native Apple Silicon runner
+        if: matrix.target == 'osx-arm64'
+        shell: bash
+        run: |
+          if [ "$(uname -m)" != 'arm64' ]; then
+            echo '::error::SRA macOS builds require an Apple Silicon runner'
+            exit 1
+          fi
+      - name: Install backend dependencies (run on target architecture)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install 'fastapi>=0.115,<1' 'uvicorn>=0.30,<1' 'python-multipart>=0.0.9,<1' 'httpx>=0.27,<1' 'PyInstaller==6.22.3' 'pymupdf>=1.24,<2'
+          if [ "$BUNDLE_PROFILE" = "full" ]; then
+            python -m pip install 'docling==2.134.0'
+          fi
+          if [ "${{ matrix.installer }}" = 'macos' ]; then
+            python -m pip install 'keyring>=25,<27'
+          fi
+      - name: Freeze Python backend
+        shell: bash
+        run: |
+          python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --output dist/backend
+          python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
+      - name: Publish Avalonia self-contained desktop
+        shell: bash
+        run: |
+          dotnet publish desktop/SRA.Desktop/SRA.Desktop.csproj -c Release -r "${{ matrix.target }}" \
+            --self-contained true -p:PublishTrimmed=false -p:PublishSingleFile=false \
+            "-p:Version=$RELEASE_VERSION" "-p:AssemblyVersion=$ASSEMBLY_VERSION" \
+            "-p:FileVersion=$ASSEMBLY_VERSION" -o dist/desktop
+      - name: Assemble complete Windows payload
+        if: matrix.installer == 'windows'
+        shell: pwsh
+        run: |
+          python scripts/assemble_windows.py --desktop dist/desktop --backend dist/backend/sra-backend --output dist/SRA-Windows
+          python scripts/check_release_safety.py artifact dist/SRA-Windows
+          python scripts/make_portable_zip.py dist/SRA-Windows "dist/SRA-win-x64-$env:RELEASE_TAG.zip"
+          python scripts/check_release_safety.py zip "dist/SRA-win-x64-$env:RELEASE_TAG.zip"
+      - name: Install Inno Setup and create Windows installer
+        if: matrix.installer == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Inno Setup compiler missing' }
+          $publish = (Resolve-Path 'dist/SRA-Windows').Path
+          $destination = (Resolve-Path 'dist').Path
+          & $iscc "/DAppVersion=$env:RELEASE_VERSION" "/DPublishDir=$publish" "/DOutputDir=$destination" installer/windows/SRA.Desktop.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer failed' }
+      - name: Windows install/uninstall + user data survival
+        if: matrix.installer == 'windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/SRA-Desktop-Setup-win-x64-*.exe | Select-Object -First 1
+          if (-not $installer) { throw 'No installer built' }
+          $dataDir = Join-Path $env:LOCALAPPDATA 'SRA'
+          New-Item $dataDir -ItemType Directory -Force | Out-Null
+          $sentinel = Join-Path $dataDir 'sra-smoke-private-user-file'
+          'preserve this' | Set-Content $sentinel
+          $setup = Start-Process $installer.FullName -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw 'Installer failed' }
+          $installedDir = Join-Path $env:LOCALAPPDATA 'Programs/SRA Desktop'
+          if (-not (Test-Path (Join-Path $installedDir 'backend/sra-backend/sra-backend.exe'))) { throw 'Backend not installed' }
+          $uninstall = Start-Process (Join-Path $installedDir 'unins000.exe') -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
+          if (-not (Test-Path $sentinel)) { throw 'Uninstall removed user research data' }
+          Remove-Item $sentinel
+      - name: Assemble, sign preview and package macOS app + DMG
+        if: matrix.installer == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python installer/macos/package_app.py --desktop dist/desktop --backend dist/backend/sra-backend \
+            --output dist/SRA.app --version "$MAC_SHORT_VERSION"
+          bash installer/macos/make_icon.sh desktop/SRA.Desktop/Assets/sra-logo.png dist/SRA.app/Contents/Resources/sra.icns
+          codesign --force --deep --sign - --timestamp=none dist/SRA.app
+          codesign --verify --deep --strict dist/SRA.app
+          python scripts/check_release_safety.py artifact dist/SRA.app
+          mkdir -p dist/dmg-root
+          ditto dist/SRA.app dist/dmg-root/SRA.app
+          ln -s /Applications dist/dmg-root/Applications
+          hdiutil create -volname 'SRA Desktop' -srcfolder dist/dmg-root -ov -format UDZO "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.dmg"
+          ditto -c -k --sequesterRsrc --keepParent dist/SRA.app "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
+          python scripts/check_release_safety.py zip "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
+      - name: Enforce GitHub asset size limit before publishing
+        shell: bash
+        run: python scripts/check_asset_sizes.py dist
+      - name: SHA-256 checksums
+        shell: bash
+        run: |
+          python scripts/write_checksums.py dist "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SRA-bundle-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SRA-Desktop-Setup-*.exe
+            dist/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: 21
+
+  github-release:
+    if: github.event_name == 'push'
+    needs: [preflight, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: SRA-bundle-*
+          merge-multiple: true
+          path: release-assets
+      - name: Verify required Windows and Apple Silicon packages
+        run: |
+          test -n "$(find release-assets -maxdepth 1 -name '*win-x64*.zip' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*osx-arm64*.dmg' -print -quit)"
+      - name: Upload one GitHub Release for all platforms
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          gh release create "$TAG" release-assets/* \
+            --title "SRA $TAG – Windows + macOS alpha" --prerelease \
+            --notes "Bundled Windows + macOS desktop builds with private Python API. Windows and macOS Apple Silicon ship Docling. macOS Intel is not supported in this release. Docling may fetch model weights on first use. macOS packages are ad-hoc signed previews, NOT Apple notarized; manual security approval may be required. User PDF and API credentials are NOT bundled."

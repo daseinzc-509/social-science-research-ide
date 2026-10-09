@@ -10,13 +10,14 @@ namespace SRA.Desktop.Services;
 public sealed class SraApiClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly List<string> _temporaryPdfs = [];
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public SraApiClient(string baseUrl)
+    public SraApiClient(string baseUrl, string? desktopSessionToken = null)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
         {
@@ -29,11 +30,46 @@ public sealed class SraApiClient : IDisposable
             BaseAddress = BaseUri,
             Timeout = TimeSpan.FromMinutes(2),
         };
+        if (!string.IsNullOrEmpty(desktopSessionToken))
+            _http.DefaultRequestHeaders.Add("X-SRA-Desktop-Token", desktopSessionToken);
     }
 
     public Uri BaseUri { get; }
     public Uri DocsUri => new(BaseUri, "docs");
     public Uri PaperPdfUri(string paperId) => new(BaseUri, $"api/v1/papers/{Uri.EscapeDataString(paperId)}/pdf");
+
+    /// <summary>
+    /// The bundled backend requires a secret header for PDF access. An external
+    /// PDF viewer cannot add that header, so save a short-lived user-only temp
+    /// copy and open the local file instead of leaking a bearer token in a URL.
+    /// </summary>
+    public async Task<string> DownloadPdfForOpenAsync(string paperId, CancellationToken cancellationToken = default)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "SRA-PDF-Viewer", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        if (!OperatingSystem.IsWindows())
+            new DirectoryInfo(folder).UnixFileMode =
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var destination = Path.Combine(folder, "paper.pdf");
+        try
+        {
+            using var response = await _http.GetAsync(
+                $"api/v1/papers/{Uri.EscapeDataString(paperId)}/pdf",
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+            await using (var output = File.Create(destination))
+            {
+                await response.Content.CopyToAsync(output, cancellationToken);
+            }
+            _temporaryPdfs.Add(folder);
+            return destination;
+        }
+        catch
+        {
+            try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
+            throw;
+        }
+    }
 
     public Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync<HealthResponse>("api/v1/health", cancellationToken);
@@ -282,7 +318,17 @@ public sealed class SraApiClient : IDisposable
         throw new SraApiException($"SRA API {(int)response.StatusCode}: {detail}".Trim());
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        foreach (var folder in _temporaryPdfs)
+        {
+            try { Directory.Delete(folder, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        _temporaryPdfs.Clear();
+    }
 }
 
 public sealed class SraApiException(string message) : Exception(message);

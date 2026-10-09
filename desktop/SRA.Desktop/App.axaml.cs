@@ -10,6 +10,7 @@ namespace SRA.Desktop;
 
 public partial class App : Application
 {
+    private LocalBackendHost? _backendHost;
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -34,10 +35,16 @@ public partial class App : Application
             var snapshot = preferences.Load();
             ApplyThemeMode(snapshot.ThemeMode);
 
-            var api = new SraApiClient("http://127.0.0.1:8766/");
+            _backendHost = LocalBackendHost.Launch();
+            var api = new SraApiClient(_backendHost.BaseUri.ToString(), _backendHost.SessionToken);
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(api, preferences, snapshot),
+                DataContext = new MainWindowViewModel(api, preferences, snapshot, _backendHost.ReadyTask),
+            };
+            desktop.Exit += (_, _) =>
+            {
+                api.Dispose();
+                _backendHost.Dispose();
             };
         }
 

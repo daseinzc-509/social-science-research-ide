@@ -24,8 +24,9 @@
                 Background="Transparent"
                 WindowDecorationProperties.ElementRole="TitleBar">
           <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-            <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True">
-              <Image Source="/Assets/sra-logo.png" Stretch="UniformToFill"/>
+            <Border Width="32" Height="32" CornerRadius="9" ClipToBounds="True">
+              <Image Source="/Assets/sra-titlebar.png" Stretch="UniformToFill"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <TextBlock Text="Social Science Research IDE" FontSize="13"
                        VerticalAlignment="Center" FontWeight="SemiBold"/>
@@ -34,7 +35,7 @@
           </StackPanel>
         </Border>
 
-        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2">
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
           <Button x:Name="PapersNav" Content="论文库" Classes="chrome-nav selected" Click="PapersNav_Click" />
           <Button x:Name="TasksNav" Content="任务" Classes="chrome-nav" Click="TasksNav_Click" />
           <Button x:Name="HealthNav" Content="数据" Classes="chrome-nav" Click="HealthNav_Click" />
@@ -44,15 +45,7 @@
         <Border Grid.Column="2" Background="Transparent"
                 WindowDecorationProperties.ElementRole="TitleBar"/>
 
-        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="0,0,12,0">
-          <Border VerticalAlignment="Center" ToolTip.Tip="{Binding ApiStatusText}">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Border Background="{DynamicResource AccentBrush}" Width="7" Height="7"
-                      CornerRadius="99" VerticalAlignment="Center"/>
-              <TextBlock Text="本地 API" Foreground="{DynamicResource InkSecondaryBrush}"
-                         VerticalAlignment="Center" FontSize="10"/>
-            </StackPanel>
-          </Border>
+        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
           <Button Content="＋ 导入 PDF" Classes="primary chrome-import" ToolTip.Tip="导入 PDF">
             <Button.Flyout>
               <MenuFlyout>
@@ -65,9 +58,22 @@
         </StackPanel>
 
         <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Stretch">
-          <Button Content="—" Classes="window-caption" FontSize="15" ToolTip.Tip="最小化" Click="MinimizeWindow_Click"/>
-          <Button Content="□" Classes="window-caption" FontSize="17" ToolTip.Tip="最大化 / 还原" Click="ToggleMaximizeWindow_Click"/>
-          <Button Content="×" Classes="window-caption close" FontSize="20" ToolTip.Tip="关闭窗口" Click="CloseWindow_Click"/>
+          <Button Classes="window-caption" ToolTip.Tip="最小化" Click="MinimizeWindow_Click">
+            <!-- Unlike a horizontal Path (zero-height bounds), this remains visible at every DPI. -->
+            <Border Width="15" Height="2" CornerRadius="1"
+                    Background="{DynamicResource InkBrush}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Button>
+          <Button Classes="window-caption" ToolTip.Tip="最大化 / 还原" Click="ToggleMaximizeWindow_Click">
+            <Path Data="M 2,2 L 12,2 L 12,12 L 2,12 Z" Width="14" Height="14" Stretch="Uniform"
+                  StrokeThickness="1.35"
+                  StrokeJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Button>
+          <Button Classes="window-caption close" ToolTip.Tip="关闭窗口" Click="CloseWindow_Click">
+            <Path Data="M 2,2 L 12,12 M 12,2 L 2,12" Width="14" Height="14" Stretch="Uniform"
+                  StrokeThickness="1.6"
+                  StrokeLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Button>
         </StackPanel>
       </Grid>
     </Border>
@@ -107,9 +113,9 @@
                         <TextBlock Text="{Binding AuthorLine}" Classes="muted" FontSize="11"
                                    TextTrimming="CharacterEllipsis"/>
                         <Grid ColumnDefinitions="*,Auto">
-                          <TextBlock Text="{Binding StatusLine}" Classes="tertiary" FontSize="10"/>
-                          <Border Grid.Column="1" Classes="badge-accent" IsVisible="{Binding HasCard}">
-                            <TextBlock Text="已分析" Foreground="{DynamicResource AccentBrush}" FontSize="9"/>
+                          <TextBlock Text="{Binding StatusLine}" Classes="tertiary" FontSize="10" VerticalAlignment="Center"/>
+                          <Border Grid.Column="1" Classes="badge-accent" IsVisible="{Binding HasCard}" VerticalAlignment="Center">
+                            <TextBlock Text="已分析" Foreground="{DynamicResource AccentBrush}" FontSize="9" VerticalAlignment="Center"/>
                           </Border>
                         </Grid>
                       </StackPanel>
@@ -508,6 +514,39 @@
                   <CheckBox IsChecked="{Binding Settings.UseLiteConnection}" Content="Pro 使用与 Lite 相同的 API Key 和 Base URL"/>
                   <StackPanel Spacing="9"><TextBlock Text="Pro" FontWeight="SemiBold"/><TextBox Text="{Binding Settings.ProApiKey}" PasswordChar="●" PlaceholderText="{Binding Settings.ProKeyHint}" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProApiBaseUrl}" PlaceholderText="Base URL" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProModel}" PlaceholderText="Model"/></StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="10"><Button Content="保存模型设置" Classes="primary" Click="SaveEmbeddedSettings_Click"/><TextBlock Text="{Binding Settings.StatusText}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="更新与安装" Classes="h2"/>
+                  <TextBlock Text="检查新版本，并从官方 GitHub Release 安装。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="12">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="启动时自动检查更新" FontWeight="SemiBold"/>
+                      <TextBlock Text="仅请求公开的版本信息，不上传论文或 API Key。" Classes="muted" FontSize="10"/>
+                    </StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding CheckForUpdatesAtStartup, Mode=TwoWay}" VerticalAlignment="Center"/>
+                  </Grid>
+                  <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"/>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="允许预发布版本" FontWeight="SemiBold"/>
+                      <TextBlock Text="开启后也会提示 alpha/beta/rc 版本。" Classes="muted" FontSize="10"/>
+                    </StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding IncludePrereleaseUpdates, Mode=TwoWay}" VerticalAlignment="Center"/>
+                  </Grid>
+                  <TextBlock Text="{Binding InstalledDesktopVersion}" Classes="muted" FontSize="11"/>
+                  <TextBlock Text="{Binding UpdateStatusText}" TextWrapping="Wrap" FontSize="11"/>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="检查更新" Classes="secondary" Click="CheckForUpdates_Click"/>
+                    <Button Content="打开发布页面" Classes="secondary" Click="OpenUpdateRelease_Click" IsEnabled="{Binding CanOpenUpdateRelease}"/>
+                  </StackPanel>
+                  <TextBlock Text="目前采用自动检测 + 用户确认安装。Windows 安装器可正常卸载，卸载默认不删除本人的 PDF、数据库和 API Key。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
                 </StackPanel>
               </Grid>
             </Border>

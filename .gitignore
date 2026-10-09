@@ -1,19 +1,57 @@
+# Python environments, caches and generated outputs
 .venv/
 .conda-env/
 .conda-pkgs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
-data/
-parsed-paper*.txt
-paper-card*.json
-.env
-.env.*
-!.env.example
+coverage.xml
 *.egg-info/
 build/
 dist/
+
+# Private configuration and credentials (keep .env.example public)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.dpapi
+*.bak
+secrets.json
+secrets.*.json
+
+# Research data: PDFs, local SQLite, generated PaperCards / parse outputs
+/data/
+data/
+*.pdf
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+parsed-paper*.txt
+paper-card*.json
+
+# .NET / desktop IDE build products
+**/bin/
+**/obj/
 .vs/
 *.user
 *.suo
+
+# Native/OS local noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+
+# Release output and staging (do NOT ignore real installer source)
+/artifacts/
+/releases/
+*.nupkg

@@ -12,8 +12,11 @@
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}"/>
     <Setter Property="BorderThickness" Value="0"/>
     <Setter Property="CornerRadius" Value="9"/>
-    <Setter Property="Padding" Value="15,8"/>
-    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="Padding" Value="14,8"/>
+    <Setter Property="Height" Value="36"/>
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
     <Setter Property="FontSize" Value="12"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
@@ -42,11 +45,14 @@
   <Style Selector="Button.window-caption">
     <Setter Property="Width" Value="43"/>
     <Setter Property="MinWidth" Value="43"/>
-    <Setter Property="MinHeight" Value="52"/>
+    <Setter Property="Height" Value="54"/>
+    <Setter Property="MinHeight" Value="54"/>
     <Setter Property="Padding" Value="0"/>
     <Setter Property="CornerRadius" Value="0"/>
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}"/>
     <Setter Property="FontWeight" Value="Normal"/>
   </Style>
@@ -57,6 +63,15 @@
   <Style Selector="Button.window-caption.close:pointerover">
     <Setter Property="Background" Value="#D84E62"/>
     <Setter Property="Foreground" Value="White"/>
+  </Style>
+  <Style Selector="Button.window-caption Path">
+    <Setter Property="Stroke" Value="{DynamicResource InkSecondaryBrush}"/>
+  </Style>
+  <Style Selector="Button.window-caption:pointerover Path">
+    <Setter Property="Stroke" Value="{DynamicResource InkBrush}"/>
+  </Style>
+  <Style Selector="Button.window-caption.close:pointerover Path">
+    <Setter Property="Stroke" Value="White"/>
   </Style>
   <Style Selector="Button.window-caption.close:pressed">
     <Setter Property="Background" Value="#B9364B"/>
