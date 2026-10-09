@@ -1,5 +1,6 @@
 name: CI / Windows + macOS Desktop
 
+run-name: "CI · ${{ github.ref_name }} · ${{ github.event_name }}"
 on:
   push:
     branches: ['**']
