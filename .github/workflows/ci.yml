@@ -44,6 +44,8 @@ jobs:
             tests/test_build_size_audit.py \
             tests/test_release_pruning.py \
             tests/test_dependency_collection.py \
+            tests/test_lean_collection.py \
+            tests/test_titlebar_version.py \
             tests/test_macos_dmg_packaging.py
 
   desktop-compile:

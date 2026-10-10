@@ -53,7 +53,23 @@ def full_profile_imports() -> None:
     from docling.document_converter import DocumentConverter
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from huggingface_hub import hf_hub_download
-    from transformers import AutoTokenizer
+    from transformers import AutoConfig, AutoTokenizer
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from safetensors.torch import load as load_tensor, save as save_tensor
+
+    # These native / dynamically loaded packages live outside Transformers'
+    # own folder and MUST still function under the lean collection policy.
+    tokenizer = Tokenizer(WordLevel({"[UNK]": 0, "sra": 1}, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = Whitespace()
+    if tokenizer.encode("sra").ids != [1]:
+        raise AssertionError("The frozen tokenizers native extension is unusable")
+    if AutoConfig.for_model("bert").model_type != "bert":
+        raise AssertionError("The Transformers configuration registry is incomplete")
+    encoded_tensor = save_tensor({"numbers": torch.tensor([2, 3])})
+    if load_tensor(encoded_tensor)["numbers"].sum().item() != 5:
+        raise AssertionError("The safetensors native extension is unusable")
 
     if int(torch.tensor([2, 3]).sum().item()) != 5:
         raise AssertionError("PyTorch CPU tensor calculation failed")

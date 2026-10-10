@@ -61,6 +61,16 @@ def _is_pymupdf_dev_artifact(relative: Path) -> bool:
                for i in range(len(parts) - 2))
 
 
+def _is_optional_type_stub(relative: Path) -> bool:
+    """Only type-checker .pyi source beneath the frozen _internal tree.
+
+    Compiled extensions (.pyd/.so), model data, runtime .py files and package
+    metadata remain untouched. This is opt-in, never part of normal releases.
+    """
+    parts = tuple(part.casefold() for part in relative.parts)
+    return len(parts) >= 3 and parts[0] == "_internal" and parts[-1].endswith(".pyi")
+
+
 def _is_opencv_video_codec(relative: Path) -> bool:
     """Exactly OpenCV's Windows FFmpeg video I/O plugin, never cv2.pyd.
 
@@ -75,7 +85,8 @@ def _is_opencv_video_codec(relative: Path) -> bool:
 
 
 def _eligible_files(
-    root: Path, component: str, *, remove_opencv_video: bool = False
+    root: Path, component: str, *, remove_opencv_video: bool = False,
+    remove_type_stubs: bool = False,
 ) -> list[PrunableFile]:
     candidates: list[PrunableFile] = []
     root_resolved = root.resolve(strict=True)
@@ -94,6 +105,8 @@ def _eligible_files(
             reason = "PyMuPDF development header/static or import library"
         elif component == "backend" and remove_opencv_video and _is_opencv_video_codec(relative):
             reason = "Optional OpenCV video/FFmpeg codec (PDF image decode is runtime-tested)"
+        elif component == "backend" and remove_type_stubs and _is_optional_type_stub(relative):
+            reason = "Type-checker only .pyi stub in experimental lean release"
         else:
             continue
         candidates.append(PrunableFile(component, path, relative.as_posix(), path.stat().st_size, reason))
@@ -103,6 +116,7 @@ def _eligible_files(
 def prune(
     backend: Path, desktop: Path, *, apply: bool = False,
     remove_opencv_video: bool = False,
+    remove_type_stubs: bool = False,
 ) -> dict:
     """Return an audit report. No file is removed unless apply=True."""
     backend = _require_release_tree(backend, component="backend")
@@ -112,20 +126,23 @@ def prune(
         backend_canonical.is_relative_to(desktop_canonical) or
         desktop_canonical.is_relative_to(backend_canonical)):
         raise ValueError("Backend and desktop roots must be independent release outputs")
-    files = _eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video) + _eligible_files(desktop, "desktop")
+    files = _eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video,
+                            remove_type_stubs=remove_type_stubs) + _eligible_files(desktop, "desktop")
     total = sum(file.size for file in files)
     if apply:
         for file in files:
             if _is_link_or_junction(file.path) or not file.path.is_file():
                 raise RuntimeError(f"Candidate changed during prune: {file.component}/{file.relative}")
             file.path.unlink()
-        if (_eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video)
+        if (_eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video,
+                            remove_type_stubs=remove_type_stubs)
                 or _eligible_files(desktop, "desktop")):
             raise RuntimeError("Eligible files remained after pruning")
     return {
         "schema_version": 2,
         "applied": apply,
         "remove_opencv_video": remove_opencv_video,
+        "remove_type_stubs": remove_type_stubs,
         "removed_files": len(files) if apply else 0,
         "candidate_files": len(files),
         "candidate_bytes": total,
@@ -150,6 +167,7 @@ def _report_markdown(report: dict, target: str) -> str:
         f"- Uncompressed candidate size: **{report['candidate_mib']:.2f} MiB**",
         "- Desktop `.pdb` and PyMuPDF development libraries/headers are eligible.",
         "- Optional Windows video codec removal: **" + ("enabled" if report.get("remove_opencv_video") else "disabled") + "**.",
+        "- Experimental lean type stub removal: **" + ("enabled" if report.get("remove_type_stubs") else "disabled") + "**.",
         "- Torch, Docling, OCR, OpenCV image decoder, `.pyd`, `.so` and `.dylib` runtime binaries are preserved.",
         "- **Compressed installer size is measured separately** by Build Size Audit.", "",
         "| Component | Removed candidate | MiB (uncompressed) |", "|---|---|---:|",
@@ -184,6 +202,8 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="Actually delete allowlisted files (default: dry-run)")
     parser.add_argument("--remove-opencv-video-codecs", action="store_true",
                         help="Windows only; remove the narrow cv2 FFmpeg video plugin allowlist")
+    parser.add_argument("--remove-type-stubs", action="store_true",
+                        help="Experimental lean only: remove packaged .pyi type stubs beneath _internal")
     parser.add_argument("--output-dir", type=Path, default=Path("dist/build-size-audit"))
     args = parser.parse_args()
     if args.remove_opencv_video_codecs and args.target != "win-x64":
@@ -195,7 +215,8 @@ def main() -> None:
         if output == root or output.is_relative_to(root):
             parser.error("--output-dir must be outside both release directories")
     report = prune(args.backend, args.desktop, apply=args.apply,
-                   remove_opencv_video=args.remove_opencv_video_codecs)
+                   remove_opencv_video=args.remove_opencv_video_codecs,
+                   remove_type_stubs=args.remove_type_stubs)
     md, _ = write_reports(report, target=args.target, output_dir=args.output_dir)
     action = "removed" if args.apply else "would remove"
     print(f"SAFE PRUNING: {action} {report['candidate_files']} file(s) / {report['candidate_mib']:.2f} MiB (uncompressed)")

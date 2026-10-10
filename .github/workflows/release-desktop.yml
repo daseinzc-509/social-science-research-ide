@@ -14,11 +14,11 @@ on:
         type: choice
         options: [full, core]
       collection_policy:
-        description: 'conservative: smaller and frozen PDF/image checked; compatible: previous broad collection'
+        description: 'conservative: default; lean: experimental extra trimming; compatible: rollback'
         required: true
         default: 'conservative'
         type: choice
-        options: [conservative, compatible]
+        options: [conservative, lean, compatible]
   push:
     tags:
       - 'v*'
@@ -58,7 +58,7 @@ jobs:
             profile="$PROFILE"
             policy="$POLICY"
           fi
-          case "$policy" in conservative|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
+          case "$policy" in conservative|lean|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
           for field in tag version assembly mac_short; do
             echo "$field=$(python scripts/release_version.py "$tag" --field "$field")" >> "$GITHUB_OUTPUT"
           done
@@ -140,12 +140,16 @@ jobs:
             --backend dist/backend/sra-backend \
             --desktop dist/desktop \
             --output-dir dist/build-size-audit --apply
-          if [ "$COLLECTION_POLICY" = 'conservative' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
+          if [ "$COLLECTION_POLICY" != 'compatible' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
             set -- "$@" --remove-opencv-video-codecs
+          fi
+          if [ "$COLLECTION_POLICY" = 'lean' ]; then
+            set -- "$@" --remove-type-stubs
           fi
           python scripts/prune_release_assets.py "$@"
           cat "dist/build-size-audit/prune-report-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
           echo "### Backend collection policy: $COLLECTION_POLICY" >> "$GITHUB_STEP_SUMMARY"
+          # For lean, the same frozen runtime tests must pass before packaging.
           # Exercise the ACTUAL frozen executable (generated PDF -> extracted text
           # -> raster -> OpenCV decode, plus full-profile Docling/Torch imports).
           # This does not download HF models or claim a complete OCR/layout test.

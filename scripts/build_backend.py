@@ -2,8 +2,10 @@
 
 Run on each native target runner. Collection policies:
   compatible: keep the previous broad PyInstaller collection rules (rollback).
-  conservative: narrow low-risk Python-package collection, but preserve Docling,
-                Torch, OCR and Transformers model resources in full releases.
+  conservative: tested low-risk narrowing for default releases.
+  lean: experimental additional narrowing of Transformers binary collection and
+        exclusion of developer-only interactive/testing modules. Always validate
+        on real PDFs before shipping this strategy to end users.
 
 The frozen executable MUST pass --self-test-bundle before assembly. This probe
 checks basic PDF, image and (for full profile) model-library imports without
@@ -22,7 +24,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("core", "full")
-POLICIES = ("conservative", "compatible")
+POLICIES = ("conservative", "compatible", "lean")
+
+# These interactive/development packages are not part of SRA's document engine.
+# Never apply to compatible/conservative releases. PyInstaller only removes the
+# listed modules from the frozen archive, never from the build environment.
+LEAN_EXCLUDES = (
+    "IPython", "jupyter", "jupyterlab", "notebook", "pytest", "sphinx",
+    "mkdocs", "tkinter", "_tkinter",
+)
 
 
 def available(module: str) -> bool:
@@ -92,13 +102,18 @@ def command_args(
             for module in ("huggingface_hub", "transformers", "accelerate", "sentencepiece"):
                 _add(args, module, "--collect-all")
         else:
-            # hub/accelerate are pure-Python module graphs + package data.
-            # Avoid their optional binary/development collections. Keep all
-            # Transformers and SentencePiece assets for model compatibility.
+            # hub/accelerate are Python module graphs + package data.
             for module in ("huggingface_hub", "accelerate"):
                 _add(args, module, "--collect-submodules", "--collect-data")
-            for module in ("transformers", "sentencepiece"):
-                _add(args, module, "--collect-all")
+            if collection_policy == "lean":
+                # Transformers ships model declarations and data. Optional
+                # native runtimes (tokenizers, safetensors, Torch) are distinct
+                # packages, validated by the frozen self-test below. This may
+                # save optional binary collections but is NOT the default.
+                _add(args, "transformers", "--collect-submodules", "--collect-data")
+            else:
+                _add(args, "transformers", "--collect-all")
+            _add(args, "sentencepiece", "--collect-all")
     # importlib.metadata users require dist-info even with static imports.
     distributions = {
         "docling": "docling",
@@ -116,6 +131,9 @@ def command_args(
             except importlib.metadata.PackageNotFoundError:
                 continue
             args += ["--copy-metadata", distribution]
+    if collection_policy == "lean":
+        for module in LEAN_EXCLUDES:
+            args += ["--exclude-module", module]
     args += [str(project / "scripts" / "desktop_backend_entry.py")]
     return args
 

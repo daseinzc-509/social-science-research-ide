@@ -122,7 +122,7 @@ def test_release_workflow_uses_bundled_probe_before_assembly():
     release = (ROOT / ".github/workflows/release-desktop.yml").read_text(encoding="utf-8")
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "collection_policy:" in release
-    assert "options: [conservative, compatible]" in release
+    assert "options: [conservative, lean, compatible]" in release
     assert "--collection-policy \"$COLLECTION_POLICY\"" in release
     assert "--remove-opencv-video-codecs" in release
     assert "--self-test-bundle --profile \"$BUNDLE_PROFILE\"" in release
@@ -162,6 +162,8 @@ def test_tag_release_initializes_collection_policy():
     ('win-x64', 'compatible', False),
     ('osx-arm64', 'conservative', False),
     ('osx-arm64', 'compatible', False),
+    ('win-x64', 'lean', True),
+    ('osx-arm64', 'lean', False),
 ])
 def test_prune_step_no_empty_array_under_nounset(tmp_path, target, policy, needs_video_flag):
     """Execute the real workflow fragment with a stub, under strict Bash mode.
@@ -203,4 +205,4 @@ def test_prune_step_no_empty_array_under_nounset(tmp_path, target, policy, needs
         '--desktop', 'dist/desktop',
         '--output-dir', 'dist/build-size-audit',
         '--apply',
-    ] + (['--remove-opencv-video-codecs'] if needs_video_flag else [])
+    ] + (['--remove-opencv-video-codecs'] if needs_video_flag else []) + (['--remove-type-stubs'] if policy == 'lean' else [])

@@ -30,8 +30,6 @@
             </Border>
             <TextBlock Text="Social Science Research IDE" FontSize="13"
                        VerticalAlignment="Center" FontWeight="SemiBold"/>
-            <TextBlock Text="0.1" VerticalAlignment="Center" FontSize="9"
-                       Foreground="{DynamicResource InkTertiaryBrush}"/>
           </StackPanel>
         </Border>
 
@@ -589,7 +587,7 @@
                 <StackPanel Spacing="4"><TextBlock Text="工作区" Classes="h2"/><TextBlock Text="桌面端只通过 localhost API 调用研究核心。" Classes="muted" FontSize="10" TextWrapping="Wrap"/></StackPanel>
                 <StackPanel Grid.Column="1" Spacing="10">
                   <Grid ColumnDefinitions="150,*"><TextBlock Text="Local API" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="http://127.0.0.1:8766/api/v1"/></Grid>
-                  <Grid ColumnDefinitions="150,*"><TextBlock Text="Desktop" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="v0.1.0 · Avalonia"/></Grid>
+                  <Grid ColumnDefinitions="150,*"><TextBlock Text="Desktop" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="{Binding InstalledDesktopVersion}"/></Grid>
                   <Grid ColumnDefinitions="150,*"><TextBlock Text="Core" Classes="eyebrow"/><TextBlock Grid.Column="1" Text="Paper Understanding v2.2"/></Grid>
                 </StackPanel>
               </Grid>
