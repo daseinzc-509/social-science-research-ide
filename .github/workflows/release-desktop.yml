@@ -52,6 +52,7 @@ jobs:
           if [ "$TRIGGER" = "push" ]; then
             tag="$REF_NAME"
             profile=full
+            policy=conservative
           else
             tag="v${REQUESTED#v}"
             profile="$PROFILE"
@@ -131,15 +132,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          prune_flags=()
-          if [ "$COLLECTION_POLICY" = 'conservative' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
-            prune_flags+=(--remove-opencv-video-codecs)
-          fi
-          python scripts/prune_release_assets.py \
+          # Use POSIX positional arguments rather than an empty Bash array.
+          # macOS ships Bash 3.2, where ${empty_array[@]} under `set -u`
+          # can raise "unbound variable" even after empty-array assignment.
+          set -- \
             --target "${{ matrix.target }}" \
             --backend dist/backend/sra-backend \
             --desktop dist/desktop \
-            --output-dir dist/build-size-audit --apply "${prune_flags[@]}"
+            --output-dir dist/build-size-audit --apply
+          if [ "$COLLECTION_POLICY" = 'conservative' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
+            set -- "$@" --remove-opencv-video-codecs
+          fi
+          python scripts/prune_release_assets.py "$@"
           cat "dist/build-size-audit/prune-report-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
           echo "### Backend collection policy: $COLLECTION_POLICY" >> "$GITHUB_STEP_SUMMARY"
           # Exercise the ACTUAL frozen executable (generated PDF -> extracted text

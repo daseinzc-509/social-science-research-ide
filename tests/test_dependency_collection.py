@@ -130,3 +130,77 @@ def test_release_workflow_uses_bundled_probe_before_assembly():
     assert release.index("--self-test-bundle") < release.index("package_app.py")
     assert "tests/test_dependency_collection.py" in ci
     assert "sra-backend.exe" in (ROOT / "scripts/desktop_backend_entry.py").read_text(encoding="utf-8") or "--self-test-bundle" in (ROOT / "scripts/desktop_backend_entry.py").read_text(encoding="utf-8")
+
+
+def _release_step_script(name: str) -> str:
+    """Read the exact workflow shell, avoiding dependence on a YAML library."""
+    lines = (ROOT / '.github/workflows/release-desktop.yml').read_text(encoding='utf-8').splitlines()
+    marker = f'      - name: {name}'
+    assert marker in lines, f'Missing workflow step: {name}'
+    position = lines.index(marker) + 1
+    while position < len(lines) and lines[position].strip() != 'run: |':
+        position += 1
+    assert position < len(lines), f'Missing run script for {name}'
+    script = []
+    for line in lines[position + 1:]:
+        if line and not line.startswith('          '):
+            break
+        script.append(line[10:] if line.startswith('          ') else '')
+    return '\n'.join(script) + '\n'
+
+
+def test_tag_release_initializes_collection_policy():
+    """A tag push has no workflow_dispatch inputs; it must set its own policy."""
+    shell = _release_step_script('Validate release version + determine backend profile')
+    push_branch = shell.split('if [ "$TRIGGER" = "push" ]; then', 1)[1].split('else', 1)[0]
+    assert 'profile=full' in push_branch
+    assert 'policy=conservative' in push_branch
+
+
+@pytest.mark.parametrize('target, policy, needs_video_flag', [
+    ('win-x64', 'conservative', True),
+    ('win-x64', 'compatible', False),
+    ('osx-arm64', 'conservative', False),
+    ('osx-arm64', 'compatible', False),
+])
+def test_prune_step_no_empty_array_under_nounset(tmp_path, target, policy, needs_video_flag):
+    """Execute the real workflow fragment with a stub, under strict Bash mode.
+
+    Windows developers may not have Bash installed; the same simulation runs
+    for all platforms in GitHub's Ubuntu CI runner.
+    """
+    import json
+    import shutil
+
+    if shutil.which('bash') is None:
+        pytest.skip('Bash is not installed (runs in Linux CI)')
+    step = _release_step_script('Safely prune release-only debug/development files and smoke-test backend')
+    assert 'prune_flags[@]' not in step
+    assert 'set --' in step and '"$@"' in step
+    # The segment after the prune invocation needs the actual frozen binary;
+    # use a stub here to test CLI arguments, not the heavyweight runtime.
+    fragment = step.split('\ncat "dist/build-size-audit/', 1)[0]
+    assert 'python scripts/prune_release_assets.py "$@"' in fragment
+    fragment = fragment.replace('${{ matrix.target }}', target)
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    (scripts / 'prune_release_assets.py').write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "Path('prune-args.json').write_text(json.dumps(sys.argv[1:]))\n",
+        encoding='utf-8',
+    )
+    process = subprocess.run(
+        ['bash', '-c', fragment],
+        cwd=tmp_path,
+        env={**os.environ, 'COLLECTION_POLICY': policy},
+        capture_output=True, text=True,
+    )
+    assert process.returncode == 0, process.stdout + process.stderr
+    args = json.loads((tmp_path / 'prune-args.json').read_text(encoding='utf-8'))
+    assert args == [
+        '--target', target,
+        '--backend', 'dist/backend/sra-backend',
+        '--desktop', 'dist/desktop',
+        '--output-dir', 'dist/build-size-audit',
+        '--apply',
+    ] + (['--remove-opencv-video-codecs'] if needs_video_flag else [])
