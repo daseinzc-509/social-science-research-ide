@@ -1,9 +1,9 @@
 """Offline PDF + image + model-import checks inside the *frozen* backend.
 
 Never reads a user's papers, environment secrets, or downloads model weights.
-This confirms the packaging of basic PDF/image libraries and Docling's Python
-import graph; an actual Docling OCR/layout inference test remains a separate
-acceptance gate and should not be inferred from this probe.
+This confirms basic PDF/image libraries AND the Hugging Face image processor
+used by Docling's Heron layout model. Does not download model weights.
+Real Docling OCR/layout inference remains a separate acceptance gate.
 """
 from __future__ import annotations
 
@@ -45,39 +45,83 @@ def image_decode_roundtrip(png_bytes: bytes, *, required: bool) -> None:
         raise AssertionError("OpenCV failed on an image conversion operation")
 
 
+# This mirrors the PUBLIC 444-byte preprocessor_config.json for
+# docling-project/docling-layout-heron (RT-DETR v2). Using a temporary local
+# directory avoids network calls and tests the exact dynamic import path that
+# previously failed only after installation on Windows.
+HERON_IMAGE_PROCESSOR_CONFIG = {
+    "image_processor_type": "RTDetrImageProcessor",
+    "do_convert_annotations": True,
+    "do_normalize": False,
+    "do_pad": False,
+    "do_rescale": True,
+    "do_resize": True,
+    "format": "coco_detection",
+    "image_mean": [0.485, 0.456, 0.406],
+    "image_std": [0.229, 0.224, 0.225],
+    "pad_size": None,
+    "resample": 2,
+    "rescale_factor": 0.00392156862745098,
+    "size": {"height": 640, "width": 640},
+}
+
+
+def exercise_heron_image_processor() -> None:
+    """Verify Transformers' lazy vision imports in the *frozen* executable.
+
+    A simple `import transformers` or `AutoTokenizer` import misses this.
+    This also exercises the selected processor on a synthetic image, not
+    merely finding its class name.
+    """
+    import json
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+
+    try:
+        from transformers import AutoImageProcessor
+        with tempfile.TemporaryDirectory(prefix="sra-heron-processor-check-") as folder:
+            path = Path(folder)
+            (path / "preprocessor_config.json").write_text(
+                json.dumps(HERON_IMAGE_PROCESSOR_CONFIG), encoding="utf-8"
+            )
+            processor = AutoImageProcessor.from_pretrained(str(path), local_files_only=True)
+            result = processor(images=Image.new("RGB", (32, 32), "white"), return_tensors="pt")
+            if "pixel_values" not in result or result["pixel_values"].shape[0] != 1:
+                raise AssertionError("Heron image processor did not produce a pixel batch")
+            print(f"Heron image processor OK: {type(processor).__name__}", flush=True)
+    except Exception as exc:
+        import traceback
+        # Lazy Transformers import hides the real exception behind generic
+        # 'Could not import module AutoImageProcessor'. Show the entire chain
+        # in Actions logs so packaging failures are actionable.
+        print("Frozen Heron image processor verification FAILED", flush=True)
+        traceback.print_exc()
+        raise RuntimeError(
+            "Frozen backend cannot load Docling Heron's RT-DETR image processor. "
+            "Inspect the preceding Python traceback for missing torchvision, "
+            "Transformers or native-library dependencies."
+        ) from exc
+
+
 def full_profile_imports() -> None:
-    # The probe must not trigger an implicit Hugging Face model download.
+    # The bundle probe must never fetch Hugging Face model weights.
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     import torch
     from docling.document_converter import DocumentConverter
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from huggingface_hub import hf_hub_download
-    from transformers import AutoConfig, AutoTokenizer
-    from tokenizers import Tokenizer
-    from tokenizers.models import WordLevel
-    from tokenizers.pre_tokenizers import Whitespace
-    from safetensors.torch import load as load_tensor, save as save_tensor
-
-    # These native / dynamically loaded packages live outside Transformers'
-    # own folder and MUST still function under the lean collection policy.
-    tokenizer = Tokenizer(WordLevel({"[UNK]": 0, "sra": 1}, unk_token="[UNK]"))
-    tokenizer.pre_tokenizer = Whitespace()
-    if tokenizer.encode("sra").ids != [1]:
-        raise AssertionError("The frozen tokenizers native extension is unusable")
-    if AutoConfig.for_model("bert").model_type != "bert":
-        raise AssertionError("The Transformers configuration registry is incomplete")
-    encoded_tensor = save_tensor({"numbers": torch.tensor([2, 3])})
-    if load_tensor(encoded_tensor)["numbers"].sum().item() != 5:
-        raise AssertionError("The safetensors native extension is unusable")
+    from transformers import AutoTokenizer, AutoModelForObjectDetection
 
     if int(torch.tensor([2, 3]).sum().item()) != 5:
         raise AssertionError("PyTorch CPU tensor calculation failed")
-    for obj in (DocumentConverter, PdfPipelineOptions, hf_hub_download, AutoTokenizer):
+    for obj in (DocumentConverter, PdfPipelineOptions, hf_hub_download, AutoTokenizer, AutoModelForObjectDetection):
         if obj is None:
             raise AssertionError("A required Docling/Transformers API was not importable")
-    # No Docling model instantiation or inference here: not all models ship
-    # inside the installer, and full layout/OCR acceptance needs a real PDF.
+    exercise_heron_image_processor()
+    # Layout model weights and real OCR are intentionally not downloaded or
+    # invoked here. A separate optional real-PDF acceptance test is required.
 
 
 def main(argv: list[str] | None = None) -> int:

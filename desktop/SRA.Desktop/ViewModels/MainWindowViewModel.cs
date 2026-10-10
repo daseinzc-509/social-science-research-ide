@@ -749,8 +749,52 @@ public partial class MainWindowViewModel : ObservableObject
             $"正在{label}…",
             async () => await _api.ImportPapersBatchAsync(files),
             preferredPaperId: null,
-            successMessage: $"{label}完成"
+            successMessage: $"{label}完成",
+            completionMessage: snapshot => DescribeBatchImport(snapshot, label)
         );
+    }
+
+    private static string DescribeBatchImport(JobSnapshot snapshot, string label)
+    {
+        // The Python batch worker reports per-file failures inside a terminal
+        // job with status=done. Treating done as unconditional success hid
+        // 0 imported / N failed scenarios from users of the packaged app.
+        if (snapshot.Result is null || snapshot.Result.Value.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("批量导入任务没有返回导入统计，请查看任务日志。");
+        var payload = snapshot.Result.Value;
+
+        int ReadCount(string field)
+        {
+            if (!payload.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.Number ||
+                !value.TryGetInt32(out var count) || count < 0)
+                throw new InvalidOperationException($"批量导入任务缺少有效的 {field} 统计，请查看任务日志。");
+            return count;
+        }
+        var imported = ReadCount("imported");
+        var duplicates = ReadCount("duplicates");
+        var failed = ReadCount("failed");
+        var summary = $"{label}：新增 {imported} 篇，已存在 {duplicates} 篇，失败 {failed} 篇。";
+
+        if (failed > 0 && payload.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array)
+        {
+            var reasons = new List<string>();
+            foreach (var item in results.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.String)
+                    continue;
+                var reason = error.GetString();
+                if (string.IsNullOrWhiteSpace(reason)) continue;
+                var filename = item.TryGetProperty("filename", out var name) && name.ValueKind == JsonValueKind.String
+                    ? name.GetString() : "某个 PDF";
+                reasons.Add($"{filename}: {reason}");
+                if (reasons.Count == 3) break;
+            }
+            if (reasons.Count > 0) summary += Environment.NewLine + string.Join(Environment.NewLine, reasons);
+        }
+        if (failed > 0 && imported == 0 && duplicates == 0)
+            throw new InvalidOperationException(summary);
+        return summary;
     }
 
     public async Task DeleteSelectedAsync()
@@ -782,7 +826,8 @@ public partial class MainWindowViewModel : ObservableObject
         Func<Task<JobAccepted>> starter,
         string? preferredPaperId,
         string successMessage,
-        bool selectResultPaper = false
+        bool selectResultPaper = false,
+        Func<JobSnapshot, string>? completionMessage = null
     )
     {
         IsBusy = true;
@@ -799,10 +844,14 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 preferredPaperId = completed.ResultString("paper_id") ?? preferredPaperId;
             }
-            StatusText = successMessage;
-            JobStage = "完成";
+            var actualMessage = completionMessage is null ? successMessage : completionMessage(completed);
+            StatusText = actualMessage;
+            JobStage = completionMessage is not null &&
+                int.TryParse(completed.ResultString("failed"), out var batchFailures) && batchFailures > 0
+                ? "部分完成" : "完成";
             JobProgress = 100;
             JobIndeterminate = false;
+            JobLog += Environment.NewLine + Environment.NewLine + actualMessage;
             await RefreshAfterJobAsync(preferredPaperId);
         }
         catch (Exception exc)
