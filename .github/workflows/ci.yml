@@ -43,6 +43,7 @@ jobs:
             tests/test_storage_transparency.py \
             tests/test_build_size_audit.py \
             tests/test_release_pruning.py \
+            tests/test_dependency_collection.py \
             tests/test_macos_dmg_packaging.py
 
   desktop-compile:

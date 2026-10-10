@@ -13,6 +13,12 @@ on:
         default: 'full'
         type: choice
         options: [full, core]
+      collection_policy:
+        description: 'conservative: smaller and frozen PDF/image checked; compatible: previous broad collection'
+        required: true
+        default: 'conservative'
+        type: choice
+        options: [conservative, compatible]
   push:
     tags:
       - 'v*'
@@ -29,6 +35,7 @@ jobs:
       assembly: ${{ steps.version.outputs.assembly }}
       mac_short: ${{ steps.version.outputs.mac_short }}
       profile: ${{ steps.version.outputs.profile }}
+      collection: ${{ steps.version.outputs.collection }}
     steps:
       - uses: actions/checkout@v7
       - name: Validate release version + determine backend profile
@@ -38,6 +45,7 @@ jobs:
           TRIGGER: ${{ github.event_name }}
           REQUESTED: ${{ inputs.version }}
           PROFILE: ${{ inputs.backend_profile }}
+          POLICY: ${{ inputs.collection_policy }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -47,11 +55,14 @@ jobs:
           else
             tag="v${REQUESTED#v}"
             profile="$PROFILE"
+            policy="$POLICY"
           fi
+          case "$policy" in conservative|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
           for field in tag version assembly mac_short; do
             echo "$field=$(python scripts/release_version.py "$tag" --field "$field")" >> "$GITHUB_OUTPUT"
           done
           echo "profile=$profile" >> "$GITHUB_OUTPUT"
+          echo "collection=$policy" >> "$GITHUB_OUTPUT"
       - name: Prevent tracked credential / PDF leakage
         run: python scripts/check_release_safety.py source .
 
@@ -75,6 +86,7 @@ jobs:
       ASSEMBLY_VERSION: ${{ needs.preflight.outputs.assembly }}
       MAC_SHORT_VERSION: ${{ needs.preflight.outputs.mac_short }}
       BUNDLE_PROFILE: ${{ needs.preflight.outputs.profile }}
+      COLLECTION_POLICY: ${{ needs.preflight.outputs.collection }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -107,7 +119,7 @@ jobs:
       - name: Freeze Python backend
         shell: bash
         run: |
-          python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --output dist/backend
+          python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --collection-policy "$COLLECTION_POLICY" --output dist/backend
       - name: Publish Avalonia self-contained desktop
         shell: bash
         run: |
@@ -119,12 +131,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          prune_flags=()
+          if [ "$COLLECTION_POLICY" = 'conservative' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
+            prune_flags+=(--remove-opencv-video-codecs)
+          fi
           python scripts/prune_release_assets.py \
             --target "${{ matrix.target }}" \
             --backend dist/backend/sra-backend \
             --desktop dist/desktop \
-            --output-dir dist/build-size-audit --apply
+            --output-dir dist/build-size-audit --apply "${prune_flags[@]}"
           cat "dist/build-size-audit/prune-report-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Backend collection policy: $COLLECTION_POLICY" >> "$GITHUB_STEP_SUMMARY"
+          # Exercise the ACTUAL frozen executable (generated PDF -> extracted text
+          # -> raster -> OpenCV decode, plus full-profile Docling/Torch imports).
+          # This does not download HF models or claim a complete OCR/layout test.
+          "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}" \
+            --self-test-bundle --profile "$BUNDLE_PROFILE"
           # Verify the frozen API still boots and rejects unauthorized clients.
           python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
       - name: Assemble complete Windows payload

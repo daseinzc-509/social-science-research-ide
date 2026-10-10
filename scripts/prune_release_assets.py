@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,7 +61,22 @@ def _is_pymupdf_dev_artifact(relative: Path) -> bool:
                for i in range(len(parts) - 2))
 
 
-def _eligible_files(root: Path, component: str) -> list[PrunableFile]:
+def _is_opencv_video_codec(relative: Path) -> bool:
+    """Exactly OpenCV's Windows FFmpeg video I/O plugin, never cv2.pyd.
+
+    Only used after the actual frozen executable passes the PDF/image probe.
+    """
+    parts = tuple(part.casefold() for part in relative.parts)
+    return (
+        len(parts) == 3
+        and parts[:2] == ("_internal", "cv2")
+        and re.fullmatch(r"opencv_videoio_ffmpeg[0-9]+_64\.dll", parts[-1]) is not None
+    )
+
+
+def _eligible_files(
+    root: Path, component: str, *, remove_opencv_video: bool = False
+) -> list[PrunableFile]:
     candidates: list[PrunableFile] = []
     root_resolved = root.resolve(strict=True)
     for path in root.rglob("*"):
@@ -76,13 +92,18 @@ def _eligible_files(root: Path, component: str) -> list[PrunableFile]:
             reason = "Release debug symbol (PDB), not a runtime dependency"
         elif component == "backend" and _is_pymupdf_dev_artifact(relative):
             reason = "PyMuPDF development header/static or import library"
+        elif component == "backend" and remove_opencv_video and _is_opencv_video_codec(relative):
+            reason = "Optional OpenCV video/FFmpeg codec (PDF image decode is runtime-tested)"
         else:
             continue
         candidates.append(PrunableFile(component, path, relative.as_posix(), path.stat().st_size, reason))
     return sorted(candidates, key=lambda item: (item.component, item.relative.casefold()))
 
 
-def prune(backend: Path, desktop: Path, *, apply: bool = False) -> dict:
+def prune(
+    backend: Path, desktop: Path, *, apply: bool = False,
+    remove_opencv_video: bool = False,
+) -> dict:
     """Return an audit report. No file is removed unless apply=True."""
     backend = _require_release_tree(backend, component="backend")
     desktop = _require_release_tree(desktop, component="desktop")
@@ -91,18 +112,20 @@ def prune(backend: Path, desktop: Path, *, apply: bool = False) -> dict:
         backend_canonical.is_relative_to(desktop_canonical) or
         desktop_canonical.is_relative_to(backend_canonical)):
         raise ValueError("Backend and desktop roots must be independent release outputs")
-    files = _eligible_files(backend, "backend") + _eligible_files(desktop, "desktop")
+    files = _eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video) + _eligible_files(desktop, "desktop")
     total = sum(file.size for file in files)
     if apply:
         for file in files:
             if _is_link_or_junction(file.path) or not file.path.is_file():
                 raise RuntimeError(f"Candidate changed during prune: {file.component}/{file.relative}")
             file.path.unlink()
-        if _eligible_files(backend, "backend") or _eligible_files(desktop, "desktop"):
+        if (_eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video)
+                or _eligible_files(desktop, "desktop")):
             raise RuntimeError("Eligible files remained after pruning")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "applied": apply,
+        "remove_opencv_video": remove_opencv_video,
         "removed_files": len(files) if apply else 0,
         "candidate_files": len(files),
         "candidate_bytes": total,
@@ -125,8 +148,9 @@ def _report_markdown(report: dict, target: str) -> str:
         f"- Mode: **{'applied' if report['applied'] else 'dry-run only'}**",
         f"- Candidate files: **{report['candidate_files']}**",
         f"- Uncompressed candidate size: **{report['candidate_mib']:.2f} MiB**",
-        "- Only desktop `.pdb` and `pymupdf/mupdf-devel` development libraries/headers are eligible.",
-        "- PyTorch, Docling, OCR, `.dll`, `.pyd`, `.so` and `.dylib` runtime binaries are preserved.",
+        "- Desktop `.pdb` and PyMuPDF development libraries/headers are eligible.",
+        "- Optional Windows video codec removal: **" + ("enabled" if report.get("remove_opencv_video") else "disabled") + "**.",
+        "- Torch, Docling, OCR, OpenCV image decoder, `.pyd`, `.so` and `.dylib` runtime binaries are preserved.",
         "- **Compressed installer size is measured separately** by Build Size Audit.", "",
         "| Component | Removed candidate | MiB (uncompressed) |", "|---|---|---:|",
     ]
@@ -158,15 +182,20 @@ def main() -> None:
     parser.add_argument("--desktop", type=Path, required=True)
     parser.add_argument("--target", choices=VALID_TARGETS, required=True)
     parser.add_argument("--apply", action="store_true", help="Actually delete allowlisted files (default: dry-run)")
+    parser.add_argument("--remove-opencv-video-codecs", action="store_true",
+                        help="Windows only; remove the narrow cv2 FFmpeg video plugin allowlist")
     parser.add_argument("--output-dir", type=Path, default=Path("dist/build-size-audit"))
     args = parser.parse_args()
+    if args.remove_opencv_video_codecs and args.target != "win-x64":
+        parser.error("--remove-opencv-video-codecs is only supported for win-x64")
     # Keep generated reports outside the build outputs. In particular, do not
     # accidentally embed the report and a workstation's path in the installer.
     for root in (args.backend.resolve(), args.desktop.resolve()):
         output = args.output_dir.resolve()
         if output == root or output.is_relative_to(root):
             parser.error("--output-dir must be outside both release directories")
-    report = prune(args.backend, args.desktop, apply=args.apply)
+    report = prune(args.backend, args.desktop, apply=args.apply,
+                   remove_opencv_video=args.remove_opencv_video_codecs)
     md, _ = write_reports(report, target=args.target, output_dir=args.output_dir)
     action = "removed" if args.apply else "would remove"
     print(f"SAFE PRUNING: {action} {report['candidate_files']} file(s) / {report['candidate_mib']:.2f} MiB (uncompressed)")
