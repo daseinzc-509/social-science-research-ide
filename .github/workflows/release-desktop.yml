@@ -108,7 +108,6 @@ jobs:
         shell: bash
         run: |
           python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --output dist/backend
-          python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
       - name: Publish Avalonia self-contained desktop
         shell: bash
         run: |
@@ -116,6 +115,18 @@ jobs:
             --self-contained true -p:PublishTrimmed=false -p:PublishSingleFile=false \
             "-p:Version=$RELEASE_VERSION" "-p:AssemblyVersion=$ASSEMBLY_VERSION" \
             "-p:FileVersion=$ASSEMBLY_VERSION" -o dist/desktop
+      - name: Safely prune release-only debug/development files and smoke-test backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/prune_release_assets.py \
+            --target "${{ matrix.target }}" \
+            --backend dist/backend/sra-backend \
+            --desktop dist/desktop \
+            --output-dir dist/build-size-audit --apply
+          cat "dist/build-size-audit/prune-report-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
+          # Verify the frozen API still boots and rejects unauthorized clients.
+          python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
       - name: Assemble complete Windows payload
         if: matrix.installer == 'windows'
         shell: pwsh
