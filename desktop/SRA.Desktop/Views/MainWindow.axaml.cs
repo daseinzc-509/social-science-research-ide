@@ -212,17 +212,37 @@ public partial class MainWindow : Window
         }
         try
         {
-            // Open the requested directory via an argument list; never run a shell
-            // or interpolate a server-controlled path into a command string.
-            if (!Directory.Exists(path))
+            // Use the OS shell to open a folder on Windows, instead of passing a
+            // space-containing/trailing-backslash path to explorer.exe's own
+            // command-line parser (which can open Documents instead).
+            // Resolve and validate the directory before launching anything.
+            var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (!Directory.Exists(directory))
             {
-                if (ViewModel is not null) ViewModel.StatusText = "目录尚未创建：" + path;
+                if (ViewModel is not null) ViewModel.StatusText = "目录尚未创建：" + directory;
                 return;
             }
-            var opener = OperatingSystem.IsWindows() ? "explorer.exe" :
-                OperatingSystem.IsMacOS() ? "open" : "xdg-open";
-            var start = new ProcessStartInfo(opener) { UseShellExecute = false };
-            start.ArgumentList.Add(path);
+
+            ProcessStartInfo start;
+            if (OperatingSystem.IsWindows())
+            {
+                // ShellExecute receives the folder as FileName, not an argument:
+                // paths such as D:\SRA\SRA Desktop\ open in Explorer correctly.
+                start = new ProcessStartInfo(directory)
+                {
+                    UseShellExecute = true,
+                    Verb = "open",
+                };
+            }
+            else
+            {
+                // macOS / Linux: pass one literal argument (no shell expansion).
+                start = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open")
+                {
+                    UseShellExecute = false,
+                };
+                start.ArgumentList.Add(directory);
+            }
             using var process = Process.Start(start);
         }
         catch (Exception ex)

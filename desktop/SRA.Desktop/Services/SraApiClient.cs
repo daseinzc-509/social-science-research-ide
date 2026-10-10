@@ -203,7 +203,7 @@ public sealed class SraApiClient : IDisposable
         using var form = new MultipartFormDataContent();
         using var file = new StreamContent(pdfStream);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-        form.Add(file, "file", string.IsNullOrWhiteSpace(fileName) ? "upload.pdf" : fileName);
+        AddPdfFilePart(form, file, "file", fileName);
 
         using var response = await _http.PostAsync("api/v1/papers/import", form, cancellationToken);
         return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
@@ -220,7 +220,7 @@ public sealed class SraApiClient : IDisposable
                 var content = new StreamContent(stream);
                 contents.Add(content);
                 content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-                form.Add(content, "files", string.IsNullOrWhiteSpace(fileName) ? "upload.pdf" : fileName);
+                AddPdfFilePart(form, content, "files", fileName);
             }
             using var response = await _http.PostAsync("api/v1/papers/import-batch", form, cancellationToken);
             return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
@@ -232,6 +232,29 @@ public sealed class SraApiClient : IDisposable
                 content.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// Preserve Unicode filenames with RFC 5987 filename* (UTF-8 percent encoding).
+    /// The ASCII filename fallback ensures parsers that do not support filename*
+    /// still receive a valid .pdf name instead of an RFC 2047 encoded word.
+    /// </summary>
+    private static void AddPdfFilePart(
+        MultipartFormDataContent form, StreamContent content, string fieldName, string? fileName)
+    {
+        var originalName = string.IsNullOrWhiteSpace(fileName)
+            ? "upload.pdf"
+            : Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(originalName))
+            originalName = "upload.pdf";
+
+        form.Add(content, fieldName);
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = fieldName,
+            FileName = "upload.pdf",
+            FileNameStar = originalName,
+        };
     }
 
     public Task<JobSnapshot> GetJobAsync(string jobId, CancellationToken cancellationToken = default) =>
