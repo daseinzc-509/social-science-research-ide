@@ -42,7 +42,8 @@ jobs:
             tests/test_release_safety_false_positives.py \
             tests/test_storage_transparency.py \
             tests/test_build_size_audit.py \
-            tests/test_release_pruning.py
+            tests/test_release_pruning.py \
+            tests/test_macos_dmg_packaging.py
 
   desktop-compile:
     name: Compile ${{ matrix.target }}

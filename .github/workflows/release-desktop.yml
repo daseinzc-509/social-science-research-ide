@@ -180,7 +180,12 @@ jobs:
           ln -s /Applications dist/dmg-root/Applications
           cp installer/macos/Remove_SRA_User_Data.command dist/dmg-root/Remove_SRA_User_Data.command
           chmod +x dist/dmg-root/Remove_SRA_User_Data.command
-          hdiutil create -volname 'SRA Desktop' -srcfolder dist/dmg-root -ov -format UDZO "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.dmg"
+          # hdiutil create can hit intermittent EBUSY on hosted macOS runners.
+          # Bounded retries + an isolated writable-image fallback are implemented here.
+          python scripts/create_macos_dmg.py \
+            --srcfolder dist/dmg-root \
+            --output "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.dmg" \
+            --volname 'SRA Desktop'
           ditto -c -k --sequesterRsrc --keepParent dist/SRA.app "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
           python scripts/check_release_safety.py zip "dist/SRA-${{ matrix.target }}-$RELEASE_TAG.zip"
       - name: Generate backend / desktop / installer size audit
