@@ -30,6 +30,11 @@ def test_full_build_retains_external_vision_module_graph(monkeypatch):
     assert ("--collect-all", "torchvision") in pairs
     assert ("--collect-all", "timm") in pairs
     assert ("--collect-all", "docling") in pairs
+    # The installed app needs rapidocr/default_models.yaml; the legacy
+    # rapidocr_onnxruntime collector does not cover this package.
+    assert ("--collect-data", "rapidocr") in pairs
+    assert ("--hidden-import", "rapidocr") in pairs
+    assert ("--copy-metadata", "rapidocr") in pairs
     assert ("--hidden-import", "frozen_backend_probe") in pairs
 
 
@@ -39,6 +44,38 @@ def test_compatible_build_also_includes_vision(monkeypatch):
     pairs = _args_pairs(build_backend.command_args("full", collection_policy="compatible"))
     assert ("--collect-all", "torchvision") in pairs
     assert ("--collect-all", "timm") in pairs
+    assert ("--collect-data", "rapidocr") in pairs
+    assert ("--hidden-import", "rapidocr") in pairs
+
+
+def test_full_profile_refuses_missing_rapidocr(monkeypatch):
+    monkeypatch.setattr(
+        build_backend, "available",
+        lambda module: module != "rapidocr",
+    )
+    with pytest.raises(RuntimeError, match="rapidocr"):
+        build_backend.command_args("full")
+
+
+def test_rapidocr_manifest_gate_catches_missing_yaml(monkeypatch, tmp_path):
+    package = tmp_path / "_internal" / "rapidocr"
+    package.mkdir(parents=True)
+    dummy = types.ModuleType("rapidocr")
+    dummy.__file__ = str(package / "__init__.py")
+    monkeypatch.setitem(sys.modules, "rapidocr", dummy)
+
+    with pytest.raises(RuntimeError, match="default_models.yaml"):
+        frozen_backend_probe.verify_rapidocr_model_manifest()
+
+    (package / "default_models.yaml").write_bytes(b"")
+    with pytest.raises(RuntimeError, match="empty"):
+        frozen_backend_probe.verify_rapidocr_model_manifest()
+
+    # A non-empty package-owned manifest is accepted without network/model IO.
+    (package / "default_models.yaml").write_text(
+        "onnxruntime:\n  PP-OCRv4:\n    det: {}\n", encoding="utf-8"
+    )
+    frozen_backend_probe.verify_rapidocr_model_manifest()
 
 
 def test_old_core_profile_is_explicitly_unavailable(monkeypatch):
@@ -88,6 +125,9 @@ def test_release_workflow_runs_frozen_processor_probe():
     assert "exercise_heron_image_processor()" in probe
     assert "AutoImageProcessor.from_pretrained" in probe
     assert 'local_files_only=True' in probe
+    # Catch packaged YAML omissions during the actual frozen --self-test-bundle.
+    assert "verify_rapidocr_model_manifest()" in probe
+    assert probe.count("verify_rapidocr_model_manifest()") >= 2
 
 
 def test_desktop_batch_import_reports_actual_per_file_outcomes():

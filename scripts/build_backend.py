@@ -82,6 +82,16 @@ def command_args(
     if profile == "full":
         if not available("docling"):
             raise RuntimeError("Full backend build requires docling to be installed")
+        if not available("rapidocr"):
+            raise RuntimeError(
+                "Full backend build requires the rapidocr package used by "
+                "Docling OCR (not only rapidocr_onnxruntime)."
+            )
+        # Critical: RapidOCR loads default_models.yaml relative to its package.
+        # Collecting rapidocr_onnxruntime alone does NOT collect this new package.
+        # Keep package size bounded: collect the YAML/data and ensure the
+        # imported package is included, without grabbing optional OCR backends.
+        _add(args, "rapidocr", "--hidden-import", "--collect-data")
         # DO NOT trim Docling/Torch/model architecture resources here. Some
         # are dynamically resolved at runtime, after an offline import smoke.
         for module in ("docling", "docling_core", "docling_parse", "docling_ibm_models"):
@@ -106,6 +116,7 @@ def command_args(
     # importlib.metadata users require dist-info even with static imports.
     distributions = {
         "docling": "docling",
+        "rapidocr": "rapidocr",
         "docling_core": "docling-core",
         "docling_parse": "docling-parse",
         "docling_ibm_models": "docling-ibm-models",

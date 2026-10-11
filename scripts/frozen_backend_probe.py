@@ -140,10 +140,48 @@ def exercise_heron_image_processor() -> None:
         ) from exc
 
 
+def verify_rapidocr_model_manifest() -> None:
+    """Verify OCR config inside the *actual frozen backend* before release.
+
+    RapidOCR resolves this file next to rapidocr/__init__.py. A successful
+    `import rapidocr` alone is not enough: PyInstaller may freeze Python
+    modules while omitting the YAML data file required to initialize OCR.
+    Does not load models, fetch weights, or process a user's PDF.
+    """
+    from pathlib import Path
+
+    try:
+        import rapidocr
+    except Exception as exc:
+        raise RuntimeError(
+            "Frozen backend cannot import rapidocr; check the "
+            "PyInstaller --collect-data rapidocr rule."
+        ) from exc
+
+    location = getattr(rapidocr, "__file__", None)
+    if not location:
+        raise RuntimeError(
+            "Frozen backend cannot resolve rapidocr package location."
+        )
+    manifest = Path(location).resolve().parent / "default_models.yaml"
+    if not manifest.is_file():
+        raise RuntimeError(
+            f"Frozen backend is missing RapidOCR default_models.yaml at {manifest}. "
+            "Build with --collect-data rapidocr and verify the final _internal/rapidocr/ "
+            "directory before publishing the installer."
+        )
+    if manifest.stat().st_size == 0:
+        raise RuntimeError(f"Frozen RapidOCR default_models.yaml is empty: {manifest}")
+    print("RapidOCR configuration manifest OK (offline)", flush=True)
+
+
 def full_profile_imports() -> None:
     # The bundle probe must never fetch Hugging Face model weights.
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    # This missing YAML was the cause of single and batch PDF import failures
+    # in installed SRA. Check it before expensive Torch/Docling imports.
+    verify_rapidocr_model_manifest()
     import torch
     from docling.document_converter import DocumentConverter
     from docling.datamodel.pipeline_options import PdfPipelineOptions
