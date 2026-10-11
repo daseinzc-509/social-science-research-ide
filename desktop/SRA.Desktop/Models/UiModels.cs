@@ -145,33 +145,94 @@ public sealed class ReferenceItem
     };
 }
 
+/// <summary>
+/// One displayed cell. The value is preserved from Docling's table_rows;
+/// presentation never performs number formatting, OCR correction or inference.
+/// </summary>
+public sealed class TableCellItem
+{
+    public string Text { get; init; } = "";
+}
+
+/// <summary>A single visual table row, padded only with empty display cells.</summary>
+public sealed class TableRowItem
+{
+    public IReadOnlyList<TableCellItem> Cells { get; init; } = [];
+}
+
 public sealed class TableItem
 {
     public string Page { get; init; } = "—";
+    public string SourceBlockId { get; init; } = "";
     public string DisplayText { get; init; } = "";
+    public IReadOnlyList<TableCellItem> FirstRowCells { get; init; } = [];
+    public IReadOnlyList<TableRowItem> RemainingRows { get; init; } = [];
+    public int RowCount { get; init; }
+    public int ColumnCount { get; init; }
+
+    public bool HasStructuredRows => RowCount > 0 && ColumnCount > 0;
+    public bool HasRawOnly => !HasStructuredRows;
+    public string Dimensions => HasStructuredRows
+        ? $"{RowCount} 行 × {ColumnCount} 列 · 源自 PDF 识别"
+        : "仅有原文提取文本，暂无可用的二维表格结构";
 
     public static TableItem FromJson(JsonElement node)
     {
-        var lines = new List<string>();
+        var parsedRows = new List<List<string>>();
         if (node.TryGetProperty("table_rows", out var rows) && rows.ValueKind == JsonValueKind.Array)
         {
             foreach (var row in rows.EnumerateArray())
             {
                 if (row.ValueKind != JsonValueKind.Array)
-                {
                     continue;
-                }
-                lines.Add(string.Join("  |  ", row.EnumerateArray().Select(cell => cell.ValueKind == JsonValueKind.String ? cell.GetString() : cell.ToString())));
+
+                // Preserve extracted cell text. Null cells are display blanks;
+                // repeated header text is NOT deduplicated or guessed away.
+                var cells = row.EnumerateArray().Select(cell => cell.ValueKind switch
+                {
+                    JsonValueKind.String => cell.GetString() ?? "",
+                    JsonValueKind.Null => "",
+                    JsonValueKind.Undefined => "",
+                    _ => cell.ToString(),
+                }).ToList();
+                parsedRows.Add(cells);
             }
         }
-        if (lines.Count == 0)
+
+        var columnCount = parsedRows.Count == 0 ? 0 : parsedRows.Max(row => row.Count);
+        var flatText = parsedRows.Count > 0 && columnCount > 0
+            ? string.Join(Environment.NewLine, parsedRows.Select(row => string.Join("  |  ", row)))
+            : "没有可显示的表格文本。";
+        var originalText = JsonRead.Text(node, "text");
+
+        static IReadOnlyList<TableCellItem> ToCells(IReadOnlyList<string> values, int width)
         {
-            lines.Add(JsonRead.Text(node, "text", "没有可显示的表格文本。"));
+            var result = new List<TableCellItem>(width);
+            for (var index = 0; index < width; index++)
+                result.Add(new TableCellItem
+                {
+                    Text = index < values.Count ? values[index] : "",
+                });
+            return result;
         }
+
         return new TableItem
         {
             Page = JsonRead.Text(node, "page_number", "—"),
-            DisplayText = string.Join(Environment.NewLine, lines),
+            SourceBlockId = JsonRead.Text(node, "id"),
+            // The PDF parser's original source text is the audit source.
+            // Constructed row text is only the fallback if it was absent.
+            DisplayText = string.IsNullOrWhiteSpace(originalText) ? flatText : originalText,
+            RowCount = parsedRows.Count,
+            ColumnCount = columnCount,
+            // The first row is visually highlighted, but no assertion is made
+            // that it is a verified header: merged/multi-level tables differ.
+            FirstRowCells = parsedRows.Count == 0
+                ? Array.Empty<TableCellItem>()
+                : ToCells(parsedRows[0], columnCount),
+            RemainingRows = parsedRows.Skip(1)
+                .Select(row => new TableRowItem { Cells = ToCells(row, columnCount) })
+                .ToList(),
         };
     }
 }

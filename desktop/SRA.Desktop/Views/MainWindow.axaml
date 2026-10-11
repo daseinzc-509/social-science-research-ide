@@ -278,8 +278,19 @@
             <TabItem Header="概览">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="30,28,30,45" Spacing="24">
+                  <!-- Keep extracted metadata audit warnings visible without
+                       overwhelming the actual book information / abstract. -->
                   <Border Background="{DynamicResource AmberSoftBrush}" CornerRadius="8" Padding="12" IsVisible="{Binding HasWarnings}">
-                    <TextBlock Text="{Binding WarningsText}" Foreground="{DynamicResource AmberInkBrush}" TextWrapping="Wrap" FontSize="11" />
+                    <Expander IsExpanded="False">
+                      <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="待核验" Foreground="{DynamicResource AmberInkBrush}" FontWeight="SemiBold" FontSize="12"/>
+                          <TextBlock Text="{Binding WarningsSummary}" Foreground="{DynamicResource AmberInkBrush}" FontSize="11"/>
+                        </StackPanel>
+                      </Expander.Header>
+                      <TextBlock Text="{Binding WarningsText}" Foreground="{DynamicResource AmberInkBrush}"
+                                 TextWrapping="Wrap" Margin="4,8,4,3" FontSize="11" />
+                    </Expander>
                   </Border>
 
                   <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
@@ -376,14 +387,107 @@
 
             <TabItem Header="表格">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="24" Spacing="10">
+                <StackPanel Margin="24,22,24,36" Spacing="12">
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="结构化表格预览" Classes="section-title"/>
+                    <TextBlock Classes="muted" FontSize="11" TextWrapping="Wrap"
+                               Text="按提取结果展示单元格，保留原始数值；第一行仅作视觉强调，不保证是真正表头。复杂跨行、跨页表格请打开 PDF 核对。" />
+                  </StackPanel>
+
+                  <Border Classes="reading-lead" Padding="15,12" IsVisible="{Binding HasNoTables}">
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="当前 Paper Card 没有可预览的表格。如果原 PDF 含表格，请先检查 Docling 解析和文献页码。" />
+                  </Border>
+
                   <ItemsControl ItemsSource="{Binding Tables}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="models:TableItem">
-                        <Border Classes="card" Padding="13" Margin="0,0,0,8">
-                          <StackPanel Spacing="7">
-                            <StackPanel Orientation="Horizontal"><TextBlock Text="PDF p." Classes="eyebrow"/><TextBlock Text="{Binding Page}" Classes="eyebrow"/></StackPanel>
-                            <TextBox Text="{Binding DisplayText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="10" Background="Transparent" BorderThickness="0" />
+                        <Border Classes="card" Padding="15" Margin="0,0,0,12">
+                          <StackPanel Spacing="12">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                              <StackPanel Spacing="3">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                  <TextBlock Text="PDF 第" Classes="eyebrow"/>
+                                  <TextBlock Text="{Binding Page}" Classes="eyebrow"/>
+                                  <TextBlock Text="页" Classes="eyebrow"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding Dimensions}" Classes="muted" FontSize="11" />
+                              </StackPanel>
+                              <TextBlock Grid.Column="1" Text="TABLE PREVIEW" Classes="eyebrow"
+                                         VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- No markdown-code text box for usable table_rows:
+                                 render genuine horizontal cell layouts instead.
+                                 Highlighting the first row is a visual cue, not
+                                 a verified assertion that it is a real header. -->
+                            <ScrollViewer IsVisible="{Binding HasStructuredRows}"
+                                          HorizontalScrollBarVisibility="Auto"
+                                          VerticalScrollBarVisibility="Disabled">
+                              <StackPanel HorizontalAlignment="Left" Spacing="0">
+                                <ItemsControl ItemsSource="{Binding FirstRowCells}">
+                                  <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="0" /></ItemsPanelTemplate>
+                                  </ItemsControl.ItemsPanel>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TableCellItem">
+                                      <Border Width="170" MinHeight="45" Padding="10,8"
+                                              Background="{DynamicResource BlueSoftBrush}"
+                                              BorderBrush="{DynamicResource LineBrush}"
+                                              BorderThickness="0.5,0.5,0.5,0.5">
+                                        <TextBlock Text="{Binding Text}"
+                                                   Foreground="{DynamicResource BlueInkBrush}"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                      </Border>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding RemainingRows}">
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TableRowItem">
+                                      <ItemsControl ItemsSource="{Binding Cells}">
+                                        <ItemsControl.ItemsPanel>
+                                          <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="0" /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate x:DataType="models:TableCellItem">
+                                            <Border Width="170" MinHeight="41" Padding="10,8"
+                                                    Background="{DynamicResource CanvasBrush}"
+                                                    BorderBrush="{DynamicResource LineBrush}"
+                                                    BorderThickness="0.5,0,0.5,0.5">
+                                              <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="11" />
+                                            </Border>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </StackPanel>
+                            </ScrollViewer>
+
+                            <!-- Some PDFs yield table text but no reliable cell grid.
+                                 Make it visible rather than showing an empty card. -->
+                            <TextBox IsVisible="{Binding HasRawOnly}"
+                                     Text="{Binding DisplayText}" IsReadOnly="True"
+                                     AcceptsReturn="True" TextWrapping="Wrap"
+                                     Background="{DynamicResource CodeBrush}"
+                                     BorderThickness="0" Padding="10"
+                                     FontSize="11" MaxHeight="300"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+
+                            <Expander IsVisible="{Binding HasStructuredRows}" IsExpanded="False"
+                                      Header="查看原始提取文本（可复制 / 核对）">
+                              <TextBox Text="{Binding DisplayText}" IsReadOnly="True"
+                                       AcceptsReturn="True" TextWrapping="NoWrap"
+                                       Background="{DynamicResource CodeBrush}"
+                                       BorderThickness="0" Padding="10" FontFamily="Consolas"
+                                       FontSize="10" MaxHeight="260"
+                                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                       ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                            </Expander>
                           </StackPanel>
                         </Border>
                       </DataTemplate>

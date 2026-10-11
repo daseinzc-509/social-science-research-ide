@@ -84,6 +84,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string metadataDoi = "—";
     [ObservableProperty] private string abstractText = "尚未提取摘要。";
     [ObservableProperty] private string warningsText = "";
+    [ObservableProperty] private string warningsSummary = "暂无提取警告";
     [ObservableProperty] private bool hasWarnings;
     [ObservableProperty] private bool hasManualMetadata;
     [ObservableProperty] private string manualMetadataNote = "";
@@ -117,6 +118,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool HasSelection => SelectedPaper is not null;
     public bool HasCard => SelectedPaper?.HasCard == true;
     public bool HasStudyRationale => !string.IsNullOrWhiteSpace(StudyRationale);
+    public bool HasNoTables => Tables.Count == 0;
     public bool CanRunPaperActions => HasSelection && !IsBusy;
     public string AnalyzeButtonText => HasCard ? "重新分析" : "开始分析";
     public Uri? SelectedPdfUri => SelectedPaper is null ? null : _api.PaperPdfUri(SelectedPaper.Id);
@@ -507,24 +509,30 @@ public partial class MainWindowViewModel : ObservableObject
     private void ProjectTables(JsonElement card)
     {
         Tables.Clear();
-        if (!card.TryGetProperty("tables", out var tables) || tables.ValueKind != JsonValueKind.Array)
+        if (card.TryGetProperty("tables", out var tables) && tables.ValueKind == JsonValueKind.Array)
         {
-            return;
-        }
-        foreach (var table in tables.EnumerateArray())
-        {
-            if (table.ValueKind == JsonValueKind.Object)
+            foreach (var table in tables.EnumerateArray())
             {
-                Tables.Add(TableItem.FromJson(table));
+                if (table.ValueKind == JsonValueKind.Object)
+                {
+                    Tables.Add(TableItem.FromJson(table));
+                }
             }
         }
+        OnPropertyChanged(nameof(HasNoTables));
     }
 
     private void ProjectWarnings(JsonElement card)
     {
         var warnings = JsonRead.StringList(card, "warnings");
         HasWarnings = warnings.Count > 0;
-        WarningsText = warnings.Count == 0 ? "Paper Card 当前为 0 warnings。" : string.Join(Environment.NewLine, warnings);
+        WarningsSummary = warnings.Count == 0
+            ? "暂无提取警告"
+            : $"{warnings.Count} 项信息需要核验 · 点击展开详情";
+        // Preserve every raw warning; only the on-screen initial state is collapsed.
+        WarningsText = warnings.Count == 0
+            ? ""
+            : string.Join(Environment.NewLine, warnings);
     }
 
     private static List<ClaimItem> ParseClaims(JsonElement card, string propertyName)
@@ -928,6 +936,7 @@ public partial class MainWindowViewModel : ObservableObject
         ReadingRecommendations.Clear();
         References.Clear();
         Tables.Clear();
+        OnPropertyChanged(nameof(HasNoTables));
         Keywords.Clear();
         SelectedStudyType = "—";
         SelectedStudyMethod = "—";
@@ -942,6 +951,7 @@ public partial class MainWindowViewModel : ObservableObject
         MetadataDoi = "—";
         AbstractText = "尚未提取摘要。";
         WarningsText = "";
+        WarningsSummary = "暂无提取警告";
         HasWarnings = false;
         HasManualMetadata = false;
         ManualMetadataNote = "";
