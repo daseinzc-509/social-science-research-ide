@@ -42,20 +42,16 @@ def test_preview_and_raw_audit_are_both_available():
     assert len(table_tabs) == 1
     elements = list(table_tabs[0].iter())
     assert any(
-        element.tag.endswith("ScrollViewer")
-        and element.attrib.get("HorizontalScrollBarVisibility") == "Auto"
+        element.tag.endswith("StructuredTableView")
+        and element.attrib.get("Table") == "{Binding}"
         for element in elements
     )
-    assert any(
-        element.tag.endswith("ItemsControl")
-        and element.attrib.get("ItemsSource") == "{Binding FirstRowCells}"
-        for element in elements
-    )
-    assert any(
-        element.tag.endswith("ItemsControl")
-        and element.attrib.get("ItemsSource") == "{Binding RemainingRows}"
-        for element in elements
-    )
+    table_control = (
+        ROOT / "desktop/SRA.Desktop/Controls/StructuredTableView.cs"
+    ).read_text(encoding="utf-8")
+    assert "Grid.SetRowSpan(border, cell.RowSpan)" in table_control
+    assert "Grid.SetColumnSpan(border, cell.ColumnSpan)" in table_control
+    assert "HorizontalScrollBarVisibility = ScrollBarVisibility.Auto" in table_control
     assert any(
         element.tag.endswith("TextBox")
         and element.attrib.get("Text") == "{Binding DisplayText}"
@@ -74,3 +70,28 @@ def test_warnings_are_collapsed_without_removing_raw_text():
     assert 'string.Join(Environment.NewLine, warnings)' in model
     assert 'OnPropertyChanged(nameof(HasNoTables))' in model
     assert 'public bool HasNoTables => Tables.Count == 0;' in model
+
+
+
+def test_structured_docling_spans_not_guessed_from_duplicate_text():
+    model = MODEL.read_text(encoding="utf-8")
+    assert 'node.TryGetProperty("table_cells"' in model
+    assert "class TableSpanCellItem" in model
+    assert "ReadAuthoritativeSpans" in model
+    assert "occupied[r, c]" in model
+    assert "return null;" in model
+    assert "BuildFlatCells" in model
+    assert "HasVerifiedSpans" in model
+
+
+def test_formula_and_figure_views_keep_pdf_source_links():
+    model = MODEL.read_text(encoding="utf-8")
+    view = VIEW.read_text(encoding="utf-8")
+    vm = VIEWMODEL.read_text(encoding="utf-8")
+    assert "public sealed class VisualSourceItem" in model
+    assert 'JsonRead.Text(node, "page_number"' in model
+    assert 'Header="公式与图片"' in view
+    assert "ItemsSource=\"{Binding Formulas}\"" in view
+    assert "ItemsSource=\"{Binding Figures}\"" in view
+    assert 'Formulas.Add(VisualSourceItem.FromFormula(item))' in vm
+    assert 'Figures.Add(VisualSourceItem.FromFigure(item))' in vm

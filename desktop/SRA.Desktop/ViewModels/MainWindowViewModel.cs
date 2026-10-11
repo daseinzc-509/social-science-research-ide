@@ -55,6 +55,8 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<ClaimItem> ReadingRecommendations { get; } = [];
     public ObservableCollection<ReferenceItem> References { get; } = [];
     public ObservableCollection<TableItem> Tables { get; } = [];
+    public ObservableCollection<VisualSourceItem> Formulas { get; } = [];
+    public ObservableCollection<VisualSourceItem> Figures { get; } = [];
 
     [ObservableProperty] private PaperSummary? selectedPaper;
     [ObservableProperty] private PaperDetailResponse? selectedDetail;
@@ -119,6 +121,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool HasCard => SelectedPaper?.HasCard == true;
     public bool HasStudyRationale => !string.IsNullOrWhiteSpace(StudyRationale);
     public bool HasNoTables => Tables.Count == 0;
+    public bool HasNoVisuals => Formulas.Count == 0 && Figures.Count == 0;
     public bool CanRunPaperActions => HasSelection && !IsBusy;
     public string AnalyzeButtonText => HasCard ? "重新分析" : "开始分析";
     public Uri? SelectedPdfUri => SelectedPaper is null ? null : _api.PaperPdfUri(SelectedPaper.Id);
@@ -377,6 +380,7 @@ public partial class MainWindowViewModel : ObservableObject
         ProjectStudyProfile(card);
         ProjectClaims(card);
         ProjectTables(card);
+        ProjectVisuals(card);
         ProjectWarnings(card);
     }
 
@@ -520,6 +524,30 @@ public partial class MainWindowViewModel : ObservableObject
             }
         }
         OnPropertyChanged(nameof(HasNoTables));
+    }
+
+    private void ProjectVisuals(JsonElement card)
+    {
+        Formulas.Clear();
+        Figures.Clear();
+
+        if (card.TryGetProperty("formulas", out var formulas) && formulas.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in formulas.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Object)
+                    Formulas.Add(VisualSourceItem.FromFormula(item));
+            }
+        }
+        if (card.TryGetProperty("figures", out var figures) && figures.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in figures.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Object)
+                    Figures.Add(VisualSourceItem.FromFigure(item));
+            }
+        }
+        OnPropertyChanged(nameof(HasNoVisuals));
     }
 
     private void ProjectWarnings(JsonElement card)
@@ -937,6 +965,9 @@ public partial class MainWindowViewModel : ObservableObject
         References.Clear();
         Tables.Clear();
         OnPropertyChanged(nameof(HasNoTables));
+        Formulas.Clear();
+        Figures.Clear();
+        OnPropertyChanged(nameof(HasNoVisuals));
         Keywords.Clear();
         SelectedStudyType = "—";
         SelectedStudyMethod = "—";

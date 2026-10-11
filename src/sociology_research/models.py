@@ -116,6 +116,32 @@ class CitationMention(BaseModel):
     match_status: ReferenceMatchStatus = ReferenceMatchStatus.CANDIDATE
 
 
+class TableCellSpan(BaseModel):
+    """One authoritative Docling table cell; offsets are zero-based grid positions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: int = Field(ge=0)
+    col: int = Field(ge=0)
+    row_span: int = Field(default=1, ge=1)
+    col_span: int = Field(default=1, ge=1)
+    text: str = ""
+    column_header: bool = False
+    row_header: bool = False
+
+
+class FigureRegion(BaseModel):
+    """A located PDF visual. This is a pointer, not OCR text or AI evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    page_number: int = Field(ge=1)
+    bbox: tuple[float, float, float, float] | None = None
+    caption: str = ""
+    source_label: str = "docling:picture"
+
+
 class SourceBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -124,6 +150,7 @@ class SourceBlock(BaseModel):
     text: str = Field(min_length=1)
     bbox: tuple[float, float, float, float] | None = None
     table_rows: list[list[str]] | None = None
+    table_cells: list[TableCellSpan] | None = None
     role: Literal["body", "heading", "front_matter", "footnote", "table", "furniture"] = "body"
     source_label: str | None = None
 
@@ -491,6 +518,8 @@ class PaperCard(BaseModel):
     metadata_claims: list[ExtractedClaim] = Field(default_factory=list)
     basic_facts: list[ExtractedClaim] = Field(default_factory=list)
     tables: list[SourceBlock] = Field(default_factory=list)
+    formulas: list[SourceBlock] = Field(default_factory=list)
+    figures: list[FigureRegion] = Field(default_factory=list)
     evidence_spans: list[EvidenceSpan] = Field(default_factory=list)
     analysis: list[ExtractedClaim] = Field(default_factory=list)
     limitations: list[ExtractedClaim] = Field(default_factory=list)
@@ -536,6 +565,7 @@ class ParsedDocument(BaseModel):
     parser_version: str = "legacy"
     warnings: list[str] = Field(default_factory=list)
     blocks: list[SourceBlock] = Field(default_factory=list)
+    figures: list[FigureRegion] = Field(default_factory=list)
 
 
 class PaperRecord(BaseModel):

@@ -160,6 +160,60 @@ public sealed class TableRowItem
     public IReadOnlyList<TableCellItem> Cells { get; init; } = [];
 }
 
+/// <summary>
+/// A located cell from Docling's first-class table structure.
+/// All offsets are zero-based; spans are explicit, never guessed from
+/// duplicate header strings or cell contents.
+/// </summary>
+public sealed class TableSpanCellItem
+{
+    public int Row { get; init; }
+    public int Column { get; init; }
+    public int RowSpan { get; init; } = 1;
+    public int ColumnSpan { get; init; } = 1;
+    public string Text { get; init; } = "";
+    public bool IsHeader { get; init; }
+    public bool HeaderVerified { get; init; }
+}
+
+
+public sealed class VisualSourceItem
+{
+    public string Page { get; init; } = "—";
+    public string Label { get; init; } = "";
+    public string Text { get; init; } = "";
+    public string SourceId { get; init; } = "";
+    public string Location { get; init; } = "";
+
+    public static VisualSourceItem FromFormula(JsonElement node) => new()
+    {
+        Page = JsonRead.Text(node, "page_number", "—"),
+        Text = JsonRead.Text(node, "text", "未提取公式文本"),
+        Label = "公式 · 可能为 LaTeX 或原始识别文本",
+        SourceId = JsonRead.Text(node, "id"),
+        Location = FormatBbox(node),
+    };
+
+    public static VisualSourceItem FromFigure(JsonElement node) => new()
+    {
+        Page = JsonRead.Text(node, "page_number", "—"),
+        Text = JsonRead.Text(node, "caption", "该图片尚无可靠的文字说明，请打开 PDF 核对。"),
+        Label = "图片来源定位 · 未执行图片内容推断",
+        SourceId = JsonRead.Text(node, "id"),
+        Location = FormatBbox(node),
+    };
+
+    private static string FormatBbox(JsonElement node)
+    {
+        if (!node.TryGetProperty("bbox", out var bbox) || bbox.ValueKind != JsonValueKind.Array)
+            return "未取得区域坐标";
+        var values = bbox.EnumerateArray().ToArray();
+        if (values.Length != 4 || values.Any(value => value.ValueKind != JsonValueKind.Number))
+            return "未取得区域坐标";
+        return string.Join(", ", values.Select(value => value.GetDouble().ToString("F1")));
+    }
+}
+
 public sealed class TableItem
 {
     public string Page { get; init; } = "—";
@@ -167,13 +221,16 @@ public sealed class TableItem
     public string DisplayText { get; init; } = "";
     public IReadOnlyList<TableCellItem> FirstRowCells { get; init; } = [];
     public IReadOnlyList<TableRowItem> RemainingRows { get; init; } = [];
+    public IReadOnlyList<TableSpanCellItem> SpanCells { get; init; } = [];
+    public bool HasVerifiedSpans { get; init; }
     public int RowCount { get; init; }
     public int ColumnCount { get; init; }
 
     public bool HasStructuredRows => RowCount > 0 && ColumnCount > 0;
     public bool HasRawOnly => !HasStructuredRows;
     public string Dimensions => HasStructuredRows
-        ? $"{RowCount} 行 × {ColumnCount} 列 · 源自 PDF 识别"
+        ? $"{RowCount} 行 × {ColumnCount} 列 · " +
+          (HasVerifiedSpans ? "保留 Docling 合并单元格坐标" : "仅有二维网格，表头结构待核验")
         : "仅有原文提取文本，暂无可用的二维表格结构";
 
     public static TableItem FromJson(JsonElement node)
@@ -200,6 +257,7 @@ public sealed class TableItem
         }
 
         var columnCount = parsedRows.Count == 0 ? 0 : parsedRows.Max(row => row.Count);
+        var spans = ReadAuthoritativeSpans(node, parsedRows, columnCount);
         var flatText = parsedRows.Count > 0 && columnCount > 0
             ? string.Join(Environment.NewLine, parsedRows.Select(row => string.Join("  |  ", row)))
             : "没有可显示的表格文本。";
@@ -225,6 +283,8 @@ public sealed class TableItem
             DisplayText = string.IsNullOrWhiteSpace(originalText) ? flatText : originalText,
             RowCount = parsedRows.Count,
             ColumnCount = columnCount,
+            SpanCells = spans ?? BuildFlatCells(parsedRows, columnCount),
+            HasVerifiedSpans = spans is not null,
             // The first row is visually highlighted, but no assertion is made
             // that it is a verified header: merged/multi-level tables differ.
             FirstRowCells = parsedRows.Count == 0
@@ -234,6 +294,90 @@ public sealed class TableItem
                 .Select(row => new TableRowItem { Cells = ToCells(row, columnCount) })
                 .ToList(),
         };
+    }
+
+    private static IReadOnlyList<TableSpanCellItem>? ReadAuthoritativeSpans(
+        JsonElement node, IReadOnlyList<List<string>> rows, int width)
+    {
+        if (rows.Count == 0 || width == 0 ||
+            !node.TryGetProperty("table_cells", out var cellsNode) ||
+            cellsNode.ValueKind != JsonValueKind.Array || cellsNode.GetArrayLength() == 0)
+            return null;
+
+        var occupied = new bool[rows.Count, width];
+        var result = new List<TableSpanCellItem>();
+        foreach (var source in cellsNode.EnumerateArray())
+        {
+            if (source.ValueKind != JsonValueKind.Object ||
+                !TryReadNumber(source, "row", out var row) ||
+                !TryReadNumber(source, "col", out var column) ||
+                !TryReadNumber(source, "row_span", out var rowSpan) ||
+                !TryReadNumber(source, "col_span", out var colSpan) ||
+                row < 0 || column < 0 || rowSpan < 1 || colSpan < 1 ||
+                row > rows.Count - rowSpan || column > width - colSpan)
+                return null;
+
+            for (var r = row; r < row + rowSpan; r++)
+            for (var c = column; c < column + colSpan; c++)
+            {
+                if (occupied[r, c]) return null;
+                occupied[r, c] = true;
+            }
+
+            var isHeader = ReadBool(source, "column_header") || ReadBool(source, "row_header");
+            result.Add(new TableSpanCellItem
+            {
+                Row = row,
+                Column = column,
+                RowSpan = rowSpan,
+                ColumnSpan = colSpan,
+                Text = JsonRead.Text(source, "text"),
+                IsHeader = isHeader,
+                HeaderVerified = isHeader,
+            });
+        }
+
+        // Docling can omit empty logical cells. Display them as blanks without
+        // inventing any content, but never copy duplicated span header text.
+        for (var row = 0; row < rows.Count; row++)
+        for (var col = 0; col < width; col++)
+            if (!occupied[row, col])
+                result.Add(new TableSpanCellItem
+                {
+                    Row = row, Column = col,
+                    Text = col < rows[row].Count ? rows[row][col] : "",
+                });
+
+        return result;
+    }
+
+    private static IReadOnlyList<TableSpanCellItem> BuildFlatCells(
+        IReadOnlyList<List<string>> rows, int width)
+    {
+        var output = new List<TableSpanCellItem>();
+        for (var row = 0; row < rows.Count; row++)
+        for (var col = 0; col < width; col++)
+            output.Add(new TableSpanCellItem
+            {
+                Row = row, Column = col,
+                Text = col < rows[row].Count ? rows[row][col] : "",
+                IsHeader = row == 0,
+                HeaderVerified = false,
+            });
+        return output;
+    }
+
+    private static bool TryReadNumber(JsonElement node, string name, out int result)
+    {
+        result = 0;
+        return node.TryGetProperty(name, out var value) &&
+            value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out result);
+    }
+
+    private static bool ReadBool(JsonElement node, string name)
+    {
+        return node.TryGetProperty(name, out var value) &&
+            value.ValueKind == JsonValueKind.True;
     }
 }
 

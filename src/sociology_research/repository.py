@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .models import PaperCard, PaperMetadata, PaperRecord, ParsedDocument, SourceBlock
+from .models import FigureRegion, PaperCard, PaperMetadata, PaperRecord, ParsedDocument, SourceBlock
 
 
 class ResearchRepository:
@@ -60,6 +60,16 @@ class ResearchRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_source_blocks_paper_page
                     ON source_blocks(paper_id, page_number);
+                CREATE TABLE IF NOT EXISTS figure_regions (
+                    id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    page_number INTEGER NOT NULL CHECK (page_number > 0),
+                    bbox_json TEXT,
+                    caption TEXT NOT NULL DEFAULT '',
+                    source_label TEXT NOT NULL DEFAULT 'docling:picture'
+                );
+                CREATE INDEX IF NOT EXISTS idx_figure_regions_paper_page
+                    ON figure_regions(paper_id, page_number);
                 CREATE TABLE IF NOT EXISTS paper_cards (
                     paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
                     card_json TEXT NOT NULL,
@@ -111,6 +121,8 @@ class ResearchRepository:
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(source_blocks)")}
             if "table_rows_json" not in columns:
                 connection.execute("ALTER TABLE source_blocks ADD COLUMN table_rows_json TEXT")
+            if "table_cells_json" not in columns:
+                connection.execute("ALTER TABLE source_blocks ADD COLUMN table_cells_json TEXT")
             if "role" not in columns:
                 connection.execute("ALTER TABLE source_blocks ADD COLUMN role TEXT NOT NULL DEFAULT 'body'")
             if "source_label" not in columns:
@@ -140,13 +152,26 @@ class ResearchRepository:
                  json.dumps(record.warnings, ensure_ascii=False), record.created_at),
             )
             connection.executemany(
-                "INSERT INTO source_blocks (id, paper_id, page_number, text, bbox_json, table_rows_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO source_blocks (id, paper_id, page_number, text, bbox_json, table_rows_json, table_cells_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (block.id, record.id, block.page_number, block.text,
                      json.dumps(block.bbox) if block.bbox is not None else None,
                      json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None,
+                     json.dumps([cell.model_dump(mode="json") for cell in block.table_cells], ensure_ascii=False)
+                     if block.table_cells is not None else None,
                      block.role, block.source_label)
                     for block in document.blocks
+                ],
+            )
+            connection.executemany(
+                """INSERT INTO figure_regions
+                (id, paper_id, page_number, bbox_json, caption, source_label)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    (figure.id, record.id, figure.page_number,
+                     json.dumps(figure.bbox) if figure.bbox is not None else None,
+                     figure.caption, figure.source_label)
+                    for figure in document.figures
                 ],
             )
         return record
@@ -159,15 +184,29 @@ class ResearchRepository:
             if not exists:
                 raise KeyError(f"unknown paper id: {paper_id}")
             connection.execute("DELETE FROM source_blocks WHERE paper_id = ?", (paper_id,))
+            connection.execute("DELETE FROM figure_regions WHERE paper_id = ?", (paper_id,))
             connection.executemany(
                 """INSERT INTO source_blocks
-                (id, paper_id, page_number, text, bbox_json, table_rows_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id, paper_id, page_number, text, bbox_json, table_rows_json, table_cells_json, role, source_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (block.id, paper_id, block.page_number, block.text,
                      json.dumps(block.bbox) if block.bbox is not None else None,
                      json.dumps(block.table_rows, ensure_ascii=False) if block.table_rows is not None else None,
+                     json.dumps([cell.model_dump(mode="json") for cell in block.table_cells], ensure_ascii=False)
+                     if block.table_cells is not None else None,
                      block.role, block.source_label)
                     for block in document.blocks
+                ],
+            )
+            connection.executemany(
+                """INSERT INTO figure_regions
+                (id, paper_id, page_number, bbox_json, caption, source_label)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    (figure.id, paper_id, figure.page_number,
+                     json.dumps(figure.bbox) if figure.bbox is not None else None,
+                     figure.caption, figure.source_label)
+                    for figure in document.figures
                 ],
             )
             connection.execute(
@@ -279,7 +318,7 @@ class ResearchRepository:
     def get_source_blocks(self, paper_id: str) -> list[SourceBlock]:
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT id, page_number, text, bbox_json, table_rows_json, role, source_label FROM source_blocks "
+                "SELECT id, page_number, text, bbox_json, table_rows_json, table_cells_json, role, source_label FROM source_blocks "
                 "WHERE paper_id = ? ORDER BY page_number, rowid", (paper_id,)
             ).fetchall()
         return [
@@ -287,7 +326,27 @@ class ResearchRepository:
                 id=row["id"], page_number=row["page_number"], text=row["text"],
                 bbox=tuple(json.loads(row["bbox_json"])) if row["bbox_json"] else None,
                 table_rows=json.loads(row["table_rows_json"]) if row["table_rows_json"] else None,
+                table_cells=json.loads(row["table_cells_json"]) if row["table_cells_json"] else None,
                 role=row["role"] or "body",
+                source_label=row["source_label"],
+            )
+            for row in rows
+        ]
+
+    def get_figures(self, paper_id: str) -> list[FigureRegion]:
+        """Return only located figure references, never guessed image contents."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id, page_number, bbox_json, caption, source_label "
+                "FROM figure_regions WHERE paper_id = ? ORDER BY page_number, rowid",
+                (paper_id,),
+            ).fetchall()
+        return [
+            FigureRegion(
+                id=row["id"],
+                page_number=row["page_number"],
+                bbox=tuple(json.loads(row["bbox_json"])) if row["bbox_json"] else None,
+                caption=row["caption"],
                 source_label=row["source_label"],
             )
             for row in rows

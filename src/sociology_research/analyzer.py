@@ -313,6 +313,11 @@ class PaperAnalysisPipeline:
             metadata_claims=metadata_claims,
             basic_facts=basic_facts,
             tables=[block for block in blocks if block.table_rows is not None],
+            formulas=[
+                block for block in blocks
+                if (block.source_label or "").casefold() == "docling:formula"
+            ],
+            figures=self.repository.get_figures(paper_id),
             evidence_spans=used_spans,
             analysis=analysis,
             limitations=limitations,

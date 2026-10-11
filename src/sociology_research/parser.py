@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from .models import ParseStatus, ParsedDocument, SourceBlock
+from .models import FigureRegion, ParseStatus, ParsedDocument, SourceBlock, TableCellSpan
 
 
 class DocumentParseError(ValueError):
@@ -67,8 +67,11 @@ class DoclingDocumentParser:
             version = importlib.metadata.version("docling")
         except importlib.metadata.PackageNotFoundError:
             version = "missing"
-        # Changing this intentionally invalidates old PDF extraction caches on reparse.
-        self.version = f"docling-only-v1-reviewed-ocr:{version}"
+        # Formula enrichment is opt-in: it may require additional model weights.
+        self.formula_enabled = _enabled("SRA_DOCLING_FORMULA_ENRICHMENT")
+        option = "formula" if self.formula_enabled else "default"
+        # Parser version changes intentionally invalidate stale evidence caches on reparse.
+        self.version = f"docling-only-v2-table-spans-{option}:{version}"
 
     def parse(
         self,
@@ -89,8 +92,14 @@ class DoclingDocumentParser:
         except Exception as exc:
             raise DocumentParseError(f"Could not import Docling: {exc}") from exc
 
-        def convert(*, full_page: bool):
+        def convert(*, full_page: bool, formula: bool):
             options = PdfPipelineOptions()
+            if formula:
+                if not hasattr(options, "do_formula_enrichment"):
+                    raise DocumentParseError(
+                        "Installed Docling does not support formula enrichment."
+                    )
+                options.do_formula_enrichment = True
             # Standard OCR avoids erasing trustworthy embedded text. Do not turn
             # OCR off blindly on a born-digital document with mixed scanned pages.
             options.do_ocr = True
@@ -123,12 +132,31 @@ class DoclingDocumentParser:
                 raise DocumentParseError("Docling produced no pages")
             return result, document, blocks, warnings, count
 
+        active_formula = self.formula_enabled
         try:
-            result, document, blocks, warnings, page_count = convert(full_page=False)
-        except DocumentParseError:
-            raise
+            result, document, blocks, warnings, page_count = convert(
+                full_page=False, formula=active_formula
+            )
         except Exception as exc:
-            raise DocumentParseError(f"Docling could not parse PDF: {exc}") from exc
+            if not active_formula:
+                if isinstance(exc, DocumentParseError):
+                    raise
+                raise DocumentParseError(f"Docling could not parse PDF: {exc}") from exc
+            # Failure of optional enrichment must not prevent ordinary reading.
+            _emit(progress, "Docling formula enrichment unavailable; falling back to ordinary PDF parsing.")
+            try:
+                result, document, blocks, warnings, page_count = convert(
+                    full_page=False, formula=False
+                )
+            except Exception as fallback_exc:
+                raise DocumentParseError(
+                    f"Docling could not parse PDF: {fallback_exc}"
+                ) from fallback_exc
+            active_formula = False
+            warnings.append(
+                "Optional formula enrichment failed; ordinary Docling parsing retained. "
+                "Check formulas against the PDF before citing."
+            )
 
         first_quality = _docling_text_quality(blocks, page_count)
         override_full_ocr = os.environ.get("SRA_DOCLING_FULL_PAGE_OCR", "").strip().casefold() in {
@@ -142,7 +170,7 @@ class DoclingDocumentParser:
             _emit(progress, f"Docling: {reason}; evaluating full-page OCR recovery...")
             try:
                 candidate_result, candidate_doc, candidate_blocks, candidate_warnings, candidate_pages = convert(
-                    full_page=True
+                    full_page=True, formula=active_formula
                 )
                 candidate_quality = _docling_text_quality(candidate_blocks, candidate_pages)
                 if _prefer_ocr_candidate(
@@ -168,6 +196,7 @@ class DoclingDocumentParser:
                 warnings.append(f"Full-page OCR retry unavailable: {type(exc).__name__}; review original extraction.")
                 _emit(progress, "Docling: full-page OCR unavailable; original extraction retained.")
 
+        figures = _docling_figure_regions(document, paper_id=paper_id)
         blocks.extend(_docling_printed_page_number_blocks(document, blocks, paper_id=paper_id))
         # Preserve Docling's semantic item reading order. Metadata page-number
         # furniture is appended (and excluded from evidence chunking by role).
@@ -200,7 +229,12 @@ class DoclingDocumentParser:
             parser_version=self.version,
             warnings=warnings,
             blocks=blocks,
+            figures=figures,
         )
+
+
+def _enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _docling_text_quality(blocks: list[SourceBlock], page_count: int) -> dict[str, object]:
@@ -407,6 +441,9 @@ def _blocks_from_docling_document(document: object, *, paper_id: str) -> tuple[l
             rows = _docling_table_rows(item, document)
             if not rows:
                 continue
+            cells, cell_warning = _docling_table_cells(item, rows)
+            if cell_warning:
+                warnings.append(f"Table {item_index}: {cell_warning}")
             text = "\n".join("\t".join(row) for row in rows)
             if not provs:
                 warnings.append("Docling table without page provenance was skipped.")
@@ -426,6 +463,7 @@ def _blocks_from_docling_document(document: object, *, paper_id: str) -> tuple[l
                     text=text,
                     bbox=bbox,
                     table_rows=rows,
+                    table_cells=cells,
                     role="table",
                     source_label=f"docling:{label}",
                 )
@@ -480,27 +518,138 @@ def _blocks_from_docling_document(document: object, *, paper_id: str) -> tuple[l
 
 
 def _docling_table_rows(item: object, document: object) -> list[list[str]]:
+    """Keep the entire Docling dense grid, including structural blank rows.
+
+    Dropping a blank row shifts the coordinates of any row-spanning cells.
+    The dense grid is still useful for raw export and older Paper Cards.
+    """
     data = getattr(item, "data", None)
     grid = getattr(data, "grid", None)
-    if grid:
-        rows: list[list[str]] = []
-        for row in grid:
-            values = [" ".join(str(getattr(cell, "text", cell) or "").split()) for cell in row]
-            if any(values):
-                rows.append(values)
-        if rows:
+    if grid is not None:
+        rows = [
+            [" ".join(str(getattr(cell, "text", cell) or "").split()) for cell in row]
+            for row in grid
+        ]
+        if any(any(value for value in row) for row in rows):
             return rows
     try:
         frame = item.export_to_dataframe(doc=document)
         columns = [" ".join(str(value).split()) for value in list(frame.columns)]
         rows = [columns] if any(columns) else []
         for values in frame.itertuples(index=False, name=None):
-            row = [" ".join(str(value if value is not None else "").split()) for value in values]
-            if any(row):
-                rows.append(row)
-        return rows
+            rows.append([
+                " ".join(str(value if value is not None else "").split()) for value in values
+            ])
+        return rows if any(any(value for value in row) for row in rows) else []
     except Exception:
         return []
+
+
+def _docling_table_cells(
+    item: object, rows: list[list[str]]
+) -> tuple[list[TableCellSpan] | None, str | None]:
+    """Read first-class cell coordinates, never infer spans from repeated text.
+
+    A malformed span layout is rejected as a *whole*. The existing dense grid
+    remains intact and can still be displayed without suggesting false merges.
+    """
+    data = getattr(item, "data", None)
+    entries = getattr(data, "table_cells", None)
+    if not entries:
+        return None, None
+    height = len(rows)
+    width = max((len(row) for row in rows), default=0)
+    if height < 1 or width < 1:
+        return None, "Docling supplied cell spans without a usable grid; showing flat rows."
+    occupied: set[tuple[int, int]] = set()
+    converted: list[TableCellSpan] = []
+    try:
+        for cell in entries:
+            row = int(getattr(cell, "start_row_offset_idx"))
+            col = int(getattr(cell, "start_col_offset_idx"))
+            row_end = int(getattr(cell, "end_row_offset_idx", row + 1))
+            col_end = int(getattr(cell, "end_col_offset_idx", col + 1))
+            row_span = row_end - row
+            col_span = col_end - col
+            if row < 0 or col < 0 or row_span < 1 or col_span < 1:
+                raise ValueError("negative index or nonpositive span")
+            if row + row_span > height or col + col_span > width:
+                raise ValueError("cell span falls outside the dense table grid")
+            area = {
+                (r, c)
+                for r in range(row, row + row_span)
+                for c in range(col, col + col_span)
+            }
+            if occupied.intersection(area):
+                raise ValueError("overlapping cell spans")
+            occupied.update(area)
+            converted.append(TableCellSpan(
+                row=row,
+                col=col,
+                row_span=row_span,
+                col_span=col_span,
+                text=str(getattr(cell, "text", "") or ""),
+                column_header=bool(getattr(cell, "column_header", False)),
+                row_header=bool(getattr(cell, "row_header", False)),
+            ))
+    except (TypeError, ValueError, OverflowError, AttributeError) as exc:
+        return None, f"Invalid Docling span metadata ({exc}); raw table grid preserved."
+    return converted or None, None
+
+
+def _docling_figure_regions(document: object, *, paper_id: str) -> list[FigureRegion]:
+    """Locate pictures without treating AI descriptions as observed evidence.
+
+    This is best-effort metadata only: malformed figure captions/refs must not
+    block otherwise successful PDF import. No pixels or statistics are invented.
+    """
+    try:
+        iterator = document.iterate_items()
+    except Exception:
+        return []
+    found: list[FigureRegion] = []
+    try:
+        for index, pair in enumerate(iterator):
+            item = pair[0] if isinstance(pair, tuple) else pair
+            label = _enum_value(getattr(item, "label", ""))
+            if label not in {"picture", "figure", "chart"}:
+                continue
+            captions = []
+            for ref in getattr(item, "captions", []) or []:
+                text_item = None
+                try:
+                    text_item = document.resolve_ref(ref)
+                except Exception:
+                    # Caption absence is not a reason to discard the picture.
+                    pass
+                text = str(getattr(text_item, "text", "") or "").strip()
+                if text:
+                    captions.append(text)
+            caption = " ".join(captions) or str(getattr(item, "text", "") or "").strip()
+            for prov_index, prov in enumerate(getattr(item, "prov", None) or []):
+                try:
+                    page = int(getattr(prov, "page_no", 0) or 0)
+                    if page < 1:
+                        continue
+                    bbox = _docling_bbox(document, prov)
+                    if bbox is None:
+                        continue
+                    found.append(FigureRegion(
+                        id=_stable_block_id(
+                            paper_id, page, f"docling-{label}", index * 100 + prov_index, caption
+                        ),
+                        page_number=page,
+                        bbox=bbox,
+                        caption=caption,
+                        source_label=f"docling:{label}",
+                    ))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+    except Exception:
+        # Best-effort metadata: never lose a successfully parsed PDF because
+        # one Docling picture object had broken optional provenance.
+        return found
+    return found
 
 
 def _docling_bbox(document: object, prov: object) -> tuple[float, float, float, float] | None:
