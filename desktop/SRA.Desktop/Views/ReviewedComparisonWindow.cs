@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 

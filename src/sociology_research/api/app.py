@@ -7,15 +7,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
 from ..analyzer import PaperAnalysisError
 from ..llm_client import ModelRequestError
 from ..repository import ResearchRepository
 from ..services import ApplicationServices, create_application_services
 from .routes import analysis, health, imports, jobs, paper_tools, papers, settings, workspace
+from .routes import region_review
 
 API_PREFIX = "/api/v1"
-
 
 def create_app(
     *,
@@ -28,7 +27,6 @@ def create_app(
             data_dir or os.environ.get("SRA_DATA_DIR", Path.cwd() / "data")
         ).expanduser().resolve()
         services = create_application_services(resolved_data_dir, repository)
-
     app = FastAPI(
         title="Social Science Research IDE Local API",
         version="0.3.0",
@@ -38,7 +36,6 @@ def create_app(
         openapi_url="/openapi.json",
     )
     app.state.services = services
-
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(papers.router, prefix=API_PREFIX)
     app.include_router(imports.router, prefix=API_PREFIX)
@@ -47,6 +44,7 @@ def create_app(
     app.include_router(settings.router, prefix=API_PREFIX)
     app.include_router(paper_tools.router, prefix=API_PREFIX)
     app.include_router(workspace.router, prefix=API_PREFIX)
+    app.include_router(region_review.router, prefix=API_PREFIX)
 
     @app.exception_handler(KeyError)
     async def handle_key_error(request: Request, exc: KeyError):  # noqa: ARG001

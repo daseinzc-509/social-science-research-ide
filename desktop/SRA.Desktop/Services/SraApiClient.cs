@@ -23,7 +23,6 @@ public sealed class SraApiClient : IDisposable
         {
             throw new ArgumentException("SRA API base URL must be an absolute HTTP(S) URL.", nameof(baseUrl));
         }
-
         BaseUri = new Uri(uri.ToString().TrimEnd('/') + "/", UriKind.Absolute);
         _http = new HttpClient
         {
@@ -204,7 +203,6 @@ public sealed class SraApiClient : IDisposable
         using var file = new StreamContent(pdfStream);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         AddPdfFilePart(form, file, "file", fileName);
-
         using var response = await _http.PostAsync("api/v1/papers/import", form, cancellationToken);
         return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
     }
@@ -247,7 +245,6 @@ public sealed class SraApiClient : IDisposable
             : Path.GetFileName(fileName);
         if (string.IsNullOrWhiteSpace(originalName))
             originalName = "upload.pdf";
-
         form.Add(content, fieldName);
         content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
         {
@@ -272,7 +269,6 @@ public sealed class SraApiClient : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var snapshot = await GetJobAsync(jobId, cancellationToken);
             onProgress?.Invoke(snapshot);
-
             if (snapshot.Status == "done")
             {
                 return snapshot;
@@ -297,6 +293,141 @@ public sealed class SraApiClient : IDisposable
         using var response = await _http.PutAsJsonAsync("api/v1/settings/models", update, _jsonOptions, cancellationToken);
         return await ReadJsonAsync<ModelSettingsView>(response, cancellationToken);
     }
+
+    // SRA Region Review v3: authenticated local API bridge
+
+    /// <summary>Render a paper PDF page without exposing the desktop token in the URL.</summary>
+    public async Task<(byte[] Png, int Pages, double PageWidth, double PageHeight)> GetRegionReviewPageAsync(
+        string paperId, int pageNumber, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/pages/{pageNumber}.png",
+            cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        static string RequiredHeader(HttpResponseMessage reply, string name)
+        {
+            if (!reply.Headers.TryGetValues(name, out var values))
+                throw new InvalidOperationException($"PDF review backend omitted {name}");
+            return values.FirstOrDefault() ?? throw new InvalidOperationException(name + " is empty");
+        }
+        var pageCount = int.Parse(RequiredHeader(response, "X-SRA-Page-Count"),
+            System.Globalization.CultureInfo.InvariantCulture);
+        var width = double.Parse(RequiredHeader(response, "X-SRA-Page-Width"),
+            System.Globalization.CultureInfo.InvariantCulture);
+        var height = double.Parse(RequiredHeader(response, "X-SRA-Page-Height"),
+            System.Globalization.CultureInfo.InvariantCulture);
+        return (await response.Content.ReadAsByteArrayAsync(cancellationToken), pageCount, width, height);
+    }
+
+    public Task<JsonElement> GetRegionReviewBlocksAsync(
+        string paperId, int pageNumber, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/pages/{pageNumber}/blocks",
+            cancellationToken);
+
+    public async Task<JsonElement> PreviewPdfRegionAsync(
+        string paperId, int pageNumber, double x0, double y0, double x1, double y1,
+        bool manualOnly = false, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/pages/{pageNumber}/preview",
+            new { bounds = new { x0, y0, x1, y1 }, manual_only = manualOnly },
+            _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> ConfirmPdfRegionAsync(
+        string paperId, string previewId, string correctedText, string note,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/confirm",
+            new { preview_id = previewId, corrected_text = correctedText, researcher_note = note },
+            _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public Task<JsonElement> GetPdfRegionReviewsAsync(
+        string paperId, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reviews",
+            cancellationToken);
+
+    public async Task<JsonElement> RevokePdfRegionReviewAsync(
+        string paperId, string reviewId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reviews/{Uri.EscapeDataString(reviewId)}/revoke",
+            content: null, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    // SRA Region Review v4: authenticated local API bridge
+
+    /// <summary>
+    /// Create a new confirmed human revision; never change Docling evidence.
+    /// </summary>
+    public async Task<JsonElement> RevisePdfRegionReviewAsync(
+        string paperId, string reviewId, int expectedRevision, string correctedText,
+        string researcherNote, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reviews/{Uri.EscapeDataString(reviewId)}/revise",
+            new {
+                expected_revision = expectedRevision,
+                corrected_text = correctedText,
+                researcher_note = researcherNote,
+            },
+            _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    /// <summary>Retrieve a user-requested, local, read-only correction supplement.</summary>
+    public Task<JsonElement> GetPdfRegionReviewPacketAsync(
+        string paperId, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/packet",
+            cancellationToken);
+
+    // SRA Region Review v5: authenticated local API bridge
+
+    /// <summary>Local preview only. Does NOT contact a Pro provider.</summary>
+    public Task<JsonElement> PreviewReviewedComparisonAsync(
+        string paperId, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reanalysis/preview",
+            cancellationToken);
+
+    /// <summary>Runs exactly one user-approved, potentially billable Pro comparison.</summary>
+    public async Task<JsonElement> RunReviewedComparisonAsync(
+        string paperId, string snapshotDigest, bool externalConsent, bool costConsent,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reanalysis/run",
+            new {
+                expected_snapshot_digest = snapshotDigest,
+                approve_external_send = externalConsent,
+                acknowledge_api_cost = costConsent,
+            },
+            _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    /// <summary>List immutable historical reviewed-comparison cards.</summary>
+    public Task<JsonElement> ListReviewedComparisonsAsync(
+        string paperId, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reanalysis/reports",
+            cancellationToken);
+
+    /// <summary>Read a historical comparison without calling a model.</summary>
+    public Task<JsonElement> GetReviewedComparisonAsync(
+        string paperId, string analysisId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reanalysis/reports/{Uri.EscapeDataString(analysisId)}",
+            cancellationToken);
 
     private async Task<string> GetTextAsync(string relativeUrl, CancellationToken cancellationToken)
     {
@@ -324,7 +455,6 @@ public sealed class SraApiClient : IDisposable
         {
             return;
         }
-
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         var detail = text;
         try
@@ -340,7 +470,6 @@ public sealed class SraApiClient : IDisposable
         catch (JsonException)
         {
         }
-
         throw new SraApiException($"SRA API {(int)response.StatusCode}: {detail}".Trim());
     }
 

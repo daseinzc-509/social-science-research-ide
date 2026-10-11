@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -55,7 +56,7 @@ public sealed class RegionReviewWindow : Window
     private readonly TextBox _selectedSource = ReadOnlyBox(115);
     private readonly TextBox _ocrResult = new()
     {
-        Watermark = "识别后的候选文字将在此显示；请对照左侧原文手动校正。",
+        PlaceholderText = "识别后的候选文字将在此显示；请对照左侧原文手动校正。",
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
         MinHeight = 120,
@@ -63,7 +64,7 @@ public sealed class RegionReviewWindow : Window
     };
     private readonly TextBox _note = new()
     {
-        Watermark = "可选：写下修正理由，例如「原文中的样本量为 4,519」。",
+        PlaceholderText = "可选：写下修正理由，例如「原文中的样本量为 4,519」。",
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
         MinHeight = 44,
