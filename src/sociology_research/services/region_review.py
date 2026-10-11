@@ -68,6 +68,10 @@ class PendingPreview:
     ocr_text: str
     source_block_ids: tuple[str, ...]
     created: float
+    # v4 snapshots make it possible to detect a reparse between preview and
+    # confirmation; the defaults retain backward compatibility for old tests.
+    parser_version: str = ""
+    source_fingerprints: tuple[tuple[str, str], ...] = ()
 
 
 class PreviewExpired(ValueError):

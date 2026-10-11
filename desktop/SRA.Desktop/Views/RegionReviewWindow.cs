@@ -23,6 +23,17 @@ public sealed class RegionReviewWindow : Window
 {
     private sealed record VisibleBlock(string Id, string Text, Rect Box);
 
+    private sealed record ReviewChoice(
+        string Id, int Revision, int Page, string Text, string Note, string LinkStatus)
+    {
+        public override string ToString()
+        {
+            var excerpt = Text.Replace("\r", " ").Replace("\n", " ");
+            if (excerpt.Length > 50) excerpt = excerpt[..50] + "…";
+            return $"PDF p.{Page} · v{Revision} · {excerpt}";
+        }
+    }
+
     private readonly SraApiClient _api;
     private readonly string _paperId;
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
@@ -62,6 +73,52 @@ public sealed class RegionReviewWindow : Window
     private readonly Button _manualButton = new() { Content = "仅人工录入（跳过 OCR）", IsEnabled = false };
     private readonly Button _saveButton = new() { Content = "确认并保存人工修订", IsEnabled = false };
     private readonly Button _undoButton = new() { Content = "撤回刚保存的修订", IsEnabled = false };
+    private readonly ComboBox _revisionSelector = new() { MinWidth = 240 };
+    private readonly Button _loadRevisionButton = new()
+    {
+        Content = "载入选中修订，准备修改", IsEnabled = false,
+    };
+    private readonly Button _saveRevisionButton = new()
+    {
+        Content = "保存为新版本（保留历史）", IsEnabled = false,
+    };
+    private readonly Button _copyPacketButton = new()
+    {
+        Content = "复制人工复核材料（不会自动分析）",
+    };
+
+    private readonly Button _reviewPlanButton = new()
+    {
+        Content = "① 预检复评范围（不调用 API）",
+    };
+    private readonly TextBlock _reviewPlanDescription = new()
+    {
+        Text = "尚未预检。需要先确认人工修订与原始证据关联均有效。",
+        TextWrapping = TextWrapping.Wrap,
+    };
+    private readonly TextBox _outboundPayloadPreview = new()
+    {
+        IsReadOnly = true,
+        AcceptsReturn = true,
+        TextWrapping = TextWrapping.Wrap,
+        MaxHeight = 225,
+        MinHeight = 100,
+    };
+    private readonly CheckBox _externalConsent = new()
+    {
+        Content = "我确认发送列出的原文摘录、原 Card 主张和人工修订到已配置的 Pro API，并知晓可能产生费用。",
+        IsChecked = false,
+    };
+    private readonly Button _reviewRunButton = new()
+    {
+        Content = "② 明确授权并执行一次 Pro 独立复评",
+        IsEnabled = false,
+    };
+    private readonly Button _latestReviewButton = new()
+    {
+        Content = "打开最近一次独立复评（左右对照）",
+    };
+    private string? _reviewRunPlanDigest;
 
     private Bitmap? _bitmap;
     private readonly List<VisibleBlock> _blocks = [];
@@ -70,6 +127,8 @@ public sealed class RegionReviewWindow : Window
     private Rect? _selected;
     private string? _previewId;
     private string? _lastReviewId;
+    private string? _loadedRevisionId;
+    private int _loadedRevisionNumber;
     private int _page = 1;
     private int _totalPages = 1;
     private double _imageWidth;
@@ -106,6 +165,12 @@ public sealed class RegionReviewWindow : Window
         _manualButton.Click += async (_, _) => await RunOcrAsync(manualOnly: true);
         _saveButton.Click += async (_, _) => await ConfirmAsync();
         _undoButton.Click += async (_, _) => await RevokeLastAsync();
+        _loadRevisionButton.Click += (_, _) => LoadSelectedRevision();
+        _saveRevisionButton.Click += async (_, _) => await SaveNewRevisionAsync();
+        _copyPacketButton.Click += async (_, _) => await CopyEvidencePacketAsync();
+        _reviewPlanButton.Click += async (_, _) => await PrepareReviewedComparisonAsync();
+        _reviewRunButton.Click += async (_, _) => await RunReviewedComparisonAsync();
+        _latestReviewButton.Click += async (_, _) => await OpenLatestReviewedComparisonAsync();
         var tools = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -147,8 +212,31 @@ public sealed class RegionReviewWindow : Window
                 _saveButton,
                 Caption("保存的是独立的人工修订记录，不覆盖 PDF、Docling SourceBlock 或旧 Paper Card。"),
                 _undoButton,
-                Heading("该论文最近的人工修订"),
+                Heading("历史版本与证据关联"),
+                Caption("旧版本保留可追溯，重新解析会标记关联失效。只允许修改仍指向当前 SourceBlock 的有效修订。"),
+                _revisionSelector,
+                _loadRevisionButton,
+                _saveRevisionButton,
+                _copyPacketButton,
+                Caption("复制的是研究者人工复核补充材料，不是作者原文；不会改写 Paper Card 或自动调用 Lite/Pro。"),
+                Heading("该论文最近的人工修订（含过期关联）"),
                 _history,
+                Heading("v5 · 人工复核后独立复评（Pro API）"),
+                Caption("此阶段不会重跑整篇 Lite/Pro 提取，不创建正式的新 Paper Card。"
+                        + " 它只对原 Card 与人工确认的证据差异做一次独立 Pro 复评，结果保存为第二份可审计对照卡。"),
+                _reviewPlanButton,
+                _reviewPlanDescription,
+                new Expander
+                {
+                    Header = "查看即将发送给 Pro API 的完整文字（本地预检）",
+                    IsExpanded = false,
+                    Content = _outboundPayloadPreview,
+                },
+                _externalConsent,
+                _reviewRunButton,
+                _latestReviewButton,
+                Caption("预检不连接云端。点击执行后仅发送预检列出的原主张、相关原文与人工修订。"
+                        + " 如果请求超时，请先查询历史记录，避免重复产生 API 费用。"),
             },
         };
         var sideScroller = new ScrollViewer
@@ -276,6 +364,8 @@ public sealed class RegionReviewWindow : Window
         _dragStart = null;
         _selected = null;
         _previewId = null;
+        _loadedRevisionId = null;
+        _saveRevisionButton.IsEnabled = false;
         _selectedSource.Text = "请先框选左侧区域";
         _ocrResult.Text = "";
         _note.Text = "";
@@ -297,6 +387,8 @@ public sealed class RegionReviewWindow : Window
         _selectionRevision++;
         _dragStart = Clamp(eventArgs.GetPosition(_canvas));
         _previewId = null;
+        _loadedRevisionId = null;
+        _saveRevisionButton.IsEnabled = false;
         _saveButton.IsEnabled = false;
         _ocrButton.IsEnabled = false;
         _manualButton.IsEnabled = false;
@@ -440,23 +532,227 @@ public sealed class RegionReviewWindow : Window
         }
     }
 
+    private void ResetReviewRunPlan()
+    {
+        _reviewRunPlanDigest = null;
+        _reviewRunButton.IsEnabled = false;
+        _externalConsent.IsChecked = false;
+        _outboundPayloadPreview.Text = "";
+        _reviewPlanDescription.Text = "人工修订或 PDF 状态可能已更新，请重新预检复评范围。";
+    }
+
+    private async Task PrepareReviewedComparisonAsync()
+    {
+        _reviewPlanButton.IsEnabled = false;
+        ResetReviewRunPlan();
+        try
+        {
+            var plan = await _api.PreviewReviewedComparisonAsync(_paperId);
+            var digest = plan.GetProperty("snapshot_digest").GetString();
+            var count = plan.GetProperty("review_count").GetInt32();
+            var model = plan.GetProperty("pro_model").GetString();
+            var provider = plan.GetProperty("provider").GetString();
+            var input = plan.GetProperty("approximate_input_chars").GetInt32();
+            var maxOutput = plan.GetProperty("maximum_output_tokens").GetInt32();
+            if (string.IsNullOrWhiteSpace(digest))
+                throw new InvalidOperationException("预检未返回有效的内容指纹。");
+            _reviewRunPlanDigest = digest;
+            _outboundPayloadPreview.Text =
+                plan.GetProperty("outbound_payload").GetString() ?? "";
+            _reviewPlanDescription.Text =
+                $"模型：{model} · 服务：{provider}\n"
+                + $"人工修订：{count} 条 · 输入约 {input:N0} 字符 · "
+                + $"输出上限 {maxOutput:N0} tokens。\n"
+                + "费用以供应商实际 token 计费为准。不会上传完整 PDF，"
+                + "也不会覆盖原 Paper Card。";
+            _reviewRunButton.IsEnabled = true;
+            _status.Text = "预检完成，尚未调用任何模型。请审查范围并单独确认外发与费用。";
+        }
+        catch (Exception exc)
+        {
+            _reviewPlanDescription.Text = "复评预检未通过：" + exc.Message;
+            _status.Text = "请先解决缺失或过期的人工修订，然后重新预检。";
+        }
+        finally
+        {
+            _reviewPlanButton.IsEnabled = true;
+        }
+    }
+
+    private async Task RunReviewedComparisonAsync()
+    {
+        if (string.IsNullOrEmpty(_reviewRunPlanDigest))
+        {
+            _status.Text = "请先预检，获取当前论文、原 Card 和人工修订的内容指纹。";
+            return;
+        }
+        if (_externalConsent.IsChecked != true)
+        {
+            _status.Text = "未同意发送研究摘录及可能产生的 API 费用，未发起请求。";
+            return;
+        }
+        _reviewRunButton.IsEnabled = false;
+        _reviewPlanButton.IsEnabled = false;
+        var digest = _reviewRunPlanDigest;
+        try
+        {
+            _status.Text = "正在调用 Pro API 做一次独立复评；可能需要几分钟，勿重复提交…";
+            var saved = await _api.RunReviewedComparisonAsync(
+                _paperId, digest, true, true);
+            var reportId = saved.GetProperty("id").GetString();
+            if (string.IsNullOrWhiteSpace(reportId))
+                throw new InvalidOperationException("服务器未返回保存的复评 ID。");
+            var detail = await _api.GetReviewedComparisonAsync(_paperId, reportId);
+            new ReviewedComparisonWindow(detail).Show(this);
+            _status.Text = "独立复评已保存；原 Paper Card 与研究证据没有改变。";
+            ResetReviewRunPlan();
+        }
+        catch (Exception exc)
+        {
+            // After a model timeout, do not blindly enable Retry: it could
+            // duplicate a billed request. Check history first.
+            ResetReviewRunPlan();
+            _status.Text = "复评未确认成功：" + exc.Message
+                           + "。请先查看历史记录，勿直接重试扣费请求。";
+        }
+        finally
+        {
+            _reviewPlanButton.IsEnabled = true;
+        }
+    }
+
+    private async Task OpenLatestReviewedComparisonAsync()
+    {
+        _latestReviewButton.IsEnabled = false;
+        try
+        {
+            var history = await _api.ListReviewedComparisonsAsync(_paperId);
+            if (!history.TryGetProperty("reports", out var reports) ||
+                reports.ValueKind != JsonValueKind.Array ||
+                reports.GetArrayLength() == 0)
+            {
+                _status.Text = "尚无保存的独立 Pro 复评。先完成预检与明确授权。";
+                return;
+            }
+            var first = reports.EnumerateArray().First();
+            var id = first.GetProperty("id").GetString() ?? "";
+            var detail = await _api.GetReviewedComparisonAsync(_paperId, id);
+            new ReviewedComparisonWindow(detail).Show(this);
+            _status.Text = "已打开历史对照报告；它是保存时的分析快照。";
+        }
+        catch (Exception exc)
+        {
+            _status.Text = "无法打开复评报告：" + exc.Message;
+        }
+        finally
+        {
+            _latestReviewButton.IsEnabled = true;
+        }
+    }
+
+    private void LoadSelectedRevision()
+    {
+        if (_revisionSelector.SelectedItem is not ReviewChoice choice)
+        {
+            _status.Text = "请先选择需要修改的有效修订版本。";
+            return;
+        }
+        // Loading is deliberate: do not clobber a new OCR candidate just
+        // because the history selection changes.
+        _loadedRevisionId = choice.Id;
+        _loadedRevisionNumber = choice.Revision;
+        _previewId = null;
+        _saveButton.IsEnabled = false;
+        _ocrResult.Text = choice.Text;
+        _note.Text = choice.Note;
+        _saveRevisionButton.IsEnabled = true;
+        _status.Text = $"已载入 PDF p.{choice.Page} 的 v{choice.Revision}。修改文字并保存为 v{choice.Revision + 1}；旧版本会保留。";
+    }
+
+    private async Task SaveNewRevisionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_loadedRevisionId) || string.IsNullOrWhiteSpace(_ocrResult.Text))
+        {
+            _status.Text = "请先载入一条有效修订，并填写核对后的文字。";
+            return;
+        }
+        _saveRevisionButton.IsEnabled = false;
+        try
+        {
+            var updated = await _api.RevisePdfRegionReviewAsync(
+                _paperId, _loadedRevisionId, _loadedRevisionNumber,
+                _ocrResult.Text, _note.Text ?? "");
+            _lastReviewId = updated.GetProperty("id").GetString();
+            _undoButton.IsEnabled = !string.IsNullOrEmpty(_lastReviewId);
+            _loadedRevisionId = null;
+            _status.Text = "新版人工修订已保存；上一版本仍保留。原始来源和既有 AI 分析没有改变。";
+            await RefreshHistoryAsync();
+        }
+        catch (Exception exc)
+        {
+            _saveRevisionButton.IsEnabled = true;
+            _status.Text = "修订失败（可能论文已重新解析，请刷新记录）：" + exc.Message;
+        }
+    }
+
+    private async Task CopyEvidencePacketAsync()
+    {
+        _copyPacketButton.IsEnabled = false;
+        try
+        {
+            var report = await _api.GetPdfRegionReviewPacketAsync(_paperId);
+            var markdown = report.GetProperty("markdown").GetString() ?? "";
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is null)
+                throw new InvalidOperationException("当前桌面环境不可访问剪贴板");
+            await clipboard.SetTextAsync(markdown);
+            var included = report.GetProperty("included").GetInt32();
+            var held = report.GetProperty("held_for_review").GetInt32();
+            _status.Text = $"已复制人工复核材料：{included} 条关联有效，{held} 条需要重核。不会自动调用 AI。";
+        }
+        catch (Exception exc)
+        {
+            _status.Text = "复制复核材料失败：" + exc.Message;
+        }
+        finally
+        {
+            _copyPacketButton.IsEnabled = true;
+        }
+    }
+
     private async Task RefreshHistoryAsync()
     {
+        // Revising/revoking/selecting new evidence invalidates the old plan.
+        ResetReviewRunPlan();
         try
         {
             var json = await _api.GetPdfRegionReviewsAsync(_paperId);
             var lines = new List<string>();
+            var choices = new List<ReviewChoice>();
             if (json.TryGetProperty("reviews", out var items) && items.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in items.EnumerateArray().Take(30))
+                foreach (var item in items.EnumerateArray().Take(40))
                 {
                     var page = item.GetProperty("page_number").GetInt32();
-                    var status = item.GetProperty("provenance").GetString();
+                    var status = item.GetProperty("provenance").GetString() ?? "";
                     var text = item.GetProperty("corrected_text").GetString() ?? "";
-                    lines.Add($"PDF p.{page} · {status}\n{text}");
+                    var note = item.GetProperty("researcher_note").GetString() ?? "";
+                    var id = item.GetProperty("id").GetString() ?? "";
+                    var version = item.TryGetProperty("revision_no", out var v)
+                        ? v.GetInt32() : 1;
+                    var link = item.TryGetProperty("link_status", out var linkValue)
+                        ? linkValue.GetString() ?? "UNKNOWN" : "UNKNOWN";
+                    var active = item.TryGetProperty("active", out var activeValue)
+                        && activeValue.ValueKind == JsonValueKind.True;
+                    lines.Add($"PDF p.{page} · v{version} · {status} · 来源 {link}\n{text}");
+                    if (active && (link == "CURRENT" || link == "PAGE_ONLY"))
+                        choices.Add(new ReviewChoice(id, version, page, text, note, link));
                 }
             }
             _history.Text = lines.Count == 0 ? "暂无人工确认记录。" : string.Join("\n\n", lines);
+            _revisionSelector.ItemsSource = choices;
+            _revisionSelector.SelectedIndex = choices.Count > 0 ? 0 : -1;
+            _loadRevisionButton.IsEnabled = choices.Count > 0;
         }
         catch (Exception exc)
         {
