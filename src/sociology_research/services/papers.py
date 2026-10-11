@@ -143,12 +143,19 @@ class PaperService:
         for index, (filename, data) in enumerate(uploads, start=1):
             try:
                 safe_name, payload = self._validate_upload(filename or f"upload-{index}.pdf", data)
-            except ValueError as exc:
-                rejected.append({"filename": Path(filename or f"upload-{index}").name, "error": str(exc)})
+                # Isolate identical filenames without changing what ImportPipeline
+                # records as the original PDF name.
+                item_dir = temp_dir / f"{index:04d}"
+                item_dir.mkdir(parents=True, exist_ok=True)
+                temp_path = item_dir / safe_name
+                temp_path.write_bytes(payload)
+                prepared.append((safe_name, temp_path))
+            except (OSError, ValueError) as exc:
+                rejected.append({
+                    "filename": Path(str(filename or f"upload-{index}").replace("\\", "/")).name,
+                    "error": str(exc),
+                })
                 continue
-            temp_path = temp_dir / f"{index:04d}-{safe_name}"
-            temp_path.write_bytes(payload)
-            prepared.append((safe_name, temp_path))
 
         if not prepared:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -330,7 +337,7 @@ class PaperService:
 
     @staticmethod
     def _validate_upload(filename: str, data: bytes) -> tuple[str, bytes]:
-        safe_name = Path(str(filename or "upload.pdf")).name or "upload.pdf"
+        safe_name = Path(str(filename or "upload.pdf").replace("\\", "/")).name or "upload.pdf"
         if not safe_name.lower().endswith(".pdf"):
             raise ValueError("only PDF files can be imported")
         payload = bytes(data or b"")

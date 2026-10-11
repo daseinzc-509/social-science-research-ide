@@ -42,13 +42,30 @@ class ImportPipeline:
         digest = self._sha256(source)
         existing = self.repository.get_by_sha256(digest)
         if existing:
-            self._report("Import: identical PDF already exists; checking current parser output…")
+            # A batch may contain duplicates. Parsing them again when the
+            # existing source blocks are current wastes the heaviest models
+            # and may exhaust memory even though a single upload succeeds.
+            if existing.parser_version == self.parser.version:
+                stored_blocks = self.repository.get_source_blocks(existing.id)
+                if stored_blocks:
+                    self._report("Import: identical PDF already exists; reusing current parsed source blocks.")
+                    document = ParsedDocument(
+                        paper_id=existing.id,
+                        sha256=digest,
+                        source_path=existing.stored_path,
+                        page_count=existing.page_count,
+                        status=existing.parse_status,
+                        parser_version=existing.parser_version,
+                        warnings=list(existing.warnings),
+                        blocks=stored_blocks,
+                    )
+                    return existing, document, False
+            self._report("Import: identical PDF already exists; refreshing parser output…")
             document = self.parser.parse(
                 Path(existing.stored_path), paper_id=existing.id, sha256=digest, progress=self.progress
             )
-            if existing.parser_version != document.parser_version:
-                self.repository.refresh_parsed_document_and_invalidate(existing.id, document)
-                existing = self.repository.get_paper(existing.id)
+            self.repository.refresh_parsed_document_and_invalidate(existing.id, document)
+            existing = self.repository.get_paper(existing.id)
             return existing, document, False
 
         paper_id = str(uuid4())

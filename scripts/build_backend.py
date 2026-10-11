@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILES = ("core", "full")
+PROFILES = ("full",)
 POLICIES = ("conservative", "compatible")
 
 
@@ -68,18 +68,16 @@ def command_args(
         "--collect-submodules", "sociology_research.api",
         "--collect-submodules", "sociology_research.services",
     ]
+    # Docling-only: neither PyMuPDF nor the legacy fitz alias is needed.
+    # Excluding their import graphs avoids shipping unrelated MuPDF binaries.
+    args += ["--exclude-module", "pymupdf", "--exclude-module", "fitz"]
     if collection_policy == "compatible":
-        # Matches the earlier collection policy so a failed candidate build
-        # can be rebuilt without touching the source or feature set.
-        for module in ("keyring", "pymupdf", "fitz", "pydantic", "rapidocr_onnxruntime"):
+        # Rollback mode keeps broad collection for the remaining dependencies.
+        for module in ("keyring", "pydantic", "rapidocr_onnxruntime"):
             _add(args, module, "--collect-all")
     else:
-        # PyMuPDF's own hooks and runtime data stay bundled; fitz is the alias
-        # package, and Pydantic's Python modules do not need --collect-all data.
-        _add(args, "pymupdf", "--collect-all")
-        _add(args, "fitz", "--hidden-import")
         _add(args, "pydantic", "--collect-submodules")
-        _add(args, "keyring", "--collect-all")  # macOS Keychain backends are dynamic
+        _add(args, "keyring", "--collect-all")
         _add(args, "rapidocr_onnxruntime", "--collect-all")
     if profile == "full":
         if not available("docling"):

@@ -12,21 +12,57 @@ import io
 import os
 
 
-def pdf_roundtrip() -> bytes:
-    import pymupdf
+def _synthetic_pdf() -> bytes:
+    """Generate a tiny one-page PDF with no external PDF-writing package."""
+    content = b"BT /F1 11 Tf 30 170 Td (SRA frozen backend PDF smoke check) Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 220] "
+         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+        b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n"
+        + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(b"xref\n0 6\n0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref).encode("ascii") + b"\n%%EOF\n"
+    )
+    return bytes(pdf)
 
-    label = "SRA frozen backend PDF smoke check"
-    document = pymupdf.open()
-    page = document.new_page(width=320, height=220)
-    page.insert_text((30, 50), label, fontsize=11)
-    document_bytes = document.tobytes()
-    document.close()
-    with pymupdf.open(stream=document_bytes, filetype="pdf") as readback:
-        actual = readback[0].get_text()
-        if label not in actual:
-            raise AssertionError("PyMuPDF failed to extract the self-generated PDF text")
-        png_bytes = readback[0].get_pixmap(matrix=pymupdf.Matrix(1, 1)).tobytes("png")
-    return png_bytes
+
+def pdf_roundtrip() -> bytes:
+    """Test PDF parsing and rasterization through Docling's PDFium dependency."""
+    from io import BytesIO
+    import pypdfium2 as pdfium
+
+    with pdfium.PdfDocument(_synthetic_pdf()) as document:
+        if len(document) != 1:
+            raise AssertionError("PDFium failed to open the synthetic PDF")
+        page = document[0]
+        text_page = page.get_textpage()
+        try:
+            if "SRA frozen backend PDF smoke check" not in text_page.get_text_range():
+                raise AssertionError("PDFium failed to extract synthetic PDF text")
+        finally:
+            text_page.close()
+        image = page.render(scale=1).to_pil()
+        output = BytesIO()
+        image.save(output, format="PNG")
+        page.close()
+        png = output.getvalue()
+    if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise AssertionError("PDFium failed to rasterize the synthetic PDF")
+    return png
 
 
 def image_decode_roundtrip(png_bytes: bytes, *, required: bool) -> None:
@@ -126,12 +162,11 @@ def full_profile_imports() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("core", "full"), required=True)
+    parser.add_argument("--profile", choices=("full",), required=True)
     opts = parser.parse_args(argv)
     image = pdf_roundtrip()
-    image_decode_roundtrip(image, required=opts.profile == "full")
-    if opts.profile == "full":
-        full_profile_imports()
+    image_decode_roundtrip(image, required=True)
+    full_profile_imports()
     print(f"Frozen backend dependency/PDF/image probe PASSED ({opts.profile}; offline)", flush=True)
     return 0
 

@@ -8,11 +8,11 @@ on:
         required: true
         default: '0.2.0-alpha.1'
       backend_profile:
-        description: 'full includes Docling; core is a troubleshooting build'
+        description: 'Docling-only backend (full)'
         required: true
         default: 'full'
         type: choice
-        options: [full, core]
+        options: [full]
       collection_policy:
         description: 'conservative: default; lean: experimental extra trimming; compatible: rollback'
         required: true
@@ -109,11 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install 'fastapi>=0.115,<1' 'uvicorn>=0.30,<1' 'python-multipart>=0.0.9,<1' 'httpx>=0.27,<1' 'PyInstaller==6.22.3' 'pymupdf>=1.24,<2'
-          if [ "$BUNDLE_PROFILE" = "full" ]; then
-            python -m pip install 'docling==2.134.0'
-          fi
+          python -m pip install -e '.[api]'
+          python -m pip install 'PyInstaller==6.22.3'
+          python -m pip check
           if [ "${{ matrix.installer }}" = 'macos' ]; then
             python -m pip install 'keyring>=25,<27'
           fi
@@ -121,6 +119,7 @@ jobs:
         shell: bash
         run: |
           python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --collection-policy "$COLLECTION_POLICY" --output dist/backend
+          python scripts/check_bundle_without_pymupdf.py dist/backend/sra-backend
       - name: Publish Avalonia self-contained desktop
         shell: bash
         run: |
@@ -151,7 +150,7 @@ jobs:
           echo "### Backend collection policy: $COLLECTION_POLICY" >> "$GITHUB_STEP_SUMMARY"
           # For lean, the same frozen runtime tests must pass before packaging.
           # Exercise the ACTUAL frozen executable (generated PDF -> extracted text
-          # -> raster -> OpenCV decode, plus full-profile Docling/Torch imports).
+          # -> PDFium raster -> OpenCV decode, plus Docling/Torch imports).
           # This does not download HF models or claim a complete OCR/layout test.
           "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}" \
             --self-test-bundle --profile "$BUNDLE_PROFILE"

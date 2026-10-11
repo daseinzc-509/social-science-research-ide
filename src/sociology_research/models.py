@@ -233,7 +233,8 @@ class LLMClaim(BaseModel):
     statement: str = Field(min_length=1, max_length=260)
     provenance: Provenance
     verification: VerificationStatus
-    evidence: list[LLMEvidenceReference] = Field(default_factory=list, max_length=3)
+    # The model may exceed the prompt's 3-citation guidance; retain valid evidence.
+    evidence: list[LLMEvidenceReference] = Field(default_factory=list, max_length=16)
     claim_type: ClaimType = ClaimType.OTHER
     scope: ClaimScope = Field(default_factory=ClaimScope)
 
@@ -297,7 +298,7 @@ class LLMMetadataFact(BaseModel):
 
     field_name: MetadataField
     value: str | int | list[str]
-    evidence: list[LLMEvidenceReference] = Field(min_length=1, max_length=3)
+    evidence: list[LLMEvidenceReference] = Field(min_length=1, max_length=16)
 
 
 class EvidenceReference(BaseModel):

@@ -41,12 +41,10 @@ def test_compatible_build_also_includes_vision(monkeypatch):
     assert ("--collect-all", "timm") in pairs
 
 
-def test_core_build_does_not_force_docling_vision(monkeypatch):
+def test_old_core_profile_is_explicitly_unavailable(monkeypatch):
     monkeypatch.setattr(build_backend, "available", lambda _name: True)
-    monkeypatch.setattr(build_backend.importlib.metadata, "version", lambda _name: "1.0")
-    pairs = _args_pairs(build_backend.command_args("core"))
-    assert ("--collect-all", "torchvision") not in pairs
-    assert ("--collect-all", "timm") not in pairs
+    with pytest.raises(ValueError, match="profile"):
+        build_backend.command_args("core")
 
 
 def test_heron_processor_probe_uses_local_config_and_exercises_image(monkeypatch):

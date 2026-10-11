@@ -29,10 +29,12 @@ def test_default_collection_is_conservative_and_preserves_heavy_essentials(monke
     monkeypatch.setattr(build_backend.importlib.metadata, "version", lambda name: "1.0")
     args = build_backend.command_args("full")
     pairs = _options(args)
-    for module in ("pymupdf", "docling", "docling_parse", "docling_core", "docling_ibm_models", "transformers", "sentencepiece"):
+    for module in ("docling", "docling_parse", "docling_core", "docling_ibm_models", "transformers", "sentencepiece"):
         assert ("--collect-all", module) in pairs
+    assert ("--collect-all", "pymupdf") not in pairs
     assert ("--collect-all", "fitz") not in pairs
-    assert ("--hidden-import", "fitz") in pairs
+    assert ("--exclude-module", "pymupdf") in pairs
+    assert ("--exclude-module", "fitz") in pairs
     assert ("--collect-all", "pydantic") not in pairs
     assert ("--collect-submodules", "pydantic") in pairs
     assert ("--collect-all", "huggingface_hub") not in pairs
@@ -50,8 +52,10 @@ def test_compatible_policy_keeps_original_broad_collect_flags(monkeypatch):
     monkeypatch.setattr(build_backend.importlib.metadata, "version", lambda name: "1.0")
     args = build_backend.command_args("full", collection_policy="compatible")
     pairs = _options(args)
-    for module in ("fitz", "pydantic", "huggingface_hub", "accelerate", "transformers", "sentencepiece"):
+    for module in ("pydantic", "huggingface_hub", "accelerate", "transformers", "sentencepiece"):
         assert ("--collect-all", module) in pairs
+    assert ("--exclude-module", "fitz") in pairs
+    assert ("--exclude-module", "pymupdf") in pairs
 
 
 def test_missing_docling_and_unsupported_flags_fail_closed(monkeypatch):
@@ -59,10 +63,13 @@ def test_missing_docling_and_unsupported_flags_fail_closed(monkeypatch):
     with pytest.raises(RuntimeError, match="docling"):
         build_backend.command_args("full")
     with pytest.raises(ValueError, match="collection policy"):
-        build_backend.command_args("core", collection_policy="dangerous")
+        build_backend.command_args("full", collection_policy="dangerous")
     with pytest.raises(ValueError, match="profile"):
         build_backend.command_args("missing")
-    assert "--onedir" in build_backend.command_args("core")
+    with pytest.raises(ValueError, match="profile"):
+        build_backend.command_args("core")
+    monkeypatch.setattr(build_backend, "available", lambda name: True)
+    assert "--onedir" in build_backend.command_args("full")
 
 
 def _release_tree(tmp_path):
@@ -113,6 +120,7 @@ def test_mac_cli_refuses_windows_video_prune(tmp_path):
 
 
 def test_generated_pdf_can_be_read_and_rasterized_without_models():
+    pytest.importorskip("pypdfium2")
     png = frozen_backend_probe.pdf_roundtrip()
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     frozen_backend_probe.image_decode_roundtrip(png, required=False)

@@ -51,7 +51,7 @@ SRA（Social Science Research IDE）探索一种 **local-first、evidence-first*
 
 | 模块 | 当前能做什么 |
 | --- | --- |
-| **PDF 理解** | Docling-first 版式恢复，PyMuPDF 后备，文本质量检测、必要时 OCR；保留 page / bbox / source block 信息。 |
+| **PDF 理解** | Docling 负责版式和 OCR；检测提取文字质量，必要时全文 OCR 重试（不再使用 PyMuPDF）；保留 page / bbox / source block 信息。 |
 | **结构化研究事实** | Lite 提取题名、作者、研究问题和论文事实；元数据按来源与版式规则核验。 |
 | **独立方法学审读** | Pro 不只评价 Lite 摘要，还会从整篇文档定向回源，依据研究类型审查方法、限定与风险。 |
 | **Claim × Evidence** | 记录主张类型、适用范围、证据角色与支持关系；可返回来源页和原文。 |
@@ -90,9 +90,8 @@ SRA（Social Science Research IDE）探索一种 **local-first、evidence-first*
 准备 Python 3.12、Conda，以及可以构建 `net8.0` / Avalonia 12 的 .NET SDK（本项目开发流程使用 .NET 10 SDK）。在项目根目录运行：
 
 ```powershell
-conda create -p .conda-env -c conda-forge python=3.12 pip "pydantic>=2.7,<3" "pymupdf>=1.24,<2"
-conda run -p .conda-env python -m pip install --no-build-isolation -e .
-conda run -p .conda-env python -m pip install "fastapi>=0.115,<1" "uvicorn>=0.30,<1" "python-multipart>=0.0.9,<1" "httpx>=0.27,<1" "docling>=2.131,<3"
+conda create -p .conda-env -c conda-forge python=3.12 pip
+conda run -p .conda-env python -m pip install -e ".[api,dev]"
 ```
 
 复制 `.env.example` 为**本地、不提交**的 `.env` 并配置模型（或使用桌面端设置页）：
@@ -127,9 +126,8 @@ conda run --no-capture-output -p .conda-env sra ui
 conda run -p .conda-env sra import-pdf "D:\papers\example.pdf"
 conda run -p .conda-env sra import-pdf-dir "D:\papers" --json
 conda run -p .conda-env sra list
-conda run --no-capture-output -p .conda-env sra analyze PAPER_ID
+conda run --no-capture-output -p .conda-env sra analyze PAPER_ID --run
 conda run -p .conda-env sra export-card PAPER_ID --output paper-card.json
-conda run -p .conda-env sra export-reading-report PAPER_ID --output deep-reading.md
 conda run -p .conda-env sra doctor --deep
 ```
 
@@ -143,7 +141,7 @@ conda run -p .conda-env sra doctor --deep
 flowchart TB
     UI["Avalonia Desktop · .NET 8<br/>Library / Reader / Inspector / Settings"]
     API["Versioned local API · FastAPI<br/>localhost HTTP/JSON · job polling"]
-    ENGINE["Python Research Core<br/>Docling / PyMuPDF · Lite / Pro · evidence verification"]
+    ENGINE["Python Research Core<br/>Docling-only · Lite / Pro · evidence verification"]
     STORE[("SQLite + local PDF files<br/>Paper Cards · cache · notes")]
     LLM["User-configured Lite / Pro providers"]
     UI <-->|"/api/v1"| API

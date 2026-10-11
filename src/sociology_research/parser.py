@@ -1,8 +1,8 @@
-"""PDF parsing boundary with a Docling-first backend and PyMuPDF fallback.
+"""Docling-only PDF parsing with conservative OCR recovery and source provenance.
 
-Docling is preferred when installed because it provides model-based layout analysis,
-reading order, tables, OCR and typed document items with page/bbox provenance. The
-PyMuPDF backend remains available as a lightweight fallback and for regression tests.
+Docling owns document layout, text, OCR and tables. The parser never calls fitz
+or PyMuPDF. Suspicious Docling output triggers a bounded full-page OCR retry;
+a replacement must improve quality without losing previously recovered pages.
 """
 
 from __future__ import annotations
@@ -40,40 +40,35 @@ class DocumentParser(Protocol):
 
 
 def create_default_parser() -> DocumentParser:
-    """Return the configured parser.
+    """Require Docling in development and in frozen desktop builds.
 
-    SRA_PDF_PARSER may be ``auto`` (default), ``docling`` or ``pymupdf``.
-    ``auto`` selects Docling when installed and otherwise keeps the existing
-    lightweight PyMuPDF behavior. Installing Docling later therefore upgrades old
-    papers automatically through the existing parser-version refresh mechanism.
+    ``auto`` remains a legacy alias, so older user configuration is compatible.
+    Other parsers fail explicitly rather than silently changing extraction quality.
     """
-
-    requested = os.environ.get("SRA_PDF_PARSER", "auto").strip().casefold() or "auto"
-    if requested not in {"auto", "docling", "pymupdf"}:
+    requested = os.environ.get("SRA_PDF_PARSER", "docling").strip().casefold() or "docling"
+    if requested not in {"auto", "docling"}:
         raise DocumentParseError(
-            "SRA_PDF_PARSER must be one of: auto, docling, pymupdf"
+            "SRA_PDF_PARSER must be 'docling' (legacy 'auto' also works); "
+            "the PyMuPDF fallback has been removed."
         )
-    if requested == "pymupdf":
-        return PyMuPDFDocumentParser()
-    if _docling_installed():
-        return DoclingDocumentParser()
-    if requested == "docling":
+    if not _docling_installed():
         raise DocumentParseError(
-            "Docling was requested but is not installed. Run install_docling.bat once, "
-            "or install 'docling>=2.131,<3' into .conda-env."
+            "Docling is required for SRA PDF import, but is not installed. "
+            "Install the project's Docling-only dependencies."
         )
-    return PyMuPDFDocumentParser()
+    return DoclingDocumentParser()
 
 
 class DoclingDocumentParser:
-    """Semantic PDF parser backed by Docling's standard pipeline."""
+    """Semantic PDF parser backed exclusively by Docling."""
 
     def __init__(self) -> None:
         try:
             version = importlib.metadata.version("docling")
         except importlib.metadata.PackageNotFoundError:
             version = "missing"
-        self.version = f"docling-standard-v3-text-quality-ocr:{version}"
+        # Changing this intentionally invalidates old PDF extraction caches on reparse.
+        self.version = f"docling-only-v1-reviewed-ocr:{version}"
 
     def parse(
         self,
@@ -84,116 +79,118 @@ class DoclingDocumentParser:
         progress: Callable[[str], None] | None = None,
     ) -> ParsedDocument:
         path = _validate_pdf_path(pdf_path)
-        _emit(progress, "Docling: inspecting PDF text layer…")
         if not _docling_installed():
-            raise DocumentParseError(
-                "Docling is not installed. Run install_docling.bat once, or install "
-                "'docling>=2.131,<3' into .conda-env."
-            )
+            raise DocumentParseError("Docling is required but is not installed.")
 
         try:
             from docling.datamodel.base_models import InputFormat
             from docling.datamodel.pipeline_options import PdfPipelineOptions
             from docling.document_converter import DocumentConverter, PdfFormatOption
-        except Exception as exc:  # pragma: no cover - depends on optional package
+        except Exception as exc:
             raise DocumentParseError(f"Could not import Docling: {exc}") from exc
 
-        try:
-            text_profile = _pdf_text_layer_profile(path)
+        def convert(*, full_page: bool):
             options = PdfPipelineOptions()
-            # OCR is expensive and unnecessary for born-digital PDFs with a reliable text
-            # layer. Keep Docling's layout/table models, but only enable OCR for scanned or
-            # mixed image-heavy documents.
-            options.do_ocr = text_profile.needs_ocr
+            # Standard OCR avoids erasing trustworthy embedded text. Do not turn
+            # OCR off blindly on a born-digital document with mixed scanned pages.
+            options.do_ocr = True
             options.do_table_structure = True
-            full_page_ocr_enabled = False
-            if text_profile.force_full_page_ocr:
-                options.do_ocr = True
-                full_page_ocr_enabled = _enable_full_page_ocr(options)
             if hasattr(options, "generate_page_images"):
                 options.generate_page_images = False
             if hasattr(options, "generate_picture_images"):
                 options.generate_picture_images = False
-            if text_profile.force_full_page_ocr and full_page_ocr_enabled:
-                _emit(
-                    progress,
-                    f"Docling: embedded text looks corrupted on {text_profile.suspicious_pages} page(s); full-page OCR enabled.",
+            if full_page and not _enable_full_page_ocr(options):
+                raise DocumentParseError(
+                    "This Docling version cannot enable full-page OCR; "
+                    "the original extraction is preserved for manual review."
                 )
-            elif text_profile.force_full_page_ocr:
-                _emit(
-                    progress,
-                    f"Docling: embedded text looks corrupted on {text_profile.suspicious_pages} page(s); OCR enabled, but full-page mode is unavailable in this Docling build.",
-                )
-            elif text_profile.needs_ocr:
-                _emit(
-                    progress,
-                    f"Docling: {text_profile.text_pages}/{text_profile.page_count} pages have usable embedded text; OCR enabled.",
-                )
-            else:
-                _emit(
-                    progress,
-                    f"Docling: selectable text detected on {text_profile.text_pages}/{text_profile.page_count} pages; OCR disabled for this PDF.",
-                )
-
-            # Prefer accurate table structure when the installed Docling exposes the mode.
             try:
                 from docling.datamodel.pipeline_options import TableFormerMode
-
                 options.table_structure_options.mode = TableFormerMode.ACCURATE
-            except Exception:
+            except (AttributeError, ImportError, ValueError):
                 pass
-
-            _emit(
-                progress,
-                f"Docling: loading layout/table models and converting {text_profile.page_count or '?'} pages…",
-            )
             converter = DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
             )
+            label = "full-page OCR" if full_page else "layout / standard OCR"
+            _emit(progress, f"Docling: converting with {label}...")
             result = _convert_with_heartbeat(converter, path, progress=progress)
             document = result.document
-            _emit(progress, "Docling: conversion finished; building provenance blocks…")
-        except Exception as exc:  # pragma: no cover - depends on optional package/models
+            blocks, warnings = _blocks_from_docling_document(document, paper_id=paper_id)
+            count = len(getattr(document, "pages", {}) or {})
+            count = count or max((block.page_number for block in blocks), default=0)
+            if count < 1:
+                raise DocumentParseError("Docling produced no pages")
+            return result, document, blocks, warnings, count
+
+        try:
+            result, document, blocks, warnings, page_count = convert(full_page=False)
+        except DocumentParseError:
+            raise
+        except Exception as exc:
             raise DocumentParseError(f"Docling could not parse PDF: {exc}") from exc
 
-        warnings: list[str] = []
-        if text_profile.force_full_page_ocr and not full_page_ocr_enabled:
+        first_quality = _docling_text_quality(blocks, page_count)
+        override_full_ocr = os.environ.get("SRA_DOCLING_FULL_PAGE_OCR", "").strip().casefold() in {
+            "1", "true", "yes", "on"
+        }
+        if first_quality["suspicious"] or first_quality["empty"] or override_full_ocr:
+            reason = (
+                f"{len(first_quality['suspicious'])} suspicious text page(s), "
+                f"{len(first_quality['empty'])} empty page(s)"
+            )
+            _emit(progress, f"Docling: {reason}; evaluating full-page OCR recovery...")
+            try:
+                candidate_result, candidate_doc, candidate_blocks, candidate_warnings, candidate_pages = convert(
+                    full_page=True
+                )
+                candidate_quality = _docling_text_quality(candidate_blocks, candidate_pages)
+                if _prefer_ocr_candidate(
+                    first_quality, candidate_quality,
+                    same_pages=candidate_pages == page_count,
+                    forced=override_full_ocr,
+                ):
+                    result = candidate_result
+                    document = candidate_doc
+                    blocks = candidate_blocks
+                    warnings = candidate_warnings
+                    page_count = candidate_pages
+                    first_quality = candidate_quality
+                    _emit(progress, "Docling: full-page OCR improved extracted text; using reviewed result.")
+                else:
+                    warnings.append(
+                        "Full-page OCR did not safely improve extracted text; "
+                        "original Docling output retained for manual review."
+                    )
+                    _emit(progress, "Docling: retaining original extraction instead of losing evidence.")
+            except Exception as exc:
+                # A second, optional OCR pass must never discard a usable first pass.
+                warnings.append(f"Full-page OCR retry unavailable: {type(exc).__name__}; review original extraction.")
+                _emit(progress, "Docling: full-page OCR unavailable; original extraction retained.")
+
+        blocks.extend(_docling_printed_page_number_blocks(document, blocks, paper_id=paper_id))
+        # Preserve Docling's semantic item reading order. Metadata page-number
+        # furniture is appended (and excluded from evidence chunking by role).
+        quality = _docling_text_quality(blocks, page_count)
+        if quality["suspicious"]:
             warnings.append(
-                "Embedded PDF text appears corrupted, but full-page OCR could not be enabled; review extracted text before analysis."
+                "Potentially corrupted Docling text on PDF page(s): "
+                + ", ".join(map(str, quality["suspicious"][:12]))
+                + ". Check the original PDF before trusting these quotations."
+            )
+        if quality["empty"]:
+            warnings.append(
+                "Docling found no body text on PDF page(s): "
+                + ", ".join(map(str, quality["empty"][:12]))
+                + ". Blank image-only pages may be legitimate; verify important content."
             )
         status_value = str(getattr(result, "status", "")).casefold()
-        if status_value and "success" not in status_value:
+        # PARTIAL_SUCCESS is not a complete successful parse: surface it for
+        # researcher review instead of accepting it silently.
+        if status_value and ("success" not in status_value or "partial" in status_value):
             warnings.append(f"Docling conversion status needs review: {getattr(result, 'status', status_value)}")
-
-        blocks, adapter_warnings = _blocks_from_docling_document(document, paper_id=paper_id)
-        warnings.extend(adapter_warnings)
-        # Printed page numbers are deceptively hard for layout models: journals often
-        # encode 114 as three separate glyphs, and Docling may only label some pages as
-        # PAGE_FOOTER. Add one deterministic furniture block per page from the PDF text
-        # layer so page-range recovery is independent of Docling's semantic labeling.
-        printed_page_blocks = _extract_printed_page_number_blocks(path, paper_id=paper_id)
-        blocks.extend(printed_page_blocks)
-        page_count = len(getattr(document, "pages", {}) or {})
-        if page_count < 1:
-            page_count = max((block.page_number for block in blocks), default=0)
-        if page_count < 1:
-            raise DocumentParseError("Docling produced no pages")
-
-        body_pages = {
-            block.page_number
-            for block in blocks
-            if block.role != "furniture" and block.text.strip()
-        }
-        empty_pages = [page for page in range(1, page_count + 1) if page not in body_pages]
-        if empty_pages:
-            preview = ", ".join(map(str, empty_pages[:12]))
-            suffix = "…" if len(empty_pages) > 12 else ""
-            warnings.append(
-                f"Docling produced no body content on page(s): {preview}{suffix}; review OCR/layout output."
-            )
-
         status = ParseStatus.NEEDS_REVIEW if warnings else ParseStatus.SUCCESS
-        _emit(progress, f"Docling: parsed {len(blocks)} structured source blocks across {page_count} pages.")
+        _emit(progress, f"Docling: parsed {len(blocks)} source blocks across {page_count} pages.")
         return ParsedDocument(
             paper_id=paper_id,
             sha256=sha256,
@@ -206,156 +203,53 @@ class DoclingDocumentParser:
         )
 
 
-class PyMuPDFDocumentParser:
-    version = "pymupdf-tables-v4-text-quality"
-
-    def parse(
-        self,
-        pdf_path: Path,
-        *,
-        paper_id: str,
-        sha256: str,
-        progress: Callable[[str], None] | None = None,
-    ) -> ParsedDocument:
-        path = _validate_pdf_path(pdf_path)
-        _emit(progress, "PyMuPDF fallback: opening PDF…")
-        try:
-            import fitz
-        except ImportError as exc:
-            raise DocumentParseError(
-                "PyMuPDF is not installed. Install project dependencies with: python -m pip install -e ."
-            ) from exc
-
-        try:
-            document = fitz.open(path)
-        except Exception as exc:
-            raise DocumentParseError(f"Could not open PDF: {exc}") from exc
-
-        try:
-            if document.is_encrypted:
-                raise DocumentParseError("Encrypted PDFs are not supported")
-            if document.page_count < 1:
-                raise DocumentParseError("PDF contains no pages")
-
-            blocks: list[SourceBlock] = []
-            warnings: list[str] = []
-            empty_pages: list[int] = []
-            suspicious_text_pages: list[int] = []
-            for page_index, page in enumerate(document, start=1):
-                if page_index == 1 or page_index == document.page_count or page_index % 5 == 0:
-                    _emit(progress, f"PyMuPDF fallback: parsing page {page_index}/{document.page_count}…")
-                table_blocks: list[SourceBlock] = []
-                table_boxes: list[tuple[float, float, float, float]] = []
-                try:
-                    page_text_for_quality = page.get_text("text") or ""
-                except Exception:
-                    page_text_for_quality = ""
-                if _looks_like_garbled_text(page_text_for_quality):
-                    suspicious_text_pages.append(page_index)
-                try:
-                    found_tables = page.find_tables()
-                    for table_index, table in enumerate(found_tables.tables):
-                        rows = [
-                            [" ".join((cell or "").split()) for cell in row]
-                            for row in (table.extract() or [])
-                        ]
-                        rows = [row for row in rows if any(cell for cell in row)]
-                        if not rows:
-                            continue
-                        bbox = tuple(float(value) for value in table.bbox)
-                        table_boxes.append(bbox)
-                        table_text = "\n".join("\t".join(row) for row in rows)
-                        table_blocks.append(
-                            SourceBlock(
-                                id=_stable_block_id(paper_id, page_index, "table", table_index, table_text),
-                                page_number=page_index,
-                                text=table_text,
-                                bbox=bbox,
-                                table_rows=rows,
-                                role="table",
-                                source_label="pymupdf:table",
-                            )
-                        )
-                except Exception as exc:
-                    warnings.append(f"Table extraction needs review on page {page_index}: {exc}")
-
-                page_content: list[SourceBlock] = list(table_blocks)
-                page_blocks = page.get_text("blocks", sort=True)
-                extracted = len(table_blocks)
-                for block_index, item in enumerate(page_blocks):
-                    text = str(item[4]).strip()
-                    if not text:
-                        continue
-                    text_box = (float(item[0]), float(item[1]), float(item[2]), float(item[3]))
-                    if any(_overlap_ratio(text_box, table_box) >= 0.5 for table_box in table_boxes):
-                        continue
-                    extracted += 1
-                    page_content.append(
-                        SourceBlock(
-                            id=_stable_block_id(paper_id, page_index, "text", block_index, text),
-                            page_number=page_index,
-                            text=text,
-                            bbox=text_box,
-                            role="body",
-                            source_label="pymupdf:text",
-                        )
-                    )
-                printed = _extract_printed_page_number_from_page(page, page_index, paper_id)
-                if printed is not None:
-                    page_content.append(printed)
-                page_content.sort(key=_reading_order_key)
-                blocks.extend(page_content)
-                if extracted == 0:
-                    empty_pages.append(page_index)
-
-            if empty_pages:
-                preview = ", ".join(map(str, empty_pages[:12]))
-                suffix = "…" if len(empty_pages) > 12 else ""
-                warnings.append(f"No selectable text found on page(s): {preview}{suffix}; OCR is not supported by the fallback parser.")
-            if suspicious_text_pages:
-                preview = ", ".join(map(str, suspicious_text_pages[:12]))
-                suffix = "…" if len(suspicious_text_pages) > 12 else ""
-                warnings.append(
-                    f"Embedded text appears corrupted on page(s): {preview}{suffix}; use the Docling parser so full-page OCR can replace the bad text layer."
-                )
-
-            status = ParseStatus.NEEDS_REVIEW if (empty_pages or suspicious_text_pages) else ParseStatus.SUCCESS
-            return ParsedDocument(
-                paper_id=paper_id,
-                sha256=sha256,
-                source_path=str(path.resolve()),
-                page_count=document.page_count,
-                status=status,
-                parser_version=self.version,
-                warnings=warnings,
-                blocks=blocks,
-            )
-        except DocumentParseError:
-            raise
-        except Exception as exc:
-            raise DocumentParseError(f"Could not extract PDF text: {exc}") from exc
-        finally:
-            document.close()
+def _docling_text_quality(blocks: list[SourceBlock], page_count: int) -> dict[str, object]:
+    """Inspect text yielded by Docling; never fabricate page text or citations."""
+    by_page: dict[int, list[str]] = {}
+    for block in blocks:
+        if block.role != "furniture" and block.text.strip():
+            by_page.setdefault(block.page_number, []).append(block.text)
+    texts = {page: "\n".join(parts) for page, parts in by_page.items()}
+    return {
+        "suspicious": [
+            page for page, text in texts.items() if _looks_like_garbled_text(text)
+        ],
+        "empty": [
+            page for page in range(1, page_count + 1)
+            if page not in texts
+        ],
+        "pages_with_text": len(texts),
+        "chars": sum(len("".join(t.split())) for t in texts.values()),
+    }
 
 
-
-class _TextLayerProfile:
-    def __init__(
-        self,
-        *,
-        page_count: int,
-        text_pages: int,
-        text_chars: int,
-        needs_ocr: bool,
-        suspicious_pages: int = 0,
-        force_full_page_ocr: bool = False,
-    ):
-        self.page_count = page_count
-        self.text_pages = text_pages
-        self.text_chars = text_chars
-        self.needs_ocr = needs_ocr
-        self.suspicious_pages = suspicious_pages
-        self.force_full_page_ocr = force_full_page_ocr
+def _prefer_ocr_candidate(
+    old: dict[str, object],
+    new: dict[str, object],
+    *,
+    same_pages: bool,
+    forced: bool = False,
+) -> bool:
+    """Never replace a better or more complete document with an OCR regression."""
+    if not same_pages or new["suspicious"]:
+        # Exception: reducing multiple bad pages to fewer is useful, but not
+        # if all other page coverage deteriorates.
+        if not same_pages or len(new["suspicious"]) >= len(old["suspicious"]):
+            return False
+    if new["pages_with_text"] < old["pages_with_text"]:
+        return False
+    if new["chars"] < old["chars"] * 0.60:
+        return False
+    less_corrupt = len(new["suspicious"]) < len(old["suspicious"])
+    more_complete = new["pages_with_text"] > old["pages_with_text"]
+    if less_corrupt or more_complete:
+        return True
+    # An explicit forced attempt is permitted only when the output is no worse
+    # by the detectable signals; normal runs never replace an equal result.
+    return bool(
+        forced and not new["suspicious"]
+        and new["chars"] >= old["chars"]
+    )
 
 
 def _emit(progress: Callable[[str], None] | None, message: str) -> None:
@@ -460,65 +354,6 @@ def _enable_full_page_ocr(options: object) -> bool:
             return True
         except Exception:
             return False
-
-
-def _pdf_text_layer_profile(path: Path) -> _TextLayerProfile:
-    """Cheaply decide whether OCR is needed without trusting text quantity alone.
-
-    A page counts as text-bearing when PyMuPDF can extract at least 40 non-whitespace
-    characters.  In addition, pages with a suspicious embedded text mapping are
-    detected so a visually normal but copy-corrupted PDF can be sent through
-    Docling full-page OCR instead of preserving the bad text layer.
-    """
-
-    try:
-        import fitz
-
-        doc = fitz.open(path)
-    except Exception:
-        # Conservative fallback: if we cannot inspect the embedded text layer, keep OCR.
-        return _TextLayerProfile(page_count=0, text_pages=0, text_chars=0, needs_ocr=True)
-
-    try:
-        page_count = int(doc.page_count)
-        text_pages = 0
-        text_chars = 0
-        suspicious_pages = 0
-        strong_suspicious_pages = 0
-        for page in doc:
-            page_text = page.get_text("text") or ""
-            compact = re.sub(r"\s+", "", page_text)
-            text_chars += len(compact)
-            if len(compact) >= 40:
-                text_pages += 1
-                score = _garbled_text_score(page_text)
-                if score >= 7:
-                    suspicious_pages += 1
-                if score >= 9:
-                    strong_suspicious_pages += 1
-
-        # Requiring >=80% text-bearing pages keeps OCR on for materially mixed/scanned PDFs.
-        required = max(1, (page_count * 4 + 4) // 5) if page_count else 1
-        weak_text_layer = (
-            page_count == 0
-            or text_pages < required
-            or text_chars < max(200, page_count * 80)
-        )
-        suspicious_threshold = max(2, (text_pages + 3) // 4) if text_pages > 3 else 1
-        force_full_page_ocr = (
-            strong_suspicious_pages > 0
-            or suspicious_pages >= suspicious_threshold
-        )
-        return _TextLayerProfile(
-            page_count=page_count,
-            text_pages=text_pages,
-            text_chars=text_chars,
-            needs_ocr=weak_text_layer or force_full_page_ocr,
-            suspicious_pages=suspicious_pages,
-            force_full_page_ocr=force_full_page_ocr,
-        )
-    finally:
-        doc.close()
 
 
 def _convert_with_heartbeat(converter: object, path: Path, *, progress: Callable[[str], None] | None):
@@ -737,108 +572,75 @@ def _validate_pdf_path(pdf_path: Path) -> Path:
 
 
 
-def _extract_printed_page_number_blocks(path: Path, *, paper_id: str) -> list[SourceBlock]:
-    """Extract bottom-of-page printed page numbers directly from the PDF text layer.
+def _docling_printed_page_number_blocks(
+    document: object, blocks: list[SourceBlock], *, paper_id: str,
+) -> list[SourceBlock]:
+    """Reconstruct printed page numbers *only* from Docling page-footer items.
 
-    This is intentionally independent of Docling. Many journal PDFs encode a number
-    such as ``114`` as three separate glyphs / blocks, which can cause a layout model
-    to miss early page footers. We cluster digit-only glyphs near the physical bottom
-    edge and concatenate them left-to-right.
+    PDFs can split 114 into three item glyphs. Use Docling provenance/bboxes,
+    cluster close digits on one baseline and never invent a page number when
+    no footer is actually available. PDF page_number remains authoritative.
     """
-    try:
-        import fitz
-        doc = fitz.open(path)
-    except Exception:
-        return []
-    try:
-        return [
-            block
-            for page_index, page in enumerate(doc, start=1)
-            if (block := _extract_printed_page_number_from_page(page, page_index, paper_id)) is not None
-        ]
-    finally:
-        doc.close()
-
-
-def _extract_printed_page_number_from_page(page: object, page_number: int, paper_id: str) -> SourceBlock | None:
-    try:
-        rect = page.rect
-        page_height = float(rect.height)
-        # Printed footers in academic journals are normally in the final ~10% of the page.
-        clip = type(rect)(rect.x0, rect.y0 + page_height * 0.88, rect.x1, rect.y1)
-        data = page.get_text("dict", clip=clip, sort=True)
-    except Exception:
-        return None
-
-    digit_runs: list[tuple[float, float, float, float, str]] = []
-    for raw_block in data.get("blocks", []):
-        for line in raw_block.get("lines", []):
-            for span in line.get("spans", []):
-                text = str(span.get("text", "")).strip()
-                if not re.fullmatch(r"\d{1,4}", text):
-                    continue
-                try:
-                    x0, y0, x1, y1 = map(float, span["bbox"])
-                except Exception:
-                    continue
-                if y0 < page_height * 0.88:
-                    continue
-                digit_runs.append((x0, y0, x1, y1, text))
-
-    if not digit_runs:
-        return None
-
-    # Cluster runs on the same baseline. The bottom-most cluster wins, and glyphs are
-    # concatenated from left to right (e.g. separate ``1`` ``1`` ``4`` -> ``114``).
-    clusters: list[list[tuple[float, float, float, float, str]]] = []
-    for item in sorted(digit_runs, key=lambda value: ((value[1] + value[3]) / 2.0, value[0])):
-        center_y = (item[1] + item[3]) / 2.0
-        target = None
-        for cluster in clusters:
-            cluster_y = sum((x[1] + x[3]) / 2.0 for x in cluster) / len(cluster)
-            if abs(center_y - cluster_y) <= 3.5:
-                target = cluster
-                break
-        if target is None:
-            target = []
-            clusters.append(target)
-        target.append(item)
-
-    candidates=[]
-    for cluster in clusters:
-        ordered=sorted(cluster, key=lambda value:value[0])
-        text="".join(item[4] for item in ordered)
-        if not re.fullmatch(r"\d{1,4}", text):
+    pages = getattr(document, "pages", {}) or {}
+    items_by_page: dict[int, list[SourceBlock]] = {}
+    for block in blocks:
+        if (block.source_label or "").casefold() != "docling:page_footer":
             continue
-        value=int(text)
-        # Avoid picking tiny figure/table labels while still supporting journals whose
-        # printed pages begin at 1.
-        if not (1 <= value <= 9999):
+        if block.bbox is None or not re.fullmatch(r"\d{1,4}", block.text.strip()):
             continue
-        bbox=(min(x[0] for x in ordered), min(x[1] for x in ordered), max(x[2] for x in ordered), max(x[3] for x in ordered))
-        bottom=max(x[3] for x in ordered)
-        candidates.append((bottom, len(text), value, bbox, text))
-    if not candidates:
-        return None
-    _, _, value, bbox, text=max(candidates, key=lambda item:(item[0], item[1]))
-    normalized=str(value)
-    return SourceBlock(
-        id=_stable_block_id(paper_id, page_number, "printed-page-number", 0, normalized),
-        page_number=page_number,
-        text=normalized,
-        bbox=bbox,
-        role="furniture",
-        source_label="sra:printed_page_number",
-    )
+        try:
+            page_height = float(pages[block.page_number].size.height)
+        except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+            continue
+        if block.bbox[1] >= page_height * 0.86:
+            items_by_page.setdefault(block.page_number, []).append(block)
 
-def _overlap_ratio(inner: tuple[float, float, float, float], outer: tuple[float, float, float, float]) -> float:
-    x0 = max(inner[0], outer[0])
-    y0 = max(inner[1], outer[1])
-    x1 = min(inner[2], outer[2])
-    y1 = min(inner[3], outer[3])
-    intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-    area = max(0.0, inner[2] - inner[0]) * max(0.0, inner[3] - inner[1])
-    return intersection / area if area else 0.0
+    found: list[SourceBlock] = []
+    for page_number, candidates in items_by_page.items():
+        baseline_groups: list[list[SourceBlock]] = []
+        for item in sorted(candidates, key=lambda x: ((x.bbox[1] + x.bbox[3]) / 2, x.bbox[0])):
+            baseline = (item.bbox[1] + item.bbox[3]) / 2
+            group = next((
+                g for g in baseline_groups if abs(
+                    baseline - sum((x.bbox[1] + x.bbox[3]) / 2 for x in g) / len(g)
+                ) <= 3.5
+            ), None)
+            if group is None:
+                group = []
+                baseline_groups.append(group)
+            group.append(item)
+
+        valid: list[tuple[float, str, tuple[float, float, float, float]]] = []
+        for group in baseline_groups:
+            runs: list[list[SourceBlock]] = []
+            for item in sorted(group, key=lambda x: x.bbox[0]):
+                if not runs or item.bbox[0] - runs[-1][-1].bbox[2] > 12:
+                    runs.append([])
+                runs[-1].append(item)
+            for run in runs:
+                text = "".join(x.text.strip() for x in run)
+                if not re.fullmatch(r"\d{1,4}", text) or not 1 <= int(text) <= 9999:
+                    continue
+                bbox = (
+                    min(x.bbox[0] for x in run),
+                    min(x.bbox[1] for x in run),
+                    max(x.bbox[2] for x in run),
+                    max(x.bbox[3] for x in run),
+                )
+                valid.append((bbox[3], str(int(text)), bbox))
+
+        if not valid:
+            continue
+        _bottom, label, bbox = max(valid, key=lambda v: (v[0], len(v[1])))
+        found.append(SourceBlock(
+            id=_stable_block_id(paper_id, page_number, "printed-page-number", 0, label),
+            page_number=page_number,
+            text=label,
+            bbox=bbox,
+            role="furniture",
+            source_label="sra:printed_page_number",
+        ))
+    return found
 
 
 def _stable_block_id(paper_id: str, page: int, kind: str, index: int, text: str) -> str:
