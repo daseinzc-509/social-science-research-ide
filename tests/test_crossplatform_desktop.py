@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from sociology_research.api.desktop_entry import DesktopTokenMiddleware, token_is_valid
@@ -25,7 +24,6 @@ def load_relative(name, relative):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
 
 def test_session_auth_covers_pdfs_settings_and_health():
     token = "f" * 64
@@ -49,7 +47,6 @@ def test_session_auth_covers_pdfs_settings_and_health():
     assert not token_is_valid("secret")
     assert token_is_valid(token)
 
-
 def test_mac_keychain_write_read_delete(monkeypatch, tmp_path):
     # Only a simulated Keychain; no real macOS Keychain or credentials involved.
     registry: dict[tuple[str, str], str] = {}
@@ -65,7 +62,6 @@ def test_mac_keychain_write_read_delete(monkeypatch, tmp_path):
     assert list(tmp_path.rglob("*")) == []  # No plaintext secret file, even in test.
     user_storage.write_user_secrets({})
     assert user_storage.read_user_secrets() == {}
-
 
 def test_macos_app_layout_keeps_backend_under_resources(tmp_path):
     module = load_relative("sra_mac_app", "installer/macos/package_app.py")
@@ -88,7 +84,6 @@ def test_macos_app_layout_keeps_backend_under_resources(tmp_path):
     assert info["CFBundlePackageType"] == "APPL"
     assert info["CFBundleShortVersionString"] == "0.2.0"
 
-
 def test_windows_payload_contains_backend_not_private_data(tmp_path):
     module = load_relative("sra_win_app", "scripts/assemble_windows.py")
     desktop, backend = tmp_path / "desktop", tmp_path / "backend"
@@ -100,7 +95,6 @@ def test_windows_payload_contains_backend_not_private_data(tmp_path):
     assert (target / "backend/sra-backend/sra-backend.exe").exists()
     assert not (target / "data").exists()
 
-
 def test_safety_gate_blocks_private_files_but_allows_embedded_library_assets(tmp_path):
     module = load_relative("sra_safety", "scripts/check_release_safety.py")
     bundle = tmp_path / "SRA.app"
@@ -108,7 +102,7 @@ def test_safety_gate_blocks_private_files_but_allows_embedded_library_assets(tmp
     pkg.mkdir(parents=True)
     (pkg / "model.json").write_text("{}")
     trusted_ca = bundle / "Contents/Resources/backend/sra-backend/_internal/certifi"
-    trusted_ca.mkdir(parents=True)
+    trusted_ca.mkdir()
     (trusted_ca / "cacert.pem").write_text("dummy public CA")
     assert module.check_artifact(bundle) == []
     private = bundle / "Contents/Resources/data"
@@ -119,7 +113,6 @@ def test_safety_gate_blocks_private_files_but_allows_embedded_library_assets(tmp
     private.rmdir()
     (bundle / "original.pdf").write_bytes(b"%PDF-private")
     assert module.check_artifact(bundle)
-
 
 def test_release_versions_and_git_target_matrix():
     module = load_relative("sra_version", "scripts/release_version.py")
@@ -135,15 +128,15 @@ def test_release_versions_and_git_target_matrix():
     assert "macos-26-intel" not in ci and "macos-26-intel" not in release
     assert "scripts/smoke_backend.py" in release
 
-
 def test_frozen_backend_build_profile_requires_docling(monkeypatch):
     module = load_relative("sra_build_cmd", "scripts/build_backend.py")
     monkeypatch.setattr(module, "available", lambda x: False)
-    base = module.command_args("core")
-    assert "--onedir" in base
+    # Docling-only releases intentionally have no legacy core/PyMuPDF profile.
+    with pytest.raises(ValueError, match="Invalid backend profile: core"):
+        module.command_args("core")
+    # The supported full profile must refuse a build without Docling.
     with pytest.raises(RuntimeError, match="docling"):
         module.command_args("full")
-
 
 def test_release_asset_guard_is_bounded(tmp_path):
     module = load_relative("sra_sizes", "scripts/check_asset_sizes.py")
@@ -151,7 +144,6 @@ def test_release_asset_guard_is_bounded(tmp_path):
     sample.write_bytes(b"preview package bytes")
     assert module.validate(tmp_path, limit=1000) == []
     assert module.validate(tmp_path, limit=3)
-
 
 def test_macos_arm_only_and_no_intel_fallback():
     workflow = (ROOT / ".github/workflows/release-desktop.yml").read_text(encoding="utf-8")
