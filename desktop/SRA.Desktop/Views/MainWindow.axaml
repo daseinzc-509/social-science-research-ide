@@ -480,7 +480,9 @@
                               </StackPanel>
                               <TextBox Text="{Binding Text}" IsReadOnly="True"
                                        AcceptsReturn="True" TextWrapping="Wrap"
-                                       Background="{DynamicResource CodeBrush}" BorderThickness="0"
+                                       Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
+                                        SelectionBrush="{DynamicResource AccentSoftBrush}"
+                                        SelectionForegroundBrush="{DynamicResource InkBrush}" BorderThickness="0"
                                        Padding="10" FontFamily="Consolas" FontSize="12" />
                             </StackPanel>
                           </Border>
@@ -505,9 +507,15 @@
                                 <TextBlock Text="区域坐标（PDF points）" Classes="eyebrow"/>
                                 <TextBlock Text="{Binding Location}" Classes="muted" FontSize="10"/>
                               </StackPanel>
-                              <Button Content="分析该图片（调用 Vision API，可能计费）"
-                                      Tag="{Binding}" Click="AnalyzeFigure_Click"
-                                      HorizontalAlignment="Left" Classes="secondary"/>
+                              <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="本地预览裁剪图（不收费）" Classes="secondary"
+                                        Tag="{Binding}" Click="PreviewFigure_Click"/>
+                                <Button Content="确认后分析该图片（Vision API，可能计费）"
+                                        Tag="{Binding}" Click="AnalyzeFigure_Click" Classes="secondary"/>
+                              </StackPanel>
+                              <Image Source="{Binding PreviewImage}" IsVisible="{Binding HasPreview}"
+                                     Stretch="Uniform" MaxWidth="680" MaxHeight="420"
+                                     HorizontalAlignment="Left"/>
                               <TextBlock Text="{Binding AiResult}" TextWrapping="Wrap"
                                          FontSize="11" Foreground="{DynamicResource InkBrush}"/>
                             </StackPanel>
@@ -522,7 +530,8 @@
 
             <TabItem Header="原始 Card">
               <TextBox Text="{Binding RawCardJson}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
-                       Margin="18" Padding="14" Background="{DynamicResource CodeBrush}" Foreground="#E7EFEC"
+                       Margin="18" Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
+                        SelectionBrush="{DynamicResource AccentSoftBrush}" SelectionForegroundBrush="{DynamicResource InkBrush}"
                        BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10"
                        ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
             </TabItem>
@@ -534,7 +543,8 @@
                   <ProgressBar Grid.Column="1" Width="180" Height="5" Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" VerticalAlignment="Center" />
                 </Grid>
                 <TextBox Grid.Row="1" Text="{Binding JobLog}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                         Padding="14" Background="{DynamicResource CodeBrush}" Foreground="#D7E9E2" BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10" />
+                         Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
+                          SelectionBrush="{DynamicResource AccentSoftBrush}" SelectionForegroundBrush="{DynamicResource InkBrush}" BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10" />
               </Grid>
             </TabItem>
           </TabControl>

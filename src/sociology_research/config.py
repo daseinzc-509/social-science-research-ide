@@ -306,6 +306,33 @@ def migrate_legacy_model_config(*, apply: bool = False) -> dict[str, object]:
     return report
 
 
+def resolved_pro_output_budget(model: str, requested: int) -> int:
+    """Stable, inspectable default for high-reasoning Kimi K3 via Agent Plan.
+
+    Default 16k output reservation can trip model-specific TPM checks before
+    text is generated. Avoid an implicit 16k reservation for Kimi K3, while
+    leaving already-working GLM and other providers untouched. Do not truncate
+    input evidence or silently retry any paid request.
+
+    Power users may explicitly set SRA_KIMI_K3_OUTPUT_TOKENS=2048..16000.
+    This non-secret local process setting intentionally remains separate from
+    ordinary model/key storage; a bad override fails closed.
+    """
+    if not 1024 <= requested <= 100_000:
+        raise ValueError("Pro output token budget is outside safe limits.")
+    if model.strip().casefold() != "kimi-k3":
+        return requested
+    override = os.environ.get("SRA_KIMI_K3_OUTPUT_TOKENS", "").strip()
+    if override:
+        if not override.isascii() or not override.isdigit():
+            raise ValueError("SRA_KIMI_K3_OUTPUT_TOKENS must be a positive integer.")
+        chosen = int(override)
+        if not 2048 <= chosen <= 16000:
+            raise ValueError("Kimi K3 output token budget must be 2048..16000.")
+        return chosen
+    return min(requested, 8192)
+
+
 @dataclass(frozen=True)
 class AnalysisConfig:
     """Local application behavior; keep non-secret tuning out of environment variables."""

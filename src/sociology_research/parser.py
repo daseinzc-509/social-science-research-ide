@@ -204,6 +204,25 @@ class DoclingDocumentParser:
                 warnings.append(f"Full-page OCR retry unavailable: {type(exc).__name__}; review original extraction.")
                 _emit(progress, "Docling: full-page OCR unavailable; original extraction retained.")
 
+        if self.formula_enabled:
+            formula_labels = {"docling:formula", "docling:equation"}
+            count_formulas = sum(
+                (block.source_label or "").casefold() in formula_labels
+                for block in blocks
+            )
+            if active_formula:
+                _emit(progress,
+                      f"Docling: formula enrichment requested; {count_formulas} "
+                      "located formula block(s) emitted.")
+                if count_formulas == 0:
+                    _emit(progress,
+                          "Docling did not emit any located formula text; check "
+                          "whether the PDF contains recognizable formulas or "
+                          "whether this Docling/model build supports them.")
+            else:
+                _emit(progress,
+                      "Formula enrichment did not complete; ordinary Docling "
+                      "parse was retained. See parser warnings.")
         figures = _docling_figure_regions(document, paper_id=paper_id)
         blocks.extend(_docling_printed_page_number_blocks(document, blocks, paper_id=paper_id))
         # Preserve Docling's semantic item reading order. Metadata page-number

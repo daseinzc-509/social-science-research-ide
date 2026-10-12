@@ -14,6 +14,22 @@ public partial class MainWindow
             await viewModel.Settings.SaveVisualAsync();
     }
 
+    private async void PreviewFigure_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not VisualSourceItem figure ||
+            DataContext is not MainWindowViewModel viewModel)
+            return;
+        button.IsEnabled = false;
+        try
+        {
+            await viewModel.PreviewFigureAsync(figure);
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
     private async void AnalyzeFigure_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not VisualSourceItem figure ||

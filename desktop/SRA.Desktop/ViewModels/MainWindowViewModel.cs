@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Media.Imaging;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -526,6 +527,29 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoTables));
     }
 
+    public async Task PreviewFigureAsync(VisualSourceItem figure)
+    {
+        if (SelectedPaper is null || string.IsNullOrWhiteSpace(figure.SourceId))
+        {
+            figure.AiResult = "请先选择具有可靠图像来源 ID 的论文。";
+            return;
+        }
+        var paperId = SelectedPaper.Id;
+        figure.AiResult = "正在本地预览图像区域（不调用模型、不收费）…";
+        try
+        {
+            var data = await _api.GetFigurePreviewAsync(paperId, figure.SourceId);
+            if (SelectedPaper?.Id != paperId) return;
+            using var stream = new MemoryStream(data, writable: false);
+            figure.PreviewImage = new Bitmap(stream);
+            figure.AiResult = "本地预览成功。确认裁剪区域正确后才需要付费调用 Vision。";
+        }
+        catch (Exception exc)
+        {
+            figure.AiResult = "本地图片预览失败：" + exc.Message;
+        }
+    }
+
     public async Task AnalyzeFigureAsync(VisualSourceItem figure)
     {
         if (SelectedPaper is null)
@@ -538,8 +562,13 @@ public partial class MainWindowViewModel : ObservableObject
             figure.AiResult = "没有可信的图片来源 ID，无法发送。";
             return;
         }
+        if (!figure.HasPreview)
+        {
+            figure.AiResult = "请先点击「本地预览」，确认区域正确后再提交付费请求。";
+            return;
+        }
         var paperId = SelectedPaper.Id;
-        figure.AiResult = "正在分析所选图片区域（可能产生 API 费用）…";
+        figure.AiResult = "正在分析已预览区域（可能产生 API 费用）…";
         try
         {
             var response = await _api.AnalyzeFigureAsync(paperId, figure.SourceId);
@@ -558,6 +587,8 @@ public partial class MainWindowViewModel : ObservableObject
     private void ProjectVisuals(JsonElement card)
     {
         Formulas.Clear();
+        foreach (var previous in Figures)
+            previous.PreviewImage = null;
         Figures.Clear();
 
         if (card.TryGetProperty("formulas", out var formulas) && formulas.ValueKind == JsonValueKind.Array)
@@ -917,7 +948,32 @@ public partial class MainWindowViewModel : ObservableObject
             JobProgress = 100;
             JobIndeterminate = false;
             JobLog += Environment.NewLine + Environment.NewLine + actualMessage;
-            await RefreshAfterJobAsync(preferredPaperId);
+            try
+            {
+                await RefreshAfterJobAsync(preferredPaperId);
+            }
+            catch (Exception refreshError)
+            {
+                // Backend confirmed DONE: a later refresh failure is not a
+                // failed import. Never repeat PDF uploads automatically.
+                JobStage = "处理完成 · 列表待刷新";
+                StatusText = actualMessage
+                    + "；论文处理已完成，但列表暂时无法刷新。"
+                    + " 请在 API 恢复后手动刷新，勿重复导入。";
+                JobLog += Environment.NewLine + Environment.NewLine
+                    + "刷新时连接断开：" + refreshError.Message;
+            }
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException)
+        {
+            // Uncertain POST/GET transport result. The backend may already
+            // have saved the PDF even though the desktop lost its connection.
+            StatusText = "本地后端连接中断；尚无法确认后台任务结果。"
+                + " PDF 可能已保存，请恢复连接并刷新论文库，勿立即重复导入。"
+                + " 详情：" + exc.Message;
+            JobStage = "任务结果待核实";
+            JobIndeterminate = false;
+            JobLog += Environment.NewLine + Environment.NewLine + StatusText;
         }
         catch (Exception exc)
         {
@@ -995,6 +1051,8 @@ public partial class MainWindowViewModel : ObservableObject
         Tables.Clear();
         OnPropertyChanged(nameof(HasNoTables));
         Formulas.Clear();
+        foreach (var previous in Figures)
+            previous.PreviewImage = null;
         Figures.Clear();
         OnPropertyChanged(nameof(HasNoVisuals));
         Keywords.Clear();

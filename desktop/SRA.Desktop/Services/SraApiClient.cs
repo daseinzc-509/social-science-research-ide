@@ -267,7 +267,26 @@ public sealed class SraApiClient : IDisposable
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var snapshot = await GetJobAsync(jobId, cancellationToken);
+            JobSnapshot snapshot;
+            try
+            {
+                snapshot = await GetJobAsync(jobId, cancellationToken);
+            }
+            catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Retry only idempotent status GET. A reconnect MUST NOT
+                // re-upload PDF or repeat a paid Lite/Pro request.
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                try
+                {
+                    snapshot = await GetJobAsync(jobId, cancellationToken);
+                }
+                catch (HttpRequestException)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                    snapshot = await GetJobAsync(jobId, cancellationToken);
+                }
+            }
             onProgress?.Invoke(snapshot);
             if (snapshot.Status == "done")
             {
@@ -453,6 +472,21 @@ public sealed class SraApiClient : IDisposable
             _jsonOptions,
             cancellationToken);
         return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    /// <summary>Local JPEG preview only; no remote model request or fee.</summary>
+    public async Task<byte[]> GetFigurePreviewAsync(
+        string paperId, string figureId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/figures/{Uri.EscapeDataString(figureId)}/preview",
+            cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        var data = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        if (data.Length == 0 || data.Length > 3_000_000)
+            throw new SraApiException("本地图片预览内容无效或过大。");
+        return data;
     }
 
     /// <summary>Explicit, paid remote analysis for a single source-linked figure crop.</summary>

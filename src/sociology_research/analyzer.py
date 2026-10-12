@@ -13,7 +13,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from .config import AnalysisConfig, Settings
+from .config import AnalysisConfig, Settings, resolved_pro_output_budget
 from .llm_client import ModelRequestError, OpenAICompatibleClient
 from .models import (
     ClaimAudit,
@@ -100,7 +100,9 @@ class PaperAnalysisPipeline:
             "pro_thinking": self.analysis_config.pro_thinking,
             "pro_reasoning_effort": self.analysis_config.pro_reasoning_effort,
             "lite_max_completion_tokens": self.analysis_config.lite_max_completion_tokens,
-            "pro_max_completion_tokens": self.analysis_config.pro_max_completion_tokens,
+            "pro_max_completion_tokens": resolved_pro_output_budget(
+                pro_model, self.analysis_config.pro_max_completion_tokens
+            ),
             "pro_evidence_char_limit": self.analysis_config.pro_source_char_budget,
             "pro_max_source_excerpts": self.analysis_config.pro_max_source_excerpts,
             "exclude_after_text": exclude_after_text,
@@ -257,6 +259,16 @@ class PaperAnalysisPipeline:
         )
         if pro_evidence_map:
             pro_prompt = _json_task(pro_payload, ProAnalysis)
+            pro_output_budget = resolved_pro_output_budget(
+                pro_model, self.analysis_config.pro_max_completion_tokens
+            )
+            if pro_output_budget != self.analysis_config.pro_max_completion_tokens:
+                self._report(
+                    f"Pro model profile: {pro_model} output reservation reduced to "
+                    f"{pro_output_budget} tokens (default was "
+                    f"{self.analysis_config.pro_max_completion_tokens}); evidence "
+                    "input unchanged. Provider TPM/permission checks still apply."
+                )
             self._report(
                 f"Pro independent review: model {pro_model}; {len(pro_evidence_map)} source excerpts selected "
                 "from the document, not only Lite citations"
@@ -264,7 +276,7 @@ class PaperAnalysisPipeline:
             try:
                 pro_result = self._cached_call(
                     paper_id, "pro", pro_model, pro_prompt, PRO_SYSTEM_PROMPT, ProAnalysis, pro_client,
-                    max_tokens=self.analysis_config.pro_max_completion_tokens,
+                    max_tokens=pro_output_budget,
                     force=force, stage_label="Pro independent review",
                     thinking=self.analysis_config.pro_thinking,
                     reasoning_effort=self.analysis_config.pro_reasoning_effort,
@@ -397,8 +409,16 @@ class PaperAnalysisPipeline:
         reasoning_effort: str | None = None,
         connection_identity: str = "",
     ) -> T:
+        # Keep GLM/Lite cache IDs stable. Kimi requests use a model-specific
+        # output budget, so include it in that model's Pro cache identity only.
+        profile_part = (
+            f"\0kimi-output={max_tokens}"
+            if stage == "pro" and model.strip().casefold() == "kimi-k3" else ""
+        )
         input_digest = hashlib.sha256(
-            f"{PROMPT_VERSION}\0{connection_identity}\0{model}\0{thinking}\0{reasoning_effort}\0{system_prompt}\0{user_prompt}".encode("utf-8")
+            f"{PROMPT_VERSION}\0{connection_identity}\0{model}\0{thinking}"
+            f"\0{reasoning_effort}\0{system_prompt}\0{user_prompt}"
+            f"{profile_part}".encode("utf-8")
         ).hexdigest()
         if not force:
             cached = self.repository.get_model_run(paper_id, stage, model, PROMPT_VERSION, input_digest)

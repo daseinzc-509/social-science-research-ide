@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Avalonia.Media.Imaging;
 using System.ComponentModel;
 
 namespace SRA.Desktop.Models;
@@ -191,6 +192,21 @@ public sealed class VisualSourceItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AiResult)));
         }
     }
+    private Bitmap? _previewImage;
+    public Bitmap? PreviewImage
+    {
+        get => _previewImage;
+        set
+        {
+            if (ReferenceEquals(_previewImage, value)) return;
+            var previous = _previewImage;
+            _previewImage = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PreviewImage)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasPreview)));
+            previous?.Dispose();
+        }
+    }
+    public bool HasPreview => PreviewImage is not null;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public string Page { get; init; } = "—";

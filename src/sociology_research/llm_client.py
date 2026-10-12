@@ -14,52 +14,94 @@ class ModelRequestError(RuntimeError):
     """A safe-to-display model request error; credentials are never included."""
 
 
-def _http_error_message(exc: HTTPError) -> str:
-    """Give safe 429 guidance without exposing private provider response text."""
-    code = exc.code
-    if code == 429:
-        data = {}
+def _safe_provider_id(value: object) -> str:
+    """Never show arbitrary provider messages, credentials, or paper excerpts."""
+    import re
+    if not isinstance(value, (str, int)):
+        return ""
+    token = str(value)
+    return token if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", token) else ""
+
+
+def _http_error_message(exc: HTTPError, *, model: str = "") -> str:
+    """Distinguish Agent Plan quota, model TPM/RPM and transient 429 failures.
+
+    The provider-controlled error.message may quote private payloads; it is
+    NEVER displayed. Only a restricted error.code/type, safe request ID and
+    bounded Retry-After value are included.
+    """
+    status = exc.code
+    headers = getattr(exc, "headers", None)
+    try:
+        raw = exc.read(8192)
+        decoded = json.loads(raw.decode("utf-8", errors="replace"))
+        error = decoded.get("error", {}) if isinstance(decoded, dict) else {}
+    except (ValueError, OSError, TypeError):
+        error = {}
+    if not isinstance(error, dict):
+        error = {}
+
+    code = _safe_provider_id(error.get("code"))
+    code_type = _safe_provider_id(error.get("type"))
+    error_name = (code or code_type).lower()
+    compact_error_name = error_name.replace("_", "").replace("-", "")
+    code_label = f" [error.code={code or code_type}]" if (code or code_type) else ""
+    model_id = _safe_provider_id(model)
+    model_label = f" [model={model_id}]" if model_id else ""
+    request_id = ""
+    retry_seconds = ""
+    if headers is not None:
         try:
-            response = json.loads(exc.read(4096).decode("utf-8", errors="replace"))
-            data = response.get("error", {}) if isinstance(response, dict) else {}
-        except (OSError, ValueError, TypeError):
+            for name in ("x-tt-logid", "x-request-id", "x-requestid"):
+                request_id = _safe_provider_id(headers.get(name))
+                if request_id:
+                    break
+            retry_value = str(headers.get("Retry-After", "")).strip()
+            if retry_value.isascii() and retry_value.isdecimal() and 0 < int(retry_value) <= 86400:
+                retry_seconds = f" Retry-After={int(retry_value)}s ({int(retry_value)} seconds)."
+        except (AttributeError, TypeError, ValueError):
             pass
-        if not isinstance(data, dict):
-            data = {}
-        reason = " ".join(str(data.get(key, "")) for key in ("code", "type")).lower()
-        message = str(data.get("message", "")).lower()
-        if any(x in reason or x in message for x in (
-            "insufficient_quota", "quota_exceeded", "out_of_quota",
-            "balance", "billing", "resource_exhausted",
-        )):
-            return (
-                "HTTP 429 (quota/balance exhausted): check provider credits, "
-                "plan entitlement and model availability. Do not blindly retry; "
-                "the successful Lite result is reusable."
+    id_label = f" [request_id={request_id}]" if request_id else ""
+
+    if status == 429:
+        if "agentplanquotaexceeded" in error_name or (
+            "quota" in error_name and "exceed" in error_name
+        ) or "insufficient_quota" in error_name:
+            problem = (
+                 "Agent Plan/model quota/balance exhausted or provider quota refusal. Check AFP "
+                "period limits, model entitlements and provider detail; "
+                "do not buy a higher plan merely from this error."
             )
-        retry_after = ""
-        try:
-            retry_after = str(exc.headers.get("Retry-After", "")).strip()
-        except (AttributeError, TypeError):
-            pass
-        waiting = (
-            f" Retry-After: {int(retry_after)} seconds."
-            if retry_after.isdecimal() and 0 < int(retry_after) <= 86400
-            else ""
-        )
-        return (
-            "HTTP 429 (rate limit or capacity): check model RPM/TPM and "
-            "concurrency limits." + waiting
-            + " Retry manually when allowed; the Lite cache is reusable. "
-              "No automatic retry was made."
-        )
-    if code in (401, 403):
-        return f"HTTP {code}: API authorization failed; check key and entitlement."
-    if code == 404:
-        return "HTTP 404: model or Chat Completions endpoint not found."
-    if code in (500, 502, 503, 504):
-        return f"HTTP {code}: provider temporarily unavailable; request cost may already apply."
-    return f"Model service rejected the request (HTTP {code}); check provider/model/permissions."
+        elif any(term in error_name for term in ("tpm", "tokenratelimit")):
+            problem = (
+                "Model-specific TPM/token reservation limit. The Pro input "
+                "plus requested maximum output may exceed rate limits. "
+                "Check model TPM settings and reduce output reservation "
+                "before choosing to retry."
+            )
+        elif any(term in compact_error_name for term in ("rpm", "ratelimit", "ratelimitexceeded")):
+            problem = "Provider request rate limit. Wait for the retry window or reduce concurrency."
+        elif "overload" in error_name or "capacity" in error_name:
+            problem = "Provider/model capacity is temporarily exhausted."
+        else:
+            problem = (
+                "Provider refused this request; may be model-specific TPM/RPM, "
+                "Agent Plan quota, entitlement or temporary capacity. "
+                "Check the provider's safe error code and request ID."
+            )
+        return (f"HTTP 429: {problem}{retry_seconds}{code_label}"
+                f"{model_label}{id_label} No automatic paid retry was made; "
+                "Lite cache remains reusable.")
+
+    if status in (401, 403):
+        problem = "API authorization/entitlement failed; check key and model access."
+    elif status in (400, 404, 422):
+        problem = "Request parameters, model ID or API path were rejected."
+    elif status in (500, 502, 503, 504):
+        problem = "Provider server temporarily failed; request might still be billed."
+    else:
+        problem = "Provider declined the request; check model configuration."
+    return f"HTTP {status}: {problem}{code_label}{model_label}{id_label}"
 
 
 class OpenAICompatibleClient:
@@ -133,7 +175,7 @@ class OpenAICompatibleClient:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            raise ModelRequestError(_http_error_message(exc)) from None
+            raise ModelRequestError(_http_error_message(exc, model=model)) from None
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, TimeoutError):
@@ -153,8 +195,18 @@ class OpenAICompatibleClient:
         try:
             choice = response_data["choices"][0]
             if choice.get("finish_reason") == "length":
+                usage = response_data.get("usage", {})
+                details = usage.get("completion_tokens_details", {}) if isinstance(usage, dict) else {}
+                thought = details.get("reasoning_tokens") if isinstance(details, dict) else None
+                reasoning_note = (
+                    f" (reasoning_tokens={thought})"
+                    if type(thought) is int and 0 <= thought <= 1000000 else ""
+                )
                 raise ModelRequestError(
-                    "Model output reached max_completion_tokens and was truncated; no incomplete result was saved."
+                    "Model reached max_completion_tokens before completing valid JSON"
+                    + reasoning_note
+                    + ". The provider may have spent part of the budget reasoning. "
+                      "No incomplete result was saved; no automatic paid retry."
                 )
             content = choice["message"]["content"]
         except ModelRequestError:
@@ -167,5 +219,9 @@ class OpenAICompatibleClient:
                 item.get("text", "") for item in content if isinstance(item, dict)
             )
         if not isinstance(content, str) or not content.strip():
-            raise ModelRequestError("Model returned an empty response.")
+            raise ModelRequestError(
+                "Model returned no final text (reasoning-only/empty content). "
+                "Try an appropriate non-reasoning or lower-effort model, or "
+                "check output token budget. No automatic retry was made."
+            )
         return content.strip()

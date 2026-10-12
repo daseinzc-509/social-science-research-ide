@@ -16,7 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ...config import Settings, save_local_environment
@@ -153,6 +153,160 @@ def _verify_pdf(pdf: Path, sha256: str) -> None:
         raise HTTPException(409, "PDF 内容与导入时不同，已拒绝发送图像。")
 
 
+# `max_completion_tokens` is a combined budget for reasoning + final answer.
+# Previous 1100 tokens could be entirely consumed by "thinking" on reasoning
+# models, leaving message.content=null and finish_reason=length.
+# We still allow only ONE potentially billed request per explicit user click.
+VISION_MAX_COMPLETION_TOKENS = 4096
+VISION_RESPONSE_LIMIT_BYTES = 2_000_000
+
+
+def _safe_code(value: object) -> str:
+    """Only expose provider-defined identifiers, never raw response/prompt text."""
+    import re
+
+    if not isinstance(value, (str, int)):
+        return ""
+    as_text = str(value)
+    return as_text if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", as_text) else ""
+
+
+def _safe_request_id(headers: object) -> str:
+    try:
+        for header in ("x-request-id", "x-tt-logid", "x-requestid"):
+            identifier = _safe_code(headers.get(header, ""))
+            if identifier:
+                return identifier
+    except (TypeError, AttributeError):
+        pass
+    return ""
+
+
+def _read_text_content(value: object) -> str:
+    """Accept normal Chat Completions text and text-containing content parts."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") not in {"text", "output_text"}:
+                continue
+            text = item.get("text")
+            if isinstance(text, dict):  # some providers return {"value": "..."}
+                text = text.get("value")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        return "\n".join(parts)
+    return ""
+
+
+def _usage_summary(usage: object) -> str:
+    if not isinstance(usage, dict):
+        return ""
+    bits = []
+    output = usage.get("completion_tokens")
+    if isinstance(output, int) and 0 <= output < 1_000_000:
+        bits.append(f"输出={output}tokens")
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        reasoning = details.get("reasoning_tokens")
+        if isinstance(reasoning, int) and 0 <= reasoning < 1_000_000:
+            bits.append(f"其中思考={reasoning}tokens")
+    return "；".join(bits)
+
+
+def _extract_vision_response(reply: object, *, model: str,
+                             request_id: str = "") -> str:
+    """Parse provider replies while treating reasoning as *not* a final answer.
+
+    The old implementation swallowed missing/null content, truncated JSON,
+    schema differences and model reasoning exhaustion into a misleading
+    "does not support image_url" HTTP 502.
+    """
+    suffix = f"；请求ID={request_id}" if request_id else ""
+    model_name = _safe_code(model) or "configured-vision-model"
+    label = f"视觉模型 {model_name}"
+    if not isinstance(reply, dict):
+        raise HTTPException(
+            502, f"{label}返回非对象 JSON，无法提取图像说明{suffix}。"
+        )
+
+    provider_error = reply.get("error")
+    if isinstance(provider_error, dict):
+        code = _safe_code(provider_error.get("code")) or _safe_code(
+            provider_error.get("type")
+        ) or "unknown"
+        raise HTTPException(
+            502, f"{label}返回服务商错误码 {code}（即使 HTTP 状态为 200）；"
+                 f"请检查模型权限及图片输入能力{suffix}。"
+        )
+
+    choices = reply.get("choices")
+    if not isinstance(choices, list) or not choices:
+        # The configured endpoint is expected to return Chat Completions.
+        # Some gateways return Responses-like output; accept only explicit
+        # final textual content, never `reasoning`/`analysis` strings.
+        alternate = _read_text_content(reply.get("output_text"))
+        if not alternate and isinstance(reply.get("output"), list):
+            alternate = "\n".join(
+                _read_text_content(block.get("content"))
+                for block in reply["output"]
+                if isinstance(block, dict)
+                and block.get("type") == "message"
+            ).strip()
+        if alternate:
+            return alternate[:8000]
+        raise HTTPException(
+            502, f"{label}返回的不是标准 Chat Completions 结果"
+                 f"（缺少 choices），检查 Base URL 和 API 接口类型{suffix}。"
+        )
+
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message")
+    if not isinstance(message, dict):
+        raise HTTPException(
+            502, f"{label}没有返回 assistant 消息，无法生成图片说明{suffix}。"
+        )
+    content = _read_text_content(message.get("content"))
+    if content:
+        return content[:8000]
+
+    reason = _safe_code(first.get("finish_reason"))
+    usage = _usage_summary(reply.get("usage"))
+    metadata = "；".join(x for x in (
+        f"finish_reason={reason}" if reason else "",
+        usage,
+    ) if x)
+
+    if reason == "length":
+        hint = (
+            "模型已达到生成上限，可能把输出 tokens 耗在了思考过程，"
+            "导致最终 content 为空。当前一次请求的推理＋回答预算"
+            f"为 {VISION_MAX_COMPLETION_TOKENS} tokens；"
+            "可改用低思考/非推理的视觉模型或进一步调整预算。"
+        )
+    elif reason == "content_filter":
+        hint = "模型输出被内容审核拦截；不应将其视为图片识别成功。"
+    elif reason == "tool_calls":
+        hint = "模型请求了工具，而当前单图识别不支持工具调用。"
+    elif bool(message.get("refusal")):
+        hint = "模型拒绝提供图片描述。"
+    elif message.get("reasoning_content") or message.get("reasoning"):
+        hint = (
+            "模型只返回了思考内容，没有可展示的最终回答；"
+            "SRA 不会把推理内容伪装成已完成的图像分析。"
+        )
+    else:
+        hint = (
+            "模型返回了空的最终回答。请核实 Vision Model ID "
+            "确实支持 image_url 输入，以及当前服务是否正确处理图片。"
+        )
+    additional = f"（{metadata}）" if metadata else ""
+    raise HTTPException(502, f"{label}：{hint}{additional}{suffix}")
+
+
 def _request_vision(key: str, url: str, model: str, image_bytes: bytes) -> str:
     request_body = {
         "model": model,
@@ -164,17 +318,20 @@ def _request_vision(key: str, url: str, model: str, image_bytes: bytes) -> str:
             )},
             {"role": "user", "content": [
                 {"type": "text", "text": (
-                    "请用中文识别这张学术图片/统计图中的可辨识标题、图例、轴标签、数字和主要关系。"
-                    "不确定处写[不清楚]，不要猜测。说明此结果必须与原 PDF 核对。"
+                    "请直接、简洁地用中文识别这张学术图片/统计图中的可辨识标题、"
+                    "图例、轴标签、数字和主要关系。不确定处写[不清楚]，不要猜测。"
+                    "只输出最终图像描述，不必写详细推理过程。"
+                    "说明此结果必须与原 PDF 核对。"
                 )},
                 {"type": "image_url", "image_url": {
-                    "url": "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii"),
+                    "url": "data:image/jpeg;base64,"
+                           + base64.b64encode(image_bytes).decode("ascii"),
                     "detail": "high",
                 }},
             ]},
         ],
         "stream": False,
-        "max_completion_tokens": 1100,
+        "max_completion_tokens": VISION_MAX_COMPLETION_TOKENS,
     }
     request = Request(
         url.rstrip("/") + "/chat/completions",
@@ -186,23 +343,73 @@ def _request_vision(key: str, url: str, model: str, image_bytes: bytes) -> str:
         },
         method="POST",
     )
+
     try:
         with urlopen(request, timeout=180) as response:
-            reply = json.loads(response.read(200_000).decode("utf-8"))
-        content = reply["choices"][0]["message"]["content"]
-        if isinstance(content, list):
-            content = "\n".join(
-                str(item.get("text", "")) for item in content if isinstance(item, dict)
+            request_id = _safe_request_id(getattr(response, "headers", None))
+            raw = response.read(VISION_RESPONSE_LIMIT_BYTES + 1)
+        if len(raw) > VISION_RESPONSE_LIMIT_BYTES:
+            raise HTTPException(
+                502, "视觉模型响应过大，超过本地安全上限；"
+                     "不会截断后当作不支持图片处理。"
             )
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("empty response")
-        return content.strip()[:8000]
+        try:
+            reply = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise HTTPException(
+                502, "视觉模型未返回完整、可解析的 JSON 响应；"
+                     "请检查是否使用 Chat Completions Base URL。"
+            ) from None
+        return _extract_vision_response(
+            reply, model=model, request_id=request_id
+        )
     except HTTPError as exc:
-        raise HTTPException(502, _http_error_message(exc)) from None
+        # HTTP errors mean the provider explicitly rejected the request.
+        # Existing classifier distinguishes quota vs throttling, never leaks
+        # provider's raw message (which might contain private PDF text).
+        suffix = _safe_request_id(getattr(exc, "headers", None))
+        request_note = f"；请求ID={suffix}" if suffix else ""
+        raise HTTPException(
+            502, _http_error_message(exc) + request_note
+        ) from None
     except (URLError, TimeoutError, OSError):
-        raise HTTPException(502, "视觉模型请求网络失败或超时，可能已产生费用；请先检查服务商记录。") from None
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "视觉模型没有返回可用的图像说明，请核对模型是否支持 image_url 输入。") from None
+        raise HTTPException(
+            502, "视觉模型请求网络失败或超时，可能已经产生费用；"
+                 "请先检查服务商记录，不要连续点击重试。"
+        ) from None
+
+
+@figure_router.get("/{figure_id}/preview")
+def preview_figure(
+    paper_id: str,
+    figure_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    """Local-only, zero-token preview of exactly what can later be sent.
+
+    The desktop's existing authenticated localhost API is responsible for
+    authorizing this endpoint. No external model request is made.
+    """
+    paper = services.repository.get_paper(paper_id)
+    if paper is None:
+        raise HTTPException(404, "找不到这篇论文。")
+    figure = next(
+        (item for item in services.repository.get_figures(paper_id)
+         if item.id == figure_id), None
+    )
+    if figure is None or figure.bbox is None:
+        raise HTTPException(404, "该图片没有可核验的 PDF 区域。")
+    pdf = services.papers.pdf_path(paper_id)
+    _verify_pdf(pdf, paper.sha256)
+    image = _render_figure(pdf, figure.page_number, figure.bbox)
+    return Response(
+        content=image,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, private",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @figure_router.post("/{figure_id}/analyze")
