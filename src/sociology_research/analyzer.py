@@ -205,6 +205,7 @@ class PaperAnalysisPipeline:
                 evidence_map,
                 source_map,
                 warnings,
+                raw_span_registry=span_registry,
             )
             resolved = _resolve_model_claims(
                 extracted.basic_facts,
@@ -1334,6 +1335,12 @@ def _metadata_value_supported_by_evidence(
     # to fit inside the model-selected sentence fragment. This fixes title/author false
     # negatives while still rejecting translations or aliases absent from the PDF text.
     if field_name in {"title", "authors", "journal", "doi"}:
+        if field_name == "journal":
+            # A citation to *some other paragraph* on the same page is not
+            # valid journal evidence. The first-page re-anchoring pass will
+            # locate an exact SourceBlock when one actually exists.
+            needle = _normalize_marker(str(value))
+            return bool(needle and needle in evidence_normalized)
         pages = {reference.page_number for reference in claim.evidence}
         page_text = " ".join(
             block.text
@@ -1372,9 +1379,11 @@ def _metadata_value_supported_by_evidence(
 
     if field_name in {"volume", "issue"}:
         text = unicodedata.normalize("NFKC", str(value)).strip()
-        direct = _normalize_marker(text)
-        if direct and direct in evidence_normalized:
-            return True
+        # An isolated number ('1') found in a paragraph discussing research
+        # data does not establish "Volume 1" or "Issue 1".
+        if not re.fullmatch(r"\d+", text):
+            direct = _normalize_marker(text)
+            return bool(direct and direct in evidence_normalized)
         if re.fullmatch(r"\d+", text):
             target = str(int(text))
             if field_name == "issue":
@@ -1403,6 +1412,8 @@ def _resolve_metadata_facts(
     evidence_map: dict[str, EvidenceSpan],
     source_map: dict[str, SourceBlock],
     warnings: list[str],
+    *,
+    raw_span_registry: dict[str, EvidenceSpan] | None = None,
 ) -> list[tuple[str, object, ExtractedClaim]]:
     candidates: list[tuple[str, object, ExtractedClaim]] = []
     for fact in facts:
@@ -1425,13 +1436,47 @@ def _resolve_metadata_facts(
             stage="Lite metadata",
             token_prefix="E",
         )[0]
-        if claim.verification == VerificationStatus.SUPPORTED and not _metadata_value_supported_by_evidence(
-            fact.field_name, value, claim, source_map
-        ):
-            warnings.append(
-                f"Lite: metadata field '{fact.field_name}' value is not supported by its selected evidence and was omitted."
+        well_anchored = (
+            claim.verification == VerificationStatus.SUPPORTED
+            and _metadata_value_supported_by_evidence(
+                fact.field_name, value, claim, source_map
             )
-            claim = claim.model_copy(update={"verification": VerificationStatus.NEEDS_REVIEW})
+        )
+        # Treat bibliographic identifiers differently from research claims:
+        # a number cited in the introduction may really say "2021" while
+        # still NOT proving the journal's publication year. When the original
+        # source ledger is available, require a masthead-context match.
+        sensitive = {"journal", "year", "volume", "issue", "pages"}
+        recovered = (
+            _reanchor_lite_bibliography(
+                fact.field_name, value, source_map, raw_span_registry
+            )
+            if raw_span_registry is not None and fact.field_name in sensitive
+            else None
+        )
+        if recovered is not None:
+            if (
+                not well_anchored
+                or {
+                    e.evidence_id for e in claim.evidence
+                } != {e.evidence_id for e in recovered.evidence}
+            ):
+                warnings.append(
+                    f"Lite: metadata field '{fact.field_name}' was re-anchored "
+                    "to an exact first-page SourceBlock after evidence review."
+                )
+            claim = recovered
+        elif not well_anchored or (
+            raw_span_registry is not None and fact.field_name in sensitive
+        ):
+            if claim.verification == VerificationStatus.SUPPORTED:
+                warnings.append(
+                    f"Lite: metadata field '{fact.field_name}' value is not "
+                    "verified by the journal masthead; left unverified."
+                )
+                claim = claim.model_copy(
+                    update={"verification": VerificationStatus.NEEDS_REVIEW}
+                )
         candidates.append((fact.field_name, value, claim))
     return candidates
 
@@ -1524,6 +1569,441 @@ def _split_keyword_segments(text: str) -> list[str]:
             if item:
                 items.append(item)
     return items
+
+
+
+# A bibliographic masthead should be treated as a source of deterministic PDF
+# evidence, not as ordinary article prose and not as a free-form LLM guess.
+_BIBLIO_YEAR = r"(?:19|20)\d{2}"
+_BIBLIO_VOLUME_RE = re.compile(
+    r"(?:第\s*(?P<zh>\d{1,3})\s*卷|"
+    r"\bvol(?:ume)?\.?\s*[:：]?\s*(?P<en>\d{1,3})(?!\d)|"
+    r"卷\s*号\s*[:：]\s*(?P<label>\d{1,3})(?!\d))",
+    re.I,
+)
+_BIBLIO_ISSUE_RE = re.compile(
+    r"(?:第\s*(?P<zh>\d{1,3})\s*期|"
+    r"\bno\.?\s*[:：]?\s*(?P<en>\d{1,3})(?!\d)|"
+    r"\bissue\s*[:：]?\s*(?P<enlong>\d{1,3})(?!\d)|"
+    r"期\s*号\s*[:：]\s*(?P<label>\d{1,3})(?!\d))",
+    re.I,
+)
+_BIBLIO_PAGES_RE = re.compile(
+    r"(?:页\s*码(?:范围)?|起止页(?:码)?|"
+    r"\bpages?\b|\bpp?\.)(?:\s*[:：.]\s*|\s+)"
+    r"(?P<start>\d{1,5})\s*[-–—~～]\s*(?P<end>\d{1,5})(?!\d)",
+    re.I,
+)
+_BIBLIO_CITATION_RE = re.compile(
+    rf"(?P<year>{_BIBLIO_YEAR})\s*[,，]\s*"
+    r"(?P<volume>\d{1,3})\s*"
+    r"\(\s*(?P<issue>\d{1,3})\s*\)\s*"
+    r"[:：]\s*(?P<start>\d{1,5})\s*[-–—]\s*(?P<end>\d{1,5})(?!\d)"
+)
+_BIBLIO_JOURNAL_LABEL = re.compile(
+    r"(?:^|[\n\r])\s*(?:来源期刊|期刊名称|期刊名|刊物名称|刊名|"
+    r"Journal\s*(?:name|title)?|Published\s+in)\s*[:：]\s*"
+    r"(?P<value>[^\n\r;；|]{2,100})",
+    re.I,
+)
+_BIBLIO_JOURNAL_CUES = re.compile(
+    r"(?:学报|学刊|杂志|期刊|研究|论坛|评论|社会科学|"
+    r"人口与经济|人口研究|journal|review|quarterly|bulletin|annals|"
+    r"studies|research|magazine)",
+    re.I,
+)
+
+
+def _front_biblio_blocks(blocks: list[SourceBlock]) -> list[SourceBlock]:
+    """Small source-linked first/second-page header pool, never references."""
+    result: list[SourceBlock] = []
+    for block in blocks:
+        if block.page_number > 2 or block.table_rows is not None:
+            continue
+        if block.role in {"table", "footnote"}:
+            continue
+        text = unicodedata.normalize("NFKC", block.text).strip()
+        # A paper TITLE may discuss an issue, volume or year as its research
+        # subject; those numbers are not its own journal citation.
+        if (block.source_label or "").casefold() == "docling:title" and not (
+            _BIBLIO_JOURNAL_LABEL.search(text)
+        ):
+            continue
+        if not (2 <= len(text) <= 360):
+            continue
+        if re.match(r"^(?:参考文献|References)\b", text, re.I):
+            continue
+        source_label = (block.source_label or "").casefold()
+        labeled = bool(
+            _BIBLIO_JOURNAL_LABEL.search(text)
+            or re.search(r"^(?:卷号|期号|页码|出版年|发表年份)\s*[:：]", text)
+        )
+        if "page_footer" in source_label:
+            continue
+        is_header = (
+            "page_header" in source_label
+            or block.role == "furniture"
+            and "footer" not in source_label
+            or block.role == "front_matter"
+            and block.bbox is not None and block.bbox[1] <= 300
+            or labeled
+            or block.bbox is not None
+            and block.bbox[1] <= (180.0 if block.page_number == 1 else 120.0)
+        )
+        if is_header:
+            result.append(block)
+    return sorted(
+        result,
+        key=lambda b: (
+            b.page_number,
+            b.bbox[1] if b.bbox is not None else 9999,
+            b.bbox[0] if b.bbox is not None else 9999,
+            b.id,
+        ),
+    )
+
+
+def _biblio_text(text: str) -> str:
+    return re.sub(r"[ \t]+", " ", unicodedata.normalize("NFKC", text))
+
+
+def _clean_journal_masthead(value: str) -> str:
+    value = _biblio_text(value).strip()
+    value = re.split(
+        rf"(?<!\d){_BIBLIO_YEAR}\s*年?|"
+        r"\bvol(?:ume)?\.?\s*\d|"
+        r"\b(?:no\.?|issue)\s*\d|"
+        r"第\s*\d+\s*[卷期]|"
+        r"(?:doi|页码|pp\.)\s*[:：]?",
+        value,
+        maxsplit=1, flags=re.I,
+    )[0].strip(" \t,，;；:：·|-")
+    value = value.strip("《》\"' ")
+    if not (2 <= len(value) <= 76):
+        return ""
+    if any(c.isdigit() for c in value):
+        return ""
+    if re.search(
+        r"^(?:摘要|关键词|作者|收稿|基金|doi|issn|cn|第.+章|图\d+|表\d+|"
+        r"special\s+(?:issue|section)|abstract|keywords?)\b",
+        value, re.I
+    ):
+        return ""
+    return value
+
+
+def _front_biblio_value_matches(field: str, value: object, text: str) -> bool:
+    """For numeric identifiers require journal-context markup, not any digit."""
+    normalized = _biblio_text(text)
+    needle = _normalize_marker(str(value))
+    if field == "journal":
+        return bool(needle and needle in _normalize_marker(normalized))
+    if field == "volume":
+        for m in _BIBLIO_VOLUME_RE.finditer(normalized):
+            for raw in m.groupdict().values():
+                if raw and str(value).isdigit() and int(raw) == int(str(value)):
+                    return True
+        citation = _BIBLIO_CITATION_RE.search(normalized)
+        return bool(
+            citation and str(value).isdigit()
+            and int(citation["volume"]) == int(str(value))
+        )
+    if field == "issue":
+        for m in _BIBLIO_ISSUE_RE.finditer(normalized):
+            if re.search(r"总\s*$", normalized[max(0, m.start()-5):m.start()]):
+                continue
+            for raw in m.groupdict().values():
+                if raw and str(value).isdigit() and int(raw) == int(str(value)):
+                    return True
+        # Explicit year(issue):pages citation notation.
+        m = _BIBLIO_CITATION_RE.search(normalized)
+        return bool(m and str(value).isdigit() and int(m["issue"]) == int(str(value)))
+    if field == "year":
+        if not str(value).isdigit():
+            return False
+        return bool(re.search(
+            rf"(?<!\d){re.escape(str(value))}(?:\s*年)?(?!\d)", normalized
+        ))
+    if field == "pages":
+        numbers = re.findall(r"\d+", str(value))
+        if len(numbers) != 2:
+            return False
+        for m in list(_BIBLIO_PAGES_RE.finditer(normalized)) + list(
+            _BIBLIO_CITATION_RE.finditer(normalized)
+        ):
+            if [str(int(m["start"])), str(int(m["end"]))] == [
+                str(int(v)) for v in numbers
+            ]:
+                return True
+        return False
+    return False
+
+
+def _metadata_references_near_value(
+    field: str, value: object, block: SourceBlock,
+    registry: dict[str, EvidenceSpan],
+) -> list[EvidenceReference]:
+    """Reference a genuine substring of its physical SourceBlock, not its first lines."""
+    spans = sorted(
+        (span for span in registry.values()
+         if span.source_block_id == block.id
+         and span.page_number == block.page_number),
+        key=lambda span: span.start_char,
+    )
+    needle = _normalize_marker(str(value))
+    if not needle:
+        return []
+    matching: list[EvidenceSpan] = []
+    for span in spans:
+        text = _normalize_marker(span.text)
+        if field in {"volume", "issue", "pages"}:
+            ok = _front_biblio_value_matches(field, value, span.text)
+        elif field == "year":
+            ok = bool(re.search(
+                rf"(?<!\d){re.escape(str(value))}(?!\d)", span.text
+            ))
+        else:
+            ok = needle in text
+        if ok:
+            matching.append(span)
+    if not matching:
+        return []
+    # Some sources contain many numbers: choose the exact field-label section.
+    def score(span: EvidenceSpan) -> int:
+        return {
+            "journal": 0,
+            "year": 0,
+            "volume": int(bool(re.search(r"卷|vol(?:ume)?", span.text, re.I))),
+            "issue": int(bool(re.search(r"期|issue|no\.", span.text, re.I))),
+            "pages": int(bool(re.search(r"页码|pages?|pp\.|[:：]", span.text, re.I))),
+        }.get(field, 0)
+    best = max(matching, key=lambda span: (score(span), -span.start_char))
+    return [
+        EvidenceReference(
+            evidence_id=best.id,
+            source_block_id=best.source_block_id,
+            page_number=best.page_number,
+            quote=best.text,
+        )
+    ]
+
+
+def _extract_first_page_bibliography(
+    blocks: list[SourceBlock],
+    span_registry: dict[str, EvidenceSpan],
+) -> list[tuple[str, object, ExtractedClaim]]:
+    """Recover *explicitly printed* masthead fields even if visible only once.
+
+    Page-header/furniture evidence is deliberately allowed. Unlike the
+    repeating-header fallback, we do not require two physical pages when the
+    first-page issue/volume/journal typography is explicit.
+    """
+    front = _front_biblio_blocks(blocks)
+    if not front:
+        return []
+    found: dict[str, tuple[object, SourceBlock]] = {}
+    for block in front:
+        text = _biblio_text(block.text)
+        if re.search(r"(?:^|\n)\s*(?:参考文献|References)\b", text, re.I):
+            continue
+        # A standalone publication year in a real page header is safe. A
+        # year appearing in an article abstract or study sample is not.
+        standalone_year = re.fullmatch(rf"\s*({_BIBLIO_YEAR})\s*年?\s*", text)
+        if standalone_year and (
+            block.role == "furniture"
+            or "page_header" in (block.source_label or "").casefold()
+        ):
+            found.setdefault("year", (int(standalone_year[1]), block))
+
+        quoted = re.search(r"《\s*([^》\n]{2,70})\s*》", text)
+        labeled = _BIBLIO_JOURNAL_LABEL.search(text)
+        has_context = (
+            bool(_BIBLIO_ISSUE_RE.search(text) or _BIBLIO_VOLUME_RE.search(text)
+                 or _BIBLIO_CITATION_RE.search(text))
+            and bool(re.search(rf"(?<!\d){_BIBLIO_YEAR}(?!\d)", text))
+        )
+        journal = ""
+        if labeled:
+            journal = _clean_journal_masthead(labeled["value"])
+        elif quoted and has_context:
+            journal = _clean_journal_masthead(quoted[1])
+        elif has_context:
+            date = re.search(rf"(?<!\d){_BIBLIO_YEAR}(?!\d)", text)
+            if date:
+                journal = _clean_journal_masthead(text[:date.start()])
+                if journal and not (
+                    _BIBLIO_JOURNAL_CUES.search(journal)
+                    or (
+                        block.bbox is not None and block.bbox[1] <= 180
+                        and block.role != "heading" and len(journal) <= 45
+                    )
+                ):
+                    journal = ""
+
+        if not journal and (
+            has_context or _BIBLIO_ISSUE_RE.search(text)
+            or _BIBLIO_VOLUME_RE.search(text)
+        ) and block.bbox is not None:
+            # A separate title/author block must NOT be mistaken for a
+            # journal. Permit only an adjacent Docling page_header/furniture
+            # block, not a normal article heading.
+            neighbors = [
+                other for other in front
+                if other.page_number == block.page_number
+                and other.id != block.id
+                and other.bbox is not None
+                and (
+                    other.role == "furniture"
+                    or "page_header" in (other.source_label or "").casefold()
+                )
+                and abs(other.bbox[1] - block.bbox[1]) <= 105
+            ]
+            neighbors.sort(key=lambda other: (
+                abs(other.bbox[1] - block.bbox[1]), len(other.text)
+            ))
+            for candidate in neighbors:
+                name = _clean_journal_masthead(candidate.text)
+                if name and len(name) <= 65:
+                    journal = name
+                    found.setdefault("journal", (journal, candidate))
+                    break
+        if journal:
+            found.setdefault("journal", (journal, block))
+
+        for volume_match in _BIBLIO_VOLUME_RE.finditer(text):
+            raw = next((v for v in volume_match.groupdict().values() if v), None)
+            if raw:
+                found.setdefault("volume", (str(int(raw)), block))
+                break
+        for issue_match in _BIBLIO_ISSUE_RE.finditer(text):
+            if re.search(r"总\s*$", text[max(0, issue_match.start()-5):issue_match.start()]):
+                continue
+            raw = next((v for v in issue_match.groupdict().values() if v), None)
+            if raw:
+                found.setdefault("issue", (str(int(raw)), block))
+                break
+
+        citation = _BIBLIO_CITATION_RE.search(text)
+        if citation:
+            found.setdefault("volume", (str(int(citation["volume"])), block))
+            found.setdefault("issue", (str(int(citation["issue"])), block))
+            found.setdefault("year", (int(citation["year"]), block))
+        if has_context or labeled or citation:
+            year_match = re.search(rf"(?<!\d)({_BIBLIO_YEAR})(?:\s*年)?(?!\d)", text)
+            if year_match:
+                found.setdefault("year", (int(year_match[1]), block))
+        elif block.bbox is not None and (
+            _BIBLIO_ISSUE_RE.search(text) or _BIBLIO_VOLUME_RE.search(text)
+        ):
+            # Some journals split year, volume and issue into distinct
+            # Docling page_header items. A standalone year within the same
+            # printed masthead band is legitimate, but arbitrary body years
+            # and DOI digits are not.
+            nearby_years = [
+                other for other in front
+                if other.id != block.id
+                and other.page_number == block.page_number
+                and other.bbox is not None
+                and abs(other.bbox[1] - block.bbox[1]) <= 105
+                and re.fullmatch(
+                    rf"\s*({_BIBLIO_YEAR})\s*年?\s*",
+                    _biblio_text(other.text)
+                )
+                and (
+                    other.role == "furniture"
+                    or "page_header" in (other.source_label or "").casefold()
+                )
+            ]
+            if nearby_years:
+                closest = min(
+                    nearby_years,
+                    key=lambda other: abs(other.bbox[1] - block.bbox[1])
+                )
+                match = re.search(_BIBLIO_YEAR, closest.text)
+                if match:
+                    found.setdefault("year", (int(match.group()), closest))
+
+        pages = _BIBLIO_PAGES_RE.search(text)
+        if pages is None and citation is not None:
+            pages = citation
+        if pages:
+            first, last = int(pages["start"]), int(pages["end"])
+            if 1 <= first <= last <= 99999 and last - first <= 600:
+                found.setdefault("pages", (f"{first}-{last}", block))
+
+    # If metadata appears in a dedicated issue block while the journal is a
+    # separate page-header text block, only accept that adjacent exact source.
+    candidates: list[tuple[str, object, ExtractedClaim]] = []
+    for field in ("journal", "year", "volume", "issue", "pages"):
+        if field not in found:
+            continue
+        value, block = found[field]
+        if not _front_biblio_value_matches(field, value, block.text):
+            # For an explicitly labeled journal the name may have been
+            # combined from whitespace; never manufacture an evidence quote.
+            continue
+        evidence = _metadata_references_near_value(
+            field, value, block, span_registry
+        )
+        claim = _layout_claim(field, value, evidence)
+        if claim:
+            candidates.append(claim)
+    return candidates
+
+
+def _reanchor_lite_bibliography(
+    field: str, value: object,
+    source_map: dict[str, SourceBlock],
+    registry: dict[str, EvidenceSpan],
+) -> ExtractedClaim | None:
+    """Repair an LLM-selected wrong evidence ID only when the PDF verifies it.
+
+    In particular a bare digit appearing in an unrelated paragraph cannot
+    establish journal volume, issue, or printed page range.
+    """
+    if field not in {"journal", "year", "volume", "issue", "pages"}:
+        return None
+    front = _front_biblio_blocks(list(source_map.values()))
+    for block in front:
+        text = _biblio_text(block.text)
+        if not _front_biblio_value_matches(field, value, text):
+            continue
+        if field == "journal":
+            if not (
+                _BIBLIO_JOURNAL_LABEL.search(text)
+                or block.role == "furniture"
+                or "page_header" in (block.source_label or "").casefold()
+                or (
+                    _BIBLIO_JOURNAL_CUES.search(str(value))
+                    and re.search(rf"(?<!\d){_BIBLIO_YEAR}(?!\d)", text)
+                    and (
+                        _BIBLIO_ISSUE_RE.search(text)
+                        or _BIBLIO_VOLUME_RE.search(text)
+                    )
+                )
+            ):
+                continue
+        elif field == "year":
+            # A random study year or publication date in the article body
+            # is not sufficient for a journal's year metadata.
+            if not (
+                _BIBLIO_JOURNAL_LABEL.search(text)
+                or _BIBLIO_VOLUME_RE.search(text)
+                or _BIBLIO_ISSUE_RE.search(text)
+                or _BIBLIO_CITATION_RE.search(text)
+                or re.search(r"^(?:出版年份|发表年份|出版年)\s*[:：]", text)
+                or (
+                    re.fullmatch(rf"\s*{_BIBLIO_YEAR}\s*年?\s*", text)
+                    and (block.role == "furniture"
+                         or "page_header" in (block.source_label or "").casefold())
+                )
+            ):
+                continue
+        evidence = _metadata_references_near_value(field, value, block, registry)
+        claim = _layout_claim(field, value, evidence)
+        if claim:
+            return claim[2]
+    return None
 
 
 def _derive_front_matter_metadata(
@@ -2004,6 +2484,7 @@ def _derive_layout_metadata_candidates(
     return [
         *_derive_front_matter_metadata(blocks, span_registry),
         *_derive_abstract_metadata(blocks, span_registry),
+        *_extract_first_page_bibliography(blocks, span_registry),
         *_derive_repeating_header_metadata(blocks, span_registry),
         *_derive_page_range_metadata(blocks, span_registry),
     ]
