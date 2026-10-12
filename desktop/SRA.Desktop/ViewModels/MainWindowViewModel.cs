@@ -526,6 +526,35 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoTables));
     }
 
+    public async Task AnalyzeFigureAsync(VisualSourceItem figure)
+    {
+        if (SelectedPaper is null)
+        {
+            figure.AiResult = "请先选择论文。";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(figure.SourceId))
+        {
+            figure.AiResult = "没有可信的图片来源 ID，无法发送。";
+            return;
+        }
+        var paperId = SelectedPaper.Id;
+        figure.AiResult = "正在分析所选图片区域（可能产生 API 费用）…";
+        try
+        {
+            var response = await _api.AnalyzeFigureAsync(paperId, figure.SourceId);
+            if (SelectedPaper?.Id != paperId)
+                return;
+            var description = JsonRead.Text(response, "description");
+            figure.AiResult = "AI 推断 · 未核验（请对照 PDF）："
+                + Environment.NewLine + description;
+        }
+        catch (Exception exc)
+        {
+            figure.AiResult = "图片分析失败：" + exc.Message;
+        }
+    }
+
     private void ProjectVisuals(JsonElement card)
     {
         Formulas.Clear();

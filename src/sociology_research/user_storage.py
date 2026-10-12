@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any
 
 _APP = "SRA"
-_PRIVATE_KEYS = frozenset({"SRA_API_KEY", "SRA_LITE_API_KEY", "SRA_PRO_API_KEY"})
+_PRIVATE_KEYS = frozenset({
+    "SRA_API_KEY", "SRA_LITE_API_KEY", "SRA_PRO_API_KEY", "SRA_VISION_API_KEY"
+})
 
 
 def user_root() -> Path:

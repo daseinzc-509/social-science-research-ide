@@ -429,6 +429,44 @@ public sealed class SraApiClient : IDisposable
             $"api/v1/papers/{Uri.EscapeDataString(paperId)}/region-review/reanalysis/reports/{Uri.EscapeDataString(analysisId)}",
             cancellationToken);
 
+    /// <summary>Visual settings; independent of Lite/Pro cost-sensitive analysis.</summary>
+    public Task<JsonElement> GetVisualSettingsAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>("api/v1/settings/visual", cancellationToken);
+
+    /// <summary>Save per-user formula/vision settings through protected storage.</summary>
+    public async Task<JsonElement> SaveVisualSettingsAsync(
+        bool formulaEnabled, bool visionEnabled, bool useProConnection,
+        string? visionApiKey, string visionApiBaseUrl, string visionModel,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            "api/v1/settings/visual",
+            new
+            {
+                formula_enabled = formulaEnabled,
+                vision_enabled = visionEnabled,
+                use_pro_connection = useProConnection,
+                vision_api_key = string.IsNullOrWhiteSpace(visionApiKey) ? null : visionApiKey.Trim(),
+                vision_api_base_url = visionApiBaseUrl?.Trim() ?? "",
+                vision_model = visionModel?.Trim() ?? "",
+            },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    /// <summary>Explicit, paid remote analysis for a single source-linked figure crop.</summary>
+    public async Task<JsonElement> AnalyzeFigureAsync(
+        string paperId, string figureId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/figures/{Uri.EscapeDataString(figureId)}/analyze",
+            new { approve_external_send = true },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
     private async Task<string> GetTextAsync(string relativeUrl, CancellationToken cancellationToken)
     {
         using var response = await _http.GetAsync(relativeUrl, cancellationToken);

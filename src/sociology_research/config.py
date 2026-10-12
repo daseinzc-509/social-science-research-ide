@@ -13,6 +13,10 @@ from .user_storage import (read_user_preferences, read_user_secrets,
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _setting_on(value: str | None) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     """Model connection settings with independent Lite and Pro endpoints.
@@ -34,6 +38,48 @@ class Settings:
     lite_api_base_url: str | None = None
     pro_api_key: str | None = None
     pro_api_base_url: str | None = None
+
+    # Optional document/vision capabilities. False by default to avoid
+    # unexpected weight downloads or external model charges.
+    formula_enrichment: str | None = None
+    vision_enabled: str | None = None
+    vision_use_pro_connection: str | None = None
+    vision_api_key: str | None = None
+    vision_api_base_url: str | None = None
+    vision_model: str | None = None
+
+    @property
+    def formula_enrichment_enabled(self) -> bool:
+        return _setting_on(self.formula_enrichment)
+
+    @property
+    def vision_analysis_enabled(self) -> bool:
+        return _setting_on(self.vision_enabled)
+
+    @property
+    def uses_pro_vision_connection(self) -> bool:
+        return self.vision_use_pro_connection is None or _setting_on(self.vision_use_pro_connection)
+
+    @property
+    def effective_vision_api_key(self) -> str | None:
+        return self.effective_pro_api_key if self.uses_pro_vision_connection else self.vision_api_key
+
+    @property
+    def effective_vision_api_base_url(self) -> str | None:
+        return self.effective_pro_api_base_url if self.uses_pro_vision_connection else self.vision_api_base_url
+
+    def require_vision_configuration(self) -> tuple[str, str, str]:
+        if not self.vision_analysis_enabled:
+            raise ValueError("Visual AI analysis is disabled in Settings.")
+        return _require_stage_configuration(
+            "Vision",
+            self.effective_vision_api_key,
+            self.effective_vision_api_base_url,
+            self.vision_model,
+            key_name="SRA_VISION_API_KEY or existing Pro API key",
+            url_name="SRA_VISION_API_BASE_URL or existing Pro Base URL",
+            model_name="SRA_VISION_MODEL",
+        )
 
     @property
     def effective_lite_api_key(self) -> str | None:
@@ -76,6 +122,12 @@ class Settings:
             lite_api_base_url=value("SRA_LITE_API_BASE_URL"),
             pro_api_key=value("SRA_PRO_API_KEY"),
             pro_api_base_url=value("SRA_PRO_API_BASE_URL"),
+            formula_enrichment=value("SRA_FORMULA_ENRICHMENT"),
+            vision_enabled=value("SRA_VISION_ENABLED"),
+            vision_use_pro_connection=value("SRA_VISION_USE_PRO"),
+            vision_api_key=value("SRA_VISION_API_KEY"),
+            vision_api_base_url=value("SRA_VISION_API_BASE_URL"),
+            vision_model=value("SRA_VISION_MODEL"),
         )
 
     @classmethod
@@ -90,6 +142,12 @@ class Settings:
             lite_api_base_url=clean("SRA_LITE_API_BASE_URL"),
             pro_api_key=clean("SRA_PRO_API_KEY"),
             pro_api_base_url=clean("SRA_PRO_API_BASE_URL"),
+            formula_enrichment=clean("SRA_FORMULA_ENRICHMENT"),
+            vision_enabled=clean("SRA_VISION_ENABLED"),
+            vision_use_pro_connection=clean("SRA_VISION_USE_PRO"),
+            vision_api_key=clean("SRA_VISION_API_KEY"),
+            vision_api_base_url=clean("SRA_VISION_API_BASE_URL"),
+            vision_model=clean("SRA_VISION_MODEL"),
         )
 
     def require_lite_configuration(self) -> tuple[str, str, str]:
@@ -136,10 +194,14 @@ def local_env_path() -> Path:
     return _PROJECT_ROOT / ".env"
 
 
-_SECRET_FIELDS = frozenset({"SRA_API_KEY", "SRA_LITE_API_KEY", "SRA_PRO_API_KEY"})
+_SECRET_FIELDS = frozenset({
+    "SRA_API_KEY", "SRA_LITE_API_KEY", "SRA_PRO_API_KEY", "SRA_VISION_API_KEY"
+})
 _MODEL_FIELDS = frozenset({
     "SRA_API_KEY", "SRA_API_BASE_URL", "SRA_LITE_MODEL", "SRA_PRO_MODEL",
     "SRA_LITE_API_KEY", "SRA_LITE_API_BASE_URL", "SRA_PRO_API_KEY", "SRA_PRO_API_BASE_URL",
+    "SRA_FORMULA_ENRICHMENT", "SRA_VISION_ENABLED", "SRA_VISION_USE_PRO",
+    "SRA_VISION_API_KEY", "SRA_VISION_API_BASE_URL", "SRA_VISION_MODEL",
 })
 
 
@@ -208,6 +270,12 @@ def save_local_environment(values: dict[str, str | None]) -> None:
         "SRA_LITE_API_BASE_URL": current.lite_api_base_url or "",
         "SRA_PRO_API_KEY": current.pro_api_key or "",
         "SRA_PRO_API_BASE_URL": current.pro_api_base_url or "",
+        "SRA_FORMULA_ENRICHMENT": current.formula_enrichment or "",
+        "SRA_VISION_ENABLED": current.vision_enabled or "",
+        "SRA_VISION_USE_PRO": current.vision_use_pro_connection or "",
+        "SRA_VISION_API_KEY": current.vision_api_key or "",
+        "SRA_VISION_API_BASE_URL": current.vision_api_base_url or "",
+        "SRA_VISION_MODEL": current.vision_model or "",
     }
     merged.update(updates)
 

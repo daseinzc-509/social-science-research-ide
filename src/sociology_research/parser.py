@@ -68,7 +68,15 @@ class DoclingDocumentParser:
         except importlib.metadata.PackageNotFoundError:
             version = "missing"
         # Formula enrichment is opt-in: it may require additional model weights.
-        self.formula_enabled = _enabled("SRA_DOCLING_FORMULA_ENRICHMENT")
+        # UI preferences are persisted in the per-user config store. A process
+        # environment variable can override them for reproducible CI/dev runs.
+        value = os.environ.get("SRA_DOCLING_FORMULA_ENRICHMENT")
+        if value is None:
+            value = os.environ.get("SRA_FORMULA_ENRICHMENT")
+        if value is None:
+            from .user_storage import read_user_preferences
+            value = read_user_preferences().get("SRA_FORMULA_ENRICHMENT", "0")
+        self.formula_enabled = str(value).strip().casefold() in {"1", "true", "yes", "on"}
         option = "formula" if self.formula_enabled else "default"
         # Parser version changes intentionally invalidate stale evidence caches on reparse.
         self.version = f"docling-only-v2-table-spans-{option}:{version}"

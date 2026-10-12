@@ -207,6 +207,7 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center" Margin="0,0,0,0">
               <Button Content="{Binding AnalyzeButtonText}" Classes="primary" IsEnabled="{Binding CanRunPaperActions}" Click="Analyze_Click" />
               <Button Content="打开 PDF" Classes="secondary" IsEnabled="{Binding HasSelection}" Click="OpenPdf_Click" />
+              <Button Content="局部复核" Classes="secondary" IsEnabled="{Binding HasSelection}" Click="RegionReview_Click" ToolTip.Tip="原 PDF 与提取结果对照、区域 OCR、人工确认" />
               <Button Content="专注阅读" Classes="ghost focus-toggle" ToolTip.Tip="显示或收起右侧研究画像" Click="ToggleInspector_Click" />
               <Button Content="•••" Classes="secondary icon" IsEnabled="{Binding HasSelection}" ToolTip.Tip="更多论文操作">
                 <Button.Flyout>
@@ -427,7 +428,7 @@
                             <TextBox IsVisible="{Binding HasRawOnly}"
                                      Text="{Binding DisplayText}" IsReadOnly="True"
                                      AcceptsReturn="True" TextWrapping="Wrap"
-                                     Background="{DynamicResource CodeBrush}"
+                                     Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
                                      BorderThickness="0" Padding="10"
                                      FontSize="11" MaxHeight="300"
                                      ScrollViewer.VerticalScrollBarVisibility="Auto" />
@@ -436,7 +437,7 @@
                                       Header="查看原始提取文本（可复制 / 核对）">
                               <TextBox Text="{Binding DisplayText}" IsReadOnly="True"
                                        AcceptsReturn="True" TextWrapping="NoWrap"
-                                       Background="{DynamicResource CodeBrush}"
+                                       Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
                                        BorderThickness="0" Padding="10" FontFamily="Consolas"
                                        FontSize="10" MaxHeight="260"
                                        ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -459,7 +460,7 @@
                     <TextBlock TextWrapping="Wrap" Classes="muted" FontSize="11"
                                Text="这里展示 Docling 提取到的公式文字和图片来源定位，不把图片描述当作已验证事实。点击顶部「打开 PDF」核对原文页面。" />
                     <TextBlock TextWrapping="Wrap" Classes="muted" FontSize="11"
-                               Text="公式增强默认关闭；开启后需重新解析并重新分析当前论文。公式内容先显示原始 LaTeX/识别文本，后续再加入数学排版。" />
+                               Text="在「设置 → 公式与图片增强」中开启 Docling 本地公式识别，重新解析并重新分析后生效。图片视觉分析使用独立配置的 Vision 模型，只有点击单张图片的分析按钮才会联网并可能计费。" />
                   </StackPanel>
                   <Border Classes="reading-lead" Padding="14,12" IsVisible="{Binding HasNoVisuals}">
                     <TextBlock TextWrapping="Wrap" Classes="muted"
@@ -504,6 +505,11 @@
                                 <TextBlock Text="区域坐标（PDF points）" Classes="eyebrow"/>
                                 <TextBlock Text="{Binding Location}" Classes="muted" FontSize="10"/>
                               </StackPanel>
+                              <Button Content="分析该图片（调用 Vision API，可能计费）"
+                                      Tag="{Binding}" Click="AnalyzeFigure_Click"
+                                      HorizontalAlignment="Left" Classes="secondary"/>
+                              <TextBlock Text="{Binding AiResult}" TextWrapping="Wrap"
+                                         FontSize="11" Foreground="{DynamicResource InkBrush}"/>
                             </StackPanel>
                           </Border>
                         </DataTemplate>
@@ -632,7 +638,45 @@
                   <StackPanel Spacing="9"><TextBlock Text="Lite" FontWeight="SemiBold"/><TextBox Text="{Binding Settings.LiteApiKey}" PasswordChar="●" PlaceholderText="{Binding Settings.LiteKeyHint}"/><TextBox Text="{Binding Settings.LiteApiBaseUrl}" PlaceholderText="Base URL"/><TextBox Text="{Binding Settings.LiteModel}" PlaceholderText="Model"/></StackPanel>
                   <CheckBox IsChecked="{Binding Settings.UseLiteConnection}" Content="Pro 使用与 Lite 相同的 API Key 和 Base URL"/>
                   <StackPanel Spacing="9"><TextBlock Text="Pro" FontWeight="SemiBold"/><TextBox Text="{Binding Settings.ProApiKey}" PasswordChar="●" PlaceholderText="{Binding Settings.ProKeyHint}" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProApiBaseUrl}" PlaceholderText="Base URL" IsEnabled="{Binding Settings.IsProConnectionEditable}"/><TextBox Text="{Binding Settings.ProModel}" PlaceholderText="Model"/></StackPanel>
+                  <TextBlock Text="Pro 报 HTTP 429 时请检查服务商额度或每分钟请求限制；可以等待、检查配额或切换获授权的模型后重新分析。无需勾选强制重跑，已成功的 Lite 阶段可以复用缓存。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
                   <StackPanel Orientation="Horizontal" Spacing="10"><Button Content="保存模型设置" Classes="primary" Click="SaveEmbeddedSettings_Click"/><TextBlock Text="{Binding Settings.StatusText}" Classes="muted" VerticalAlignment="Center"/></StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="公式与图片增强" Classes="h2"/>
+                  <TextBlock Text="Docling 本地识别与可选的视觉 API 各自控制。默认关闭，不会自动扣费。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="13">
+                  <CheckBox Content="启用 Docling 数学公式增强（本地模型）"
+                            IsChecked="{Binding Settings.FormulaEnabled, Mode=TwoWay}"/>
+                  <TextBlock Text="需要重新解析 PDF、重新分析后才能更新现有 Paper Card。首次启用可能下载 Docling 公式模型权重；不需要另填 API Key。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                  <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"/>
+                  <CheckBox Content="允许按需用视觉模型辅助解读单张图片"
+                            IsChecked="{Binding Settings.VisionEnabled, Mode=TwoWay}"/>
+                  <TextBlock Text="只有在「公式与图片」页点击图片分析按钮，才发送裁剪后的图片到你的模型 API；模型描述仅供辅助，不能充当作者证据。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                  <TextBlock Text="Vision 模型名称（必须支持图片输入）" FontWeight="SemiBold"/>
+                  <TextBox Text="{Binding Settings.VisionModel, Mode=TwoWay}"
+                           PlaceholderText="例如 doubao-seed-2.1-pro；使用实际 API Model ID"/>
+                  <CheckBox Content="Vision 共用现有 Pro API Key 与 Base URL"
+                            IsChecked="{Binding Settings.VisionUseProConnection, Mode=TwoWay}"/>
+                  <StackPanel Spacing="8">
+                    <TextBox Text="{Binding Settings.VisionApiKey}" PasswordChar="●"
+                             PlaceholderText="{Binding Settings.VisionKeyHint}"
+                             IsEnabled="{Binding Settings.IsVisionConnectionEditable}"/>
+                    <TextBox Text="{Binding Settings.VisionApiBaseUrl, Mode=TwoWay}"
+                             PlaceholderText="Vision OpenAI-compatible Base URL"
+                             IsEnabled="{Binding Settings.IsVisionConnectionEditable}"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="保存公式 / 图片设置" Classes="primary"
+                            Click="SaveVisualSettings_Click"/>
+                    <TextBlock Text="{Binding Settings.VisualStatusText}" Classes="muted"
+                               TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="500"/>
+                  </StackPanel>
                 </StackPanel>
               </Grid>
             </Border>

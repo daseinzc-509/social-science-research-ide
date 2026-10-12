@@ -14,6 +14,54 @@ class ModelRequestError(RuntimeError):
     """A safe-to-display model request error; credentials are never included."""
 
 
+def _http_error_message(exc: HTTPError) -> str:
+    """Give safe 429 guidance without exposing private provider response text."""
+    code = exc.code
+    if code == 429:
+        data = {}
+        try:
+            response = json.loads(exc.read(4096).decode("utf-8", errors="replace"))
+            data = response.get("error", {}) if isinstance(response, dict) else {}
+        except (OSError, ValueError, TypeError):
+            pass
+        if not isinstance(data, dict):
+            data = {}
+        reason = " ".join(str(data.get(key, "")) for key in ("code", "type")).lower()
+        message = str(data.get("message", "")).lower()
+        if any(x in reason or x in message for x in (
+            "insufficient_quota", "quota_exceeded", "out_of_quota",
+            "balance", "billing", "resource_exhausted",
+        )):
+            return (
+                "HTTP 429 (quota/balance exhausted): check provider credits, "
+                "plan entitlement and model availability. Do not blindly retry; "
+                "the successful Lite result is reusable."
+            )
+        retry_after = ""
+        try:
+            retry_after = str(exc.headers.get("Retry-After", "")).strip()
+        except (AttributeError, TypeError):
+            pass
+        waiting = (
+            f" Retry-After: {int(retry_after)} seconds."
+            if retry_after.isdecimal() and 0 < int(retry_after) <= 86400
+            else ""
+        )
+        return (
+            "HTTP 429 (rate limit or capacity): check model RPM/TPM and "
+            "concurrency limits." + waiting
+            + " Retry manually when allowed; the Lite cache is reusable. "
+              "No automatic retry was made."
+        )
+    if code in (401, 403):
+        return f"HTTP {code}: API authorization failed; check key and entitlement."
+    if code == 404:
+        return "HTTP 404: model or Chat Completions endpoint not found."
+    if code in (500, 502, 503, 504):
+        return f"HTTP {code}: provider temporarily unavailable; request cost may already apply."
+    return f"Model service rejected the request (HTTP {code}); check provider/model/permissions."
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -85,9 +133,7 @@ class OpenAICompatibleClient:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            raise ModelRequestError(
-                f"Model service rejected the request (HTTP {exc.code}); check the Agent Plan key, base URL, model name, and quota."
-            ) from None
+            raise ModelRequestError(_http_error_message(exc)) from None
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, TimeoutError):

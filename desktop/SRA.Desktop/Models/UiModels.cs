@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.ComponentModel;
 
 namespace SRA.Desktop.Models;
 
@@ -177,8 +178,21 @@ public sealed class TableSpanCellItem
 }
 
 
-public sealed class VisualSourceItem
+public sealed class VisualSourceItem : INotifyPropertyChanged
 {
+    private string _aiResult = "尚未请求视觉模型。";
+    public string AiResult
+    {
+        get => _aiResult;
+        set
+        {
+            if (_aiResult == value) return;
+            _aiResult = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AiResult)));
+        }
+    }
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public string Page { get; init; } = "—";
     public string Label { get; init; } = "";
     public string Text { get; init; } = "";

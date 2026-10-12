@@ -13,6 +13,7 @@ from ..repository import ResearchRepository
 from ..services import ApplicationServices, create_application_services
 from .routes import analysis, health, imports, jobs, paper_tools, papers, settings, workspace
 from .routes import region_review
+from .routes import visual
 
 API_PREFIX = "/api/v1"
 
@@ -45,6 +46,8 @@ def create_app(
     app.include_router(paper_tools.router, prefix=API_PREFIX)
     app.include_router(workspace.router, prefix=API_PREFIX)
     app.include_router(region_review.router, prefix=API_PREFIX)
+    app.include_router(visual.settings_router, prefix=API_PREFIX)
+    app.include_router(visual.figure_router, prefix=API_PREFIX)
 
     @app.exception_handler(KeyError)
     async def handle_key_error(request: Request, exc: KeyError):  # noqa: ARG001
