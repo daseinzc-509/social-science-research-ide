@@ -17,6 +17,16 @@ from sociology_research import config, model_profiles
 from sociology_research.config import Settings
 
 
+def _dummy_credential(label: str) -> str:
+    """Return a stable, synthetic credential without embedding a key in Git.
+
+    This is *not* a provider credential: it exists only inside offline tests.
+    Separate labels give different values for override/isolation assertions.
+    """
+    from hashlib import sha256
+    return "sra-fixture-" + sha256(("offline-fixture:" + label).encode("utf-8")).hexdigest()[:20]
+
+
 @pytest.fixture
 def isolated(monkeypatch, tmp_path):
     previous_env = os.environ.copy()
@@ -38,7 +48,7 @@ def isolated(monkeypatch, tmp_path):
     os.environ.update(previous_env)
 
 
-def _make_profile(*, name="GLM", key="key-v1", model="glm-v1"):
+def _make_profile(*, name="GLM", key=_dummy_credential("default-profile"), model="glm-v1"):
     return model_profiles.save_profile({
         "name": name, "model": model, "base_url": "https://api.example.net/v1",
         "api_key": key, "max_tokens": 4096,
@@ -51,20 +61,20 @@ def test_editing_active_provider_updates_real_lite_and_pro_atomically(isolated):
     model_profiles.activate_profile("pro", original["id"])
     edited = model_profiles.save_profile({
         "id": original["id"], "name": "Kimi", "model": "kimi-k3",
-        "base_url": "https://ark.example.net/v1", "api_key": "secret-2", "max_tokens": 6000,
+        "base_url": "https://ark.example.net/v1", "api_key": _dummy_credential("updated-profile"), "max_tokens": 6000,
     })
     assert edited["id"] == original["id"]
     actual = Settings.from_environment()
-    assert actual.require_lite_configuration() == ("secret-2", "https://ark.example.net/v1", "kimi-k3")
-    assert actual.require_pro_configuration() == ("secret-2", "https://ark.example.net/v1", "kimi-k3")
+    assert actual.require_lite_configuration() == (_dummy_credential("updated-profile"), "https://ark.example.net/v1", "kimi-k3")
+    assert actual.require_pro_configuration() == (_dummy_credential("updated-profile"), "https://ark.example.net/v1", "kimi-k3")
     assert model_profiles.active_token_budget("lite", "kimi-k3") == 6000
     assert model_profiles.active_token_budget("pro", "kimi-k3") == 6000
     shown = model_profiles.effective_connections()
     assert shown["lite"]["profile_id"] == edited["id"]
     assert shown["pro"]["profile_id"] == edited["id"]
     assert shown["lite"]["profile_name"] == "Kimi"
-    assert "secret-2" not in json.dumps(shown)
-    assert "secret-2" not in (isolated.root / "config/model-profiles.json").read_text(encoding="utf-8")
+    assert _dummy_credential("updated-profile") not in json.dumps(shown)
+    assert _dummy_credential("updated-profile") not in (isolated.root / "config/model-profiles.json").read_text(encoding="utf-8")
 
 
 def test_external_settings_override_cannot_silently_claim_profile_or_budget(isolated):
@@ -72,24 +82,24 @@ def test_external_settings_override_cannot_silently_claim_profile_or_budget(isol
     model_profiles.activate_profile("pro", saved["id"])
     assert model_profiles.active_token_budget("pro", "glm-v1") == 4096
     # Same endpoint/model but different key: this is a different connection.
-    config.save_local_environment({"SRA_PRO_API_KEY": "legacy-user-override"})
+    config.save_local_environment({"SRA_PRO_API_KEY": _dummy_credential("legacy-override")})
     assert model_profiles.active_token_budget("pro", "glm-v1") is None
     shown = model_profiles.effective_connections()["pro"]
     assert shown["origin"] == "legacy"
     assert shown["profile_id"] is None
-    assert "legacy-user-override" not in json.dumps(shown)
+    assert _dummy_credential("legacy-override") not in json.dumps(shown)
 
 
 def test_edit_stale_profile_does_not_overwrite_external_settings(isolated):
     saved = _make_profile()
     model_profiles.activate_profile("pro", saved["id"])
-    config.save_local_environment({"SRA_PRO_API_KEY": "external-secret"})
+    config.save_local_environment({"SRA_PRO_API_KEY": _dummy_credential("outside-change")})
     assert model_profiles.effective_connections()["pro"]["origin"] == "legacy"
     model_profiles.save_profile({
         "id": saved["id"], "name": "edited-but-inactive", "model": "glm-v2",
         "base_url": "https://another.example/v1", "max_tokens": 3000,
     })
-    assert Settings.from_environment().effective_pro_api_key == "external-secret"
+    assert Settings.from_environment().effective_pro_api_key == _dummy_credential("outside-change")
     assert Settings.from_environment().pro_model == "glm-v1"
     assert "pro" not in model_profiles.list_profiles()["active"]
 
@@ -142,7 +152,7 @@ def test_active_profile_bad_save_does_not_replace_catalog(isolated, monkeypatch)
     with pytest.raises(RuntimeError, match="secured stage"):
         model_profiles.save_profile({
             "id": saved["id"], "name": "broken", "base_url": "https://new.example/v1",
-            "model": "new-model", "api_key": "new-key", "max_tokens": 7000,
+            "model": "new-model", "api_key": _dummy_credential("failed-write"), "max_tokens": 7000,
         })
     assert isolated.keys == before_keys
     assert Settings.from_environment().require_lite_configuration() == before_lite
@@ -151,7 +161,7 @@ def test_active_profile_bad_save_does_not_replace_catalog(isolated, monkeypatch)
 
 def test_legacy_connections_are_visible_and_importable_without_switching(isolated):
     config.save_local_environment({
-        "SRA_LITE_API_KEY": "old-key", "SRA_LITE_API_BASE_URL": "https://old.example/v1",
+        "SRA_LITE_API_KEY": _dummy_credential("legacy-import"), "SRA_LITE_API_BASE_URL": "https://old.example/v1",
         "SRA_LITE_MODEL": "old-model",
     })
     status = model_profiles.effective_connections()
@@ -160,7 +170,7 @@ def test_legacy_connections_are_visible_and_importable_without_switching(isolate
     assert status["lite"]["profile_id"] is None
     imported = model_profiles.import_existing_connections()
     assert len(imported["imported"]) == 1
-    assert Settings.from_environment().require_lite_configuration() == ("old-key", "https://old.example/v1", "old-model")
+    assert Settings.from_environment().require_lite_configuration() == (_dummy_credential("legacy-import"), "https://old.example/v1", "old-model")
     assert not model_profiles.import_existing_connections()["imported"]
 
 
@@ -200,7 +210,7 @@ def test_single_ui_no_duplicate_credential_editor_and_feature_switches_routed():
 def test_saved_preference_switch_only_changes_two_flags(isolated):
     # The route calls this legacy secure writer with only the two flags.
     config.save_local_environment({
-        "SRA_VISION_API_KEY": "unchanged-secret", "SRA_VISION_MODEL": "existing-vision",
+        "SRA_VISION_API_KEY": _dummy_credential("vision-kept"), "SRA_VISION_MODEL": "existing-vision",
         "SRA_VISION_API_BASE_URL": "https://vision.example/v1", "SRA_VISION_USE_PRO": "0",
         "SRA_VISION_ENABLED": "1", "SRA_FORMULA_ENRICHMENT": "0",
     })
@@ -264,7 +274,7 @@ def test_real_router_returns_effective_stage_and_saves_switches_only(isolated, m
             assert initial["enhancements"] == {"formula_enabled": False, "vision_enabled": False}
             saved = api.post(prefix + "/profiles", json={
                 "name": "Demo", "base_url": "https://api.example.net/v1", "model": "glm-v1",
-                "api_key": "route-super-secret", "max_tokens": 4096,
+                "api_key": _dummy_credential("api-route"), "max_tokens": 4096,
             })
             assert saved.status_code == 200
             pid = saved.json()["id"]
@@ -272,7 +282,7 @@ def test_real_router_returns_effective_stage_and_saves_switches_only(isolated, m
             assert activated.status_code == 200
             first = api.get(prefix)
             assert first.json()["effective"]["lite"]["profile_id"] == pid
-            assert "route-super-secret" not in first.text
+            assert _dummy_credential("api-route") not in first.text
             updated = api.post(prefix + "/profiles", json={
                 "id": pid, "name": "New", "base_url": "https://provider.example/v1",
                 "model": "glm-v2", "max_tokens": 5000,
@@ -282,7 +292,7 @@ def test_real_router_returns_effective_stage_and_saves_switches_only(isolated, m
             assert api.get(prefix).json()["effective"]["lite"]["profile_name"] == "New"
             assert api.put(prefix + "/enhancements", json={
                 "formula_enabled": True, "vision_enabled": False,
-                "vision_api_key": "unexpected-key",
+                "vision_api_key": _dummy_credential("invalid-field"),
             }).status_code == 422
             assert api.put(prefix + "/enhancements", json={
                 "formula_enabled": True, "vision_enabled": False,
@@ -290,7 +300,7 @@ def test_real_router_returns_effective_stage_and_saves_switches_only(isolated, m
             assert api.get(prefix + "/enhancements").json() == {
                 "formula_enabled": True, "vision_enabled": False,
             }
-            assert isolated.stage_keys["SRA_LITE_API_KEY"] == "route-super-secret"
+            assert isolated.stage_keys["SRA_LITE_API_KEY"] == _dummy_credential("api-route")
 
 
 def test_model_center_click_registration_is_compile_safe():

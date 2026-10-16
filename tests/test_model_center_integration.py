@@ -18,6 +18,16 @@ from sociology_research import network_settings, model_runtime, model_profiles, 
 from sociology_research.config import Settings, resolved_pro_output_budget
 
 
+def _dummy_credential(label: str) -> str:
+    """Return a stable, synthetic credential without embedding a key in Git.
+
+    This is *not* a provider credential: it exists only inside offline tests.
+    Separate labels give different values for override/isolation assertions.
+    """
+    from hashlib import sha256
+    return "sra-fixture-" + sha256(("offline-fixture:" + label).encode("utf-8")).hexdigest()[:20]
+
+
 @pytest.fixture
 def isolated(monkeypatch, tmp_path):
     original = os.environ.copy()
@@ -44,7 +54,7 @@ def test_good_proxies(value):
 
 @pytest.mark.parametrize("value", [
     "", "socks5://127.0.0.1:7890", "http://127.0.0.1", "http://x:65536",
-    "http://name:secret@127.0.0.1:7890", "http://x:7890/path", "http://x:7890?token=abc",
+    "http://name:" + _dummy_credential("userinfo") + "@127.0.0.1:7890", "http://x:7890/path", "http://x:7890?token=" + _dummy_credential("url-query"),
     "http://x:7890#fragment", "file:///tmp/abc", "http://x:abc", "http://x:80\nother",
 ])
 def test_invalid_proxies(value):
@@ -59,7 +69,7 @@ def test_network_persists_and_download_only_changes_child_env(isolated):
     })
     assert config["download_mode"] == "custom"
     assert network_settings.read_network_settings() == config
-    parent = {"HTTPS_PROXY": "http://old:11", "ALL_PROXY": "http://other:22", "SRA_PRO_API_KEY": "sensitive", "KEEP": "ok"}
+    parent = {"HTTPS_PROXY": "http://old:11", "ALL_PROXY": "http://other:22", "SRA_PRO_API_KEY": _dummy_credential("proxy-child-env"), "KEEP": "ok"}
     child = network_settings.download_environment(parent)
     assert parent["HTTPS_PROXY"] == "http://old:11"
     assert child["HTTPS_PROXY"] == "http://127.0.0.1:7890"
@@ -141,42 +151,42 @@ def test_model_worker_command_frozen_and_python(isolated, monkeypatch):
 
 def test_profiles_do_not_store_keys_in_plaintext(isolated):
     p = model_profiles.save_profile({"name":"火山方舟", "base_url":"https://ark.cn-beijing.volces.com/api/plan/v3",
-        "model":"kimi-k3", "api_key":"super-secret-token-123", "max_tokens":4096})
+        "model":"kimi-k3", "api_key":_dummy_credential("saved-profile"), "max_tokens":4096})
     assert "api_key" not in p
     assert p["id"] in isolated.keys
     path = isolated.folder / "config/model-profiles.json"
-    assert "super-secret-token-123" not in path.read_text(encoding="utf-8")
+    assert _dummy_credential("saved-profile") not in path.read_text(encoding="utf-8")
     assert model_profiles.list_profiles()["profiles"][0]["has_api_key"]
     updated = model_profiles.save_profile({"id":p["id"],"name":"Kimi", "base_url":p["base_url"],
         "model":"kimi-k3", "max_tokens":8192})
-    assert isolated.keys[p["id"]] == "super-secret-token-123"
+    assert isolated.keys[p["id"]] == _dummy_credential("saved-profile")
     assert updated["name"] == "Kimi"
 
 
 def test_profile_activation_is_real_config_used_by_new_jobs(isolated):
     p = model_profiles.save_profile({"name":"GLM", "base_url":"https://example.org/v1",
-        "model":"glm", "api_key":"key-abc", "max_tokens":6000})
+        "model":"glm", "api_key":_dummy_credential("activated-profile"), "max_tokens":6000})
     assert model_profiles.activate_profile("lite", p["id"])["slot"] == "lite"
     settings = Settings.from_environment()
-    assert settings.require_lite_configuration() == ("key-abc", "https://example.org/v1", "glm")
+    assert settings.require_lite_configuration() == (_dummy_credential("activated-profile"), "https://example.org/v1", "glm")
     assert model_profiles.active_token_budget("lite", "glm") == 6000
     model_profiles.activate_profile("pro", p["id"])
-    assert Settings.from_environment().require_pro_configuration() == ("key-abc", "https://example.org/v1", "glm")
+    assert Settings.from_environment().require_pro_configuration() == (_dummy_credential("activated-profile"), "https://example.org/v1", "glm")
     model_profiles.activate_profile("vision", p["id"])
-    assert Settings.from_environment().require_vision_configuration() == ("key-abc", "https://example.org/v1", "glm")
+    assert Settings.from_environment().require_vision_configuration() == (_dummy_credential("activated-profile"), "https://example.org/v1", "glm")
     with pytest.raises(ValueError):
         model_profiles.remove_profile(p["id"])
 
 
 def test_kimi_manual_max_tokens_is_used_when_active(isolated):
     p = model_profiles.save_profile({"name":"Kimi", "base_url":"https://example.org/v1",
-        "model":"kimi-k3", "api_key":"token", "max_tokens":12000})
+        "model":"kimi-k3", "api_key":_dummy_credential("kimi-budget"), "max_tokens":12000})
     model_profiles.activate_profile("pro", p["id"])
     assert resolved_pro_output_budget("kimi-k3", 16000) == 12000
     assert resolved_pro_output_budget("glm-5", 16000) == 16000
 
 
-@pytest.mark.parametrize("url", ["https://a/v1?key=secret", "https://name:pass@x/v1", "file:///etc/hosts", "https://x/chat/completions", ""])
+@pytest.mark.parametrize("url", ["https://a/v1?key=" + _dummy_credential("bad-base-url"), "https://name:" + _dummy_credential("bad-base-userinfo") + "@x/v1", "file:///etc/hosts", "https://x/chat/completions", ""])
 def test_invalid_provider_base_urls(url):
     with pytest.raises(ValueError):
         model_profiles.validate_base_url(url)
@@ -186,7 +196,7 @@ def test_profile_operations_reject_invalid_keys_and_slots(isolated):
     with pytest.raises(ValueError):
         model_profiles.save_profile({"name":"empty", "base_url":"https://a/v1", "model":"m", "api_key":""})
     with pytest.raises(ValueError):
-        model_profiles.save_profile({"name":"bad", "base_url":"https://a/v1", "model":"m", "api_key":"key", "max_tokens":True})
+        model_profiles.save_profile({"name":"bad", "base_url":"https://a/v1", "model":"m", "api_key":_dummy_credential("invalid-max-tokens"), "max_tokens":True})
     with pytest.raises(ValueError):
         model_profiles.activate_profile("book", "anything")
 
@@ -297,12 +307,12 @@ def test_real_fastapi_router_crud_without_paper_repository(isolated, monkeypatch
         }).status_code == 200
         response = client.post(prefix + "/profiles", json={
             "name": "API test", "base_url": "https://models.example.org/v1",
-            "model": "model-v1", "max_tokens": 2048, "api_key": "secret-value",
+            "model": "model-v1", "max_tokens": 2048, "api_key": _dummy_credential("router-create"),
         })
         assert response.status_code == 200, response.text
         profile = response.json()
         assert "api_key" not in profile and profile["id"] in isolated.keys
-        assert "secret-value" not in client.get(prefix).text
+        assert _dummy_credential("router-create") not in client.get(prefix).text
         stage = client.post(prefix + "/activate", json={"slot": "lite", "profile_id": profile["id"]})
         assert stage.status_code == 200
         assert Settings.from_environment().require_lite_configuration()[2] == "model-v1"
@@ -334,13 +344,13 @@ def test_llm_client_configured_proxy_uses_real_per_client_opener(isolated, monke
     fake = FakeOpener()
     monkeypatch.setattr(llm_client, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("system path used")))
     monkeypatch.setattr(network_settings, "ai_request_opener", lambda: fake)
-    client = OpenAICompatibleClient(api_key="secret-1", base_url="https://models.example.org/v1", timeout_seconds=22)
+    client = OpenAICompatibleClient(api_key=_dummy_credential("proxy-request"), base_url="https://models.example.org/v1", timeout_seconds=22)
     response = client.complete_json(model="test-model", system_prompt="safe", user_prompt="ping", max_tokens=128)
     assert json.loads(response) == {"ok": True}
     assert len(fake.requests) == 1 and fake.requests[0][1] == 22
     request = fake.requests[0][0]
     assert request.full_url == "https://models.example.org/v1/chat/completions"
-    assert request.get_header("Authorization") == "Bearer secret-1"
+    assert request.get_header("Authorization") == ("Bearer " + _dummy_credential("proxy-request"))
 
 
 def test_corrupt_or_removed_model_weight_invalidates_state(isolated, monkeypatch):
@@ -360,8 +370,8 @@ def test_corrupt_or_removed_model_weight_invalidates_state(isolated, monkeypatch
 def test_import_existing_stage_settings_without_changing_current_model(isolated):
     from sociology_research.config import save_local_environment
     save_local_environment({
-        "SRA_LITE_API_KEY": "existing-lite-secret", "SRA_LITE_API_BASE_URL": "https://lite.example.org/v1",
-        "SRA_LITE_MODEL": "lite-model", "SRA_PRO_API_KEY": "existing-pro-secret",
+        "SRA_LITE_API_KEY": _dummy_credential("original-lite"), "SRA_LITE_API_BASE_URL": "https://lite.example.org/v1",
+        "SRA_LITE_MODEL": "lite-model", "SRA_PRO_API_KEY": _dummy_credential("original-pro"),
         "SRA_PRO_API_BASE_URL": "https://pro.example.org/v1", "SRA_PRO_MODEL": "pro-model",
     })
     before = Settings.from_environment().require_lite_configuration()
@@ -393,10 +403,10 @@ def test_provider_catalog_is_bounded_and_cannot_echo_secrets(isolated, monkeypat
         seen.append((req, timeout))
         return Result()
     monkeypatch.setattr(llm_client, "urlopen", fake)
-    client = OpenAICompatibleClient(api_key="private-token", base_url="https://provider.example.org/v1")
+    client = OpenAICompatibleClient(api_key=_dummy_credential("model-catalog"), base_url="https://provider.example.org/v1")
     assert client.list_model_ids() == ["glm-5", "kimi-k3"]
     assert seen[0][0].full_url == "https://provider.example.org/v1/models"
-    assert seen[0][0].get_header("Authorization") == "Bearer private-token"
+    assert seen[0][0].get_header("Authorization") == ("Bearer " + _dummy_credential("model-catalog"))
 
 
 def test_managed_models_can_be_disabled_and_reenabled_without_data_loss(isolated, monkeypatch):
