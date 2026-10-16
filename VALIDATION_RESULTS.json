@@ -1,0 +1,29 @@
+{
+  "scope": "Four original-path full replacement files",
+  "base": "Explicit uploaded tests and previously supplied SRA source ZIPs",
+  "checks": [
+    {
+      "name": "Current policy and frozen-probe tests",
+      "result": "6 passed"
+    },
+    {
+      "name": "Release shell policy/OS matrix",
+      "result": "4 passed"
+    },
+    {
+      "name": "v5 C# methods and consent contract",
+      "result": "passed with public route markers; negative regression detected"
+    },
+    {
+      "name": "AST/YAML/ZIP validation",
+      "result": "passed"
+    }
+  ],
+  "not_run": [
+    "Complete SRA repository test suite",
+    "Real prune_release_assets implementation tests (script absent from source subset)",
+    "Full region-review UI and database tests",
+    "dotnet Windows/macOS build",
+    "Frozen Docling PDF/OCR and first-download end-to-end"
+  ]
+}

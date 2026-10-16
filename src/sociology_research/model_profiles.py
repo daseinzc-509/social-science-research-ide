@@ -7,6 +7,8 @@ old in-flight analyses retain their already-created client and settings.
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
+import hmac
 import json
 import re
 import sys
@@ -126,11 +128,90 @@ def list_profiles() -> dict:
         }
 
 
+def _slot_updates(slot: str, profile: dict, secret: str, *, enable_vision: bool = True) -> dict[str, str]:
+    """Reuse the exact legacy storage consumed by all live analysis paths.
+
+    Editing an active profile must not unexpectedly toggle Vision on. Explicit
+    activation of a Vision connection retains the existing opt-in behavior.
+    """
+    if slot == "lite":
+        return {"SRA_LITE_API_KEY": secret, "SRA_LITE_API_BASE_URL": profile["base_url"],
+                "SRA_LITE_MODEL": profile["model"]}
+    if slot == "pro":
+        return {"SRA_PRO_API_KEY": secret, "SRA_PRO_API_BASE_URL": profile["base_url"],
+                "SRA_PRO_MODEL": profile["model"]}
+    if slot == "vision":
+        updates = {"SRA_VISION_API_KEY": secret, "SRA_VISION_API_BASE_URL": profile["base_url"],
+                   "SRA_VISION_MODEL": profile["model"], "SRA_VISION_USE_PRO": "0"}
+        if enable_vision:
+            updates["SRA_VISION_ENABLED"] = "1"
+        return updates
+    raise ValueError("Unknown AI model slot")
+
+
+def _effective_slot(settings: Settings, slot: str) -> tuple[str, str, str, bool]:
+    if slot == "lite":
+        return (settings.lite_model or "", settings.effective_lite_api_base_url or "",
+                settings.effective_lite_api_key or "", True)
+    if slot == "pro":
+        return (settings.pro_model or "", settings.effective_pro_api_base_url or "",
+                settings.effective_pro_api_key or "", True)
+    if slot == "vision":
+        return (settings.vision_model or "", settings.effective_vision_api_base_url or "",
+                settings.effective_vision_api_key or "", settings.vision_analysis_enabled)
+    raise ValueError("Unknown AI model slot")
+
+
+def effective_connections() -> dict[str, dict]:
+    """Redacted snapshot of ACTUAL Lite/Pro/Vision settings, not a stale UI selection.
+
+    A legacy settings API or process environment override can change effective
+    credentials without updating the saved profile assignment. Detect that and
+    clearly show the legacy/external connection instead of a misleading badge.
+    Never expose raw keys, even through the localhost API.
+    """
+    with _LOCK:
+        state = _registry()
+        keys = read_profile_keys()
+        settings = Settings.from_environment()
+        by_id = {p["id"]: p for p in state["profiles"]}
+        result: dict[str, dict] = {}
+        for slot in ("lite", "pro", "vision"):
+            model, base_url, key, enabled = _effective_slot(settings, slot)
+            selected = state["active"].get(slot)
+            profile = by_id.get(selected)
+            matches = bool(profile and key and model == profile["model"]
+                           and base_url.rstrip("/") == profile["base_url"].rstrip("/")
+                           and hmac.compare_digest(key, keys.get(profile["id"], "")))
+            configured = bool(model and base_url and key)
+            result[slot] = {
+                "model": model, "base_url": base_url,
+                "configured": configured, "enabled": enabled,
+                "profile_id": selected if matches else None,
+                "profile_name": profile["name"] if matches else None,
+                "origin": "profile" if matches else ("legacy" if configured else "unconfigured"),
+            }
+        return result
+
+
+def _current_field_values(names: set[str]) -> dict[str, str]:
+    """Capture a best-effort rollback snapshot before updating an active profile."""
+    settings = Settings.from_environment()
+    mapping = {
+        "SRA_LITE_API_KEY": "lite_api_key", "SRA_LITE_API_BASE_URL": "lite_api_base_url", "SRA_LITE_MODEL": "lite_model",
+        "SRA_PRO_API_KEY": "pro_api_key", "SRA_PRO_API_BASE_URL": "pro_api_base_url", "SRA_PRO_MODEL": "pro_model",
+        "SRA_VISION_API_KEY": "vision_api_key", "SRA_VISION_API_BASE_URL": "vision_api_base_url",
+        "SRA_VISION_MODEL": "vision_model", "SRA_VISION_USE_PRO": "vision_use_pro_connection",
+    }
+    return {name: getattr(settings, mapping[name]) or "" for name in names}
+
+
 def save_profile(payload: dict) -> dict:
     clean = _clean_profile(payload)
     requested_id = str(payload.get("id") or "").strip()
     with _LOCK:
         state = _registry()
+        before = deepcopy(state)
         existing = next((p for p in state["profiles"] if p["id"] == requested_id), None) if requested_id else None
         if requested_id and existing is None:
             raise ValueError("Unknown profile ID")
@@ -149,12 +230,47 @@ def save_profile(payload: dict) -> dict:
             state["profiles"].append(update)
         else:
             state["profiles"] = [update if p["id"] == pid else p for p in state["profiles"]]
-        # On failure, don't orphan a changed key without matching metadata.
+
+        # Previously, editing a profile assigned to Lite/Pro/Vision updated only
+        # model-profiles.json. That made the UI lie about what the model client used.
+        # Synchronize all active stage connections via the existing secure store.
+        stage_updates: dict[str, str] = {}
+        previous_runtime = Settings.from_environment() if existing else None
+        for slot, active_id in list(state["active"].items()):
+            if active_id != pid:
+                continue
+            # A legacy settings endpoint or process environment may have
+            # changed the effective stage independently of this catalog.
+            # Never seize back that stage simply because someone edited the
+            # now-stale catalog entry.
+            model, base_url, actual_key, _ = _effective_slot(previous_runtime, slot)
+            still_active = bool(existing and actual_key and
+                                model == existing["model"] and
+                                base_url.rstrip("/") == existing["base_url"].rstrip("/") and
+                                hmac.compare_digest(actual_key, prior_keys.get(pid, "")))
+            if still_active:
+                stage_updates.update(_slot_updates(slot, update, newer_keys[pid], enable_vision=False))
+            else:
+                state["active"].pop(slot, None)
+        prior_stage_values = _current_field_values(set(stage_updates)) if stage_updates else {}
+
         write_profile_keys(newer_keys)
         try:
+            # Registry metadata is written only after the actual stage settings
+            # succeed, so the saved profile does not silently diverge on failure.
+            if stage_updates:
+                save_local_environment(stage_updates)
             _save_registry(state)
         except Exception:
-            write_profile_keys(prior_keys)
+            if stage_updates:
+                try:
+                    save_local_environment(prior_stage_values)
+                except Exception:
+                    pass  # retain the original failure; user can retry safely
+            try:
+                _save_registry(before)
+            finally:
+                write_profile_keys(prior_keys)
             raise
         return dict(update, has_api_key=True)
 
@@ -170,12 +286,7 @@ def activate_profile(slot: str, profile_id: str) -> dict:
         secret = read_profile_keys().get(profile_id)
         if not secret:
             raise ValueError("Profile has no protected API Key")
-        if slot == "lite":
-            updates = {"SRA_LITE_API_KEY": secret, "SRA_LITE_API_BASE_URL": profile["base_url"], "SRA_LITE_MODEL": profile["model"]}
-        elif slot == "pro":
-            updates = {"SRA_PRO_API_KEY": secret, "SRA_PRO_API_BASE_URL": profile["base_url"], "SRA_PRO_MODEL": profile["model"]}
-        else:
-            updates = {"SRA_VISION_API_KEY": secret, "SRA_VISION_API_BASE_URL": profile["base_url"], "SRA_VISION_MODEL": profile["model"], "SRA_VISION_USE_PRO": "0", "SRA_VISION_ENABLED": "1"}
+        updates = _slot_updates(slot, profile, secret)
         # Writes the exact settings consumed by existing real analysis calls.
         # This fails closed on platforms without a secure credential store.
         save_local_environment(updates)
@@ -219,6 +330,9 @@ def active_token_budget(slot: str, model: str) -> int | None:
         return None
     configured_base = settings.effective_lite_api_base_url if slot == "lite" else settings.effective_pro_api_base_url
     if (configured_base or "").rstrip("/") != profile["base_url"].rstrip("/"):
+        return None
+    effective_key = settings.effective_lite_api_key if slot == "lite" else settings.effective_pro_api_key
+    if not effective_key or not hmac.compare_digest(effective_key, read_profile_keys().get(chosen, "")):
         return None
     return int(profile["max_tokens"])
 

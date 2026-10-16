@@ -317,6 +317,17 @@ public sealed class SraApiClient : IDisposable
     public Task<JsonElement> GetModelCenterAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync<JsonElement>("api/v1/settings/model-center", cancellationToken);
 
+    /// <summary>Save only feature switches, preserving all Vision credentials and model IDs.</summary>
+    public async Task<JsonElement> SaveModelCenterEnhancementsAsync(
+        bool formulaEnabled, bool visionEnabled, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            "api/v1/settings/model-center/enhancements",
+            new { formula_enabled = formulaEnabled, vision_enabled = visionEnabled },
+            _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
     public async Task<JsonElement> SaveModelCenterNetworkAsync(object data, CancellationToken cancellationToken = default)
     {
         using var response = await _http.PutAsJsonAsync(

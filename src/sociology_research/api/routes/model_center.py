@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...llm_client import OpenAICompatibleClient
+from ...config import Settings, save_local_environment
 from ...model_center_service import download_and_verify
-from ...model_profiles import (activate_profile, list_profiles, import_existing_connections, profile_connection,
+from ...model_profiles import (activate_profile, effective_connections, list_profiles, import_existing_connections, profile_connection,
                                remove_profile, save_profile)
 from ...model_runtime import state_report, set_managed_models_enabled
 from ...network_settings import read_network_settings, save_network_settings
@@ -43,9 +44,42 @@ class ModelOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     formula: bool = False
 
+
+class EnhancementUpdate(BaseModel):
+    """Only feature switches; never overwrite the Vision provider's credentials."""
+    model_config = ConfigDict(extra="forbid")
+    formula_enabled: bool
+    vision_enabled: bool
+
+
+def enhancement_preferences() -> dict[str, bool]:
+    settings = Settings.from_environment()
+    return {"formula_enabled": settings.formula_enrichment_enabled,
+            "vision_enabled": settings.vision_analysis_enabled}
+
 @router.get("")
 def get_model_center():
-    return {"network": read_network_settings(), "profiles": list_profiles(), "models": state_report()}
+    return {
+        "network": read_network_settings(), "profiles": list_profiles(),
+        "models": state_report(), "effective": effective_connections(),
+        "enhancements": enhancement_preferences(),
+    }
+
+
+@router.get("/enhancements")
+def get_enhancements():
+    return enhancement_preferences()
+
+
+@router.put("/enhancements")
+def update_enhancements(body: EnhancementUpdate):
+    # Do not use the legacy visual PUT here: it also rewrites URL/model/key and
+    # can accidentally undo the Vision profile selected in this same window.
+    save_local_environment({
+        "SRA_FORMULA_ENRICHMENT": "1" if body.formula_enabled else "0",
+        "SRA_VISION_ENABLED": "1" if body.vision_enabled else "0",
+    })
+    return enhancement_preferences()
 
 @router.put("/network")
 def update_network(body: NetworkUpdate):

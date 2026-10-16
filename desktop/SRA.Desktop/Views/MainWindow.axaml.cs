@@ -66,7 +66,6 @@ public partial class MainWindow : Window
     private async void SettingsNav_Click(object? sender, RoutedEventArgs e)
     {
         NavigateTo("settings");
-        if (ViewModel is not null) await ViewModel.LoadSettingsAsync();
         await RefreshStorageInventoryAsync();
     }
 
@@ -140,20 +139,11 @@ public partial class MainWindow : Window
         await Launcher.LaunchUriAsync(uri);
     }
 
-    private async void SaveEmbeddedSettings_Click(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        await ViewModel.Settings.SaveAsync();
-    }
-
     private async void OpenModelCenter_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         var window = new ModelCenterWindow(ViewModel.Api);
         await window.ShowDialog(this);
-        // Refresh the legacy inline fields: named-profile activation has written
-        // the same persisted settings consumed by all future Lite/Pro jobs.
-        await ViewModel.LoadSettingsAsync();
     }
 
     private async void RefreshStorage_Click(object? sender, RoutedEventArgs e)

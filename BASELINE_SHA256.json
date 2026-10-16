@@ -1,0 +1,22 @@
+{
+  ".github/workflows/release-desktop.yml": {
+    "baseline_sha256": "284ddd3a7d030804fe81b48b0c77ebb7262c6b3ff80e9336cded1bdb1087eb2a",
+    "replacement_sha256": "3101f7b951b0c252fa397ddbb6c60a55b84af8a3318447e5276618239f247a6f",
+    "source": "previous SRA integration ZIP"
+  },
+  "tests/test_lean_collection.py": {
+    "baseline_sha256": "05fcd8ce361654326c173a61a17492d61ada88d52e2e955b5744cac50fe43566",
+    "replacement_sha256": "10cb3325174c9980d7c76e7ba1db980d13aae216eeeb48b88f99bfe685a28752",
+    "source": "user-uploaded .py"
+  },
+  "tests/test_dependency_collection.py": {
+    "baseline_sha256": "ed651c4261862976c0953db5065c308e4b88fcc2de9c3952ee222ecc7f811e87",
+    "replacement_sha256": "677743e235723c360245dd0de5e7bd282aba92ae31485b20e231f472c6fd3b62",
+    "source": "user-uploaded source subset ZIP"
+  },
+  "tests/test_region_review_v5_desktop_contract.py": {
+    "baseline_sha256": "8f16d6586ccfe5bbb26fad884700af38a8b9d7d669f5a6ad2b4f8361859a2654",
+    "replacement_sha256": "ab81dd8cd4b3d30554e385bb701f1ee78ffae28e1586acb517e73a7b19b634b0",
+    "source": "user-uploaded .py"
+  }
+}
