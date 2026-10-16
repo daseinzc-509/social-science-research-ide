@@ -5,12 +5,12 @@ These tests do not replace Windows `dotnet build` or UI interaction tests.
 from __future__ import annotations
 
 from pathlib import Path
-import ast
+import re
 
 ROOT=Path(__file__).resolve().parents[1]
 WINDOW=ROOT/"desktop/SRA.Desktop/Views/RegionReviewWindow.cs"
 COMPARE=ROOT/"desktop/SRA.Desktop/Views/ReviewedComparisonWindow.cs"
-INSTALLER=ROOT/"apply_region_review_v5.py"
+CLIENT=ROOT/"desktop/SRA.Desktop/Services/SraApiClient.cs"
 ROUTE=ROOT/"src/sociology_research/api/routes/region_review.py"
 
 
@@ -37,20 +37,24 @@ def test_historical_two_column_comparison_ui_and_source_labels():
 
 
 def test_api_client_methods_injected_with_matching_route_paths():
-    module=ast.parse(INSTALLER.read_text(encoding="utf-8"))
-    assignment=next(node for node in module.body if isinstance(node,ast.Assign)
-                    and any(isinstance(t,ast.Name) and t.id=="CLIENT_METHODS" for t in node.targets))
-    methods=ast.literal_eval(assignment.value)
+    # Check the integrated C# client, not a deleted one-off migration script.
+    client=CLIENT.read_text(encoding="utf-8")
     route=ROUTE.read_text(encoding="utf-8")
-    for method in ("PreviewReviewedComparisonAsync","RunReviewedComparisonAsync",
-                   "ListReviewedComparisonsAsync","GetReviewedComparisonAsync"):
-        assert method in methods
-    assert "/reanalysis/preview" in route
-    assert "/reanalysis/run" in route
-    assert "/reanalysis/reports" in route
-    assert 'approve_external_send' in methods
-    assert 'acknowledge_api_cost' in methods
-    assert 'ReadJsonAsync<JsonElement>' in methods
+    start=client.index("public Task<JsonElement> PreviewReviewedComparisonAsync")
+    end=client.index("public Task<JsonElement> GetVisualSettingsAsync", start)
+    methods=client[start:end]
+    for method in ("PreviewReviewedComparisonAsync", "RunReviewedComparisonAsync",
+                   "ListReviewedComparisonsAsync", "GetReviewedComparisonAsync"):
+        assert re.search(r"public\s+(?:async\s+)?Task<JsonElement>\s+"+method+r"\s*\(", methods)
+    for endpoint in ("/reanalysis/preview", "/reanalysis/run", "/reanalysis/reports"):
+        assert endpoint in route
+        assert endpoint in methods
+    assert 'expected_snapshot_digest = snapshotDigest' in methods
+    assert 'approve_external_send = externalConsent' in methods
+    assert 'acknowledge_api_cost = costConsent' in methods
+    assert 'ReadJsonAsync<JsonElement>(response, cancellationToken)' in methods
+    assert 'GetJsonAsync<JsonElement>(' in methods
+    assert 'Uri.EscapeDataString(paperId)' in methods
 
 
 def test_fail_closed_code_still_preserves_baseline():

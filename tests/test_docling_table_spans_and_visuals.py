@@ -189,8 +189,12 @@ def test_old_sqlite_layout_gets_additive_migration(tmp_path):
 
 
 def test_optional_formula_enrichment_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("SRA_DOCLING_FORMULA_ENRICHMENT",raising=False)
-    plain=parser.DoclingDocumentParser()
+    monkeypatch.delenv("SRA_DOCLING_FORMULA_ENRICHMENT", raising=False)
+    monkeypatch.delenv("SRA_FORMULA_ENRICHMENT", raising=False)
+    # Keep this test independent of a developer's persisted UI preference.
+    from sociology_research import user_storage
+    monkeypatch.setattr(user_storage, "read_user_preferences", lambda: {})
+    plain = parser.DoclingDocumentParser()
     assert not plain.formula_enabled
     assert "default" in plain.version
     monkeypatch.setenv("SRA_DOCLING_FORMULA_ENRICHMENT","1")

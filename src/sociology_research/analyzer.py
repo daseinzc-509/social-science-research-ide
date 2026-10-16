@@ -85,8 +85,8 @@ class PaperAnalysisPipeline:
             from dataclasses import replace
             from .model_profiles import active_token_budget
             defaults = AnalysisConfig()
-            lite_tokens = active_token_budget("lite", self.settings.lite_model or "")
-            pro_tokens = active_token_budget("pro", self.settings.pro_model or "")
+            lite_tokens = active_token_budget("lite", getattr(self.settings, "lite_model", "") or "")
+            pro_tokens = active_token_budget("pro", getattr(self.settings, "pro_model", "") or "")
             self.analysis_config = replace(
                 defaults,
                 lite_max_completion_tokens=lite_tokens or defaults.lite_max_completion_tokens,

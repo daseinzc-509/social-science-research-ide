@@ -224,58 +224,86 @@ def test_minimal_worker_pdf_valid():
 
 
 def test_real_fastapi_router_crud_without_paper_repository(isolated, monkeypatch):
-    """Wire the actual route onto FastAPI using only the supplied source subset.
+    """Exercise the REAL model-center router without importing the entire app.
 
-    The original application's repository/middleware code is not in this ZIP,
-    so that larger boot and auth integration must run in the user's full repo.
+    In the complete repository, sociology_research.api.__init__ imports app.py,
+    and sociology_research.services.__init__ imports application.py. Importing
+    either package initializer here would pull in the actual repository and
+    background jobs, which this isolated router test deliberately does not use.
+    Substitute only the parent packages and the two external dependencies;
+    import the actual model_center.py by its unchanged qualified name.
     """
     import importlib
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    import sociology_research.model_profiles as profiles
 
+    package_root = Path(__file__).resolve().parents[1] / "src" / "sociology_research"
+
+    def namespace_package(qualified_name: str, directory: Path) -> ModuleType:
+        package = ModuleType(qualified_name)
+        package.__package__ = qualified_name
+        package.__path__ = [str(directory)]
+        return package
+
+    api_package = namespace_package("sociology_research.api", package_root / "api")
+    routes_package = namespace_package("sociology_research.api.routes", package_root / "api" / "routes")
+    services_package = namespace_package("sociology_research.services", package_root / "services")
     service_module = ModuleType("sociology_research.services.application")
     service_module.ApplicationServices = type("ApplicationServices", (), {})
     dependency_module = ModuleType("sociology_research.api.dependencies")
+
     def get_services():
         return SimpleNamespace(jobs=SimpleNamespace(
             create=lambda kind: SimpleNamespace(id="faked-job"),
             start=lambda job, work: None,
         ))
+
     dependency_module.get_services = get_services
-    monkeypatch.setitem(sys.modules, "sociology_research.services.application", service_module)
-    monkeypatch.setitem(sys.modules, "sociology_research.api.dependencies", dependency_module)
     imported_name = "sociology_research.api.routes.model_center"
-    sys.modules.pop(imported_name, None)
-    route = importlib.import_module(imported_name)
-    app = FastAPI()
-    app.include_router(route.router, prefix="/api/v1")
-    client = TestClient(app)
-    prefix = "/api/v1/settings/model-center"
-    first = client.get(prefix)
-    assert first.status_code == 200
-    assert first.json()["network"]["download_mode"] == "system"
-    client = TestClient(app, raise_server_exceptions=False)
-    assert client.put(prefix + "/network", json={"download_mode": "invalid"}).status_code >= 400
-    assert client.put(prefix + "/network", json={
-        "download_mode":"custom", "download_proxy":"http://localhost:7890",
-        "ai_mode":"direct", "ai_proxy":"",
-    }).status_code == 200
-    response = client.post(prefix + "/profiles", json={
-        "name":"API test", "base_url":"https://models.example.org/v1",
-        "model":"model-v1", "max_tokens":2048, "api_key":"secret-value",
-    })
-    assert response.status_code == 200, response.text
-    profile = response.json()
-    assert "api_key" not in profile and profile["id"] in isolated.keys
-    assert "secret-value" not in client.get(prefix).text
-    stage = client.post(prefix + "/activate", json={"slot":"lite", "profile_id":profile["id"]})
-    assert stage.status_code == 200
-    assert Settings.from_environment().require_lite_configuration()[2] == "model-v1"
-    assert client.delete(prefix + "/profiles/" + profile["id"]).status_code in (400, 500)
-    accepted = client.post(prefix + "/models/download", json={"formula":False})
-    assert accepted.status_code == 202 and accepted.json() == {"job_id":"faked-job"}
-    sys.modules.pop(imported_name, None)
+    root_package = importlib.import_module("sociology_research")
+
+    # Keep mocks scoped to this test, including cached package imports.
+    # In a real checkout, API and services __init__.py both have side effects;
+    # the router test must not require them or leave fakes for later tests.
+    with monkeypatch.context() as scoped:
+        scoped.setitem(sys.modules, "sociology_research.api", api_package)
+        scoped.setitem(sys.modules, "sociology_research.api.routes", routes_package)
+        scoped.setitem(sys.modules, "sociology_research.services", services_package)
+        scoped.setitem(sys.modules, "sociology_research.services.application", service_module)
+        scoped.setitem(sys.modules, "sociology_research.api.dependencies", dependency_module)
+        scoped.setattr(root_package, "api", api_package, raising=False)
+        scoped.setattr(root_package, "services", services_package, raising=False)
+        scoped.delitem(sys.modules, imported_name, raising=False)
+
+        route = importlib.import_module(imported_name)
+        scoped.setitem(sys.modules, imported_name, route)
+        app = FastAPI()
+        app.include_router(route.router, prefix="/api/v1")
+        client = TestClient(app)
+        prefix = "/api/v1/settings/model-center"
+        first = client.get(prefix)
+        assert first.status_code == 200
+        assert first.json()["network"]["download_mode"] == "system"
+        client = TestClient(app, raise_server_exceptions=False)
+        assert client.put(prefix + "/network", json={"download_mode": "invalid"}).status_code >= 400
+        assert client.put(prefix + "/network", json={
+            "download_mode": "custom", "download_proxy": "http://localhost:7890",
+            "ai_mode": "direct", "ai_proxy": "",
+        }).status_code == 200
+        response = client.post(prefix + "/profiles", json={
+            "name": "API test", "base_url": "https://models.example.org/v1",
+            "model": "model-v1", "max_tokens": 2048, "api_key": "secret-value",
+        })
+        assert response.status_code == 200, response.text
+        profile = response.json()
+        assert "api_key" not in profile and profile["id"] in isolated.keys
+        assert "secret-value" not in client.get(prefix).text
+        stage = client.post(prefix + "/activate", json={"slot": "lite", "profile_id": profile["id"]})
+        assert stage.status_code == 200
+        assert Settings.from_environment().require_lite_configuration()[2] == "model-v1"
+        assert client.delete(prefix + "/profiles/" + profile["id"]).status_code in (400, 500)
+        accepted = client.post(prefix + "/models/download", json={"formula": False})
+        assert accepted.status_code == 202 and accepted.json() == {"job_id": "faked-job"}
 
 
 def test_llm_client_configured_proxy_uses_real_per_client_opener(isolated, monkeypatch):

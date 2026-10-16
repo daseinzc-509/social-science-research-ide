@@ -14,11 +14,11 @@ on:
         type: choice
         options: [full]
       collection_policy:
-        description: 'conservative: default; lean: experimental extra trimming; compatible: rollback'
+        description: 'conservative: default (preserves model resources); compatible: broad rollback'
         required: true
         default: 'conservative'
         type: choice
-        options: [conservative, lean, compatible]
+        options: [conservative, compatible]
   push:
     tags:
       - 'v*'
@@ -58,7 +58,7 @@ jobs:
             profile="$PROFILE"
             policy="$POLICY"
           fi
-          case "$policy" in conservative|lean|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
+          case "$policy" in conservative|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
           for field in tag version assembly mac_short; do
             echo "$field=$(python scripts/release_version.py "$tag" --field "$field")" >> "$GITHUB_OUTPUT"
           done
@@ -142,13 +142,10 @@ jobs:
           if [ "$COLLECTION_POLICY" != 'compatible' ] && [ "${{ matrix.target }}" = 'win-x64' ]; then
             set -- "$@" --remove-opencv-video-codecs
           fi
-          if [ "$COLLECTION_POLICY" = 'lean' ]; then
-            set -- "$@" --remove-type-stubs
-          fi
           python scripts/prune_release_assets.py "$@"
           cat "dist/build-size-audit/prune-report-${{ matrix.target }}.md" >> "$GITHUB_STEP_SUMMARY"
           echo "### Backend collection policy: $COLLECTION_POLICY" >> "$GITHUB_STEP_SUMMARY"
-          # For lean, the same frozen runtime tests must pass before packaging.
+          # Every supported policy must pass the frozen runtime tests before packaging.
           # Exercise the ACTUAL frozen executable (generated PDF -> extracted text
           # -> PDFium raster -> OpenCV decode, plus Docling/Torch imports).
           # This does not download HF models or claim a complete OCR/layout test.
