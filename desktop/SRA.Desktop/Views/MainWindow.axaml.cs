@@ -14,6 +14,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // Explicit subscription avoids Avalonia XAML event-handler resolution
+        // failures (AVLN3000) for the model-center launcher.
+        ModelCenterLaunchButton.Click += OpenModelCenter_Click;
         NavigateTo("papers");
     }
 

@@ -174,7 +174,13 @@ def test_single_ui_no_duplicate_credential_editor_and_feature_switches_routed():
     client = (root / "desktop/SRA.Desktop/Services/SraApiClient.cs").read_text(encoding="utf-8")
     route = (root / "src/sociology_research/api/routes/model_center.py").read_text(encoding="utf-8")
 
-    assert xaml.count('Click="OpenModelCenter_Click"') == 1
+    assert xaml.count('x:Name="ModelCenterLaunchButton"') == 1
+    assert 'Click="OpenModelCenter_Click"' not in xaml
+    assert codebehind.count("ModelCenterLaunchButton.Click += OpenModelCenter_Click;") == 1
+    assert codebehind.index("InitializeComponent();") < codebehind.index(
+        "ModelCenterLaunchButton.Click += OpenModelCenter_Click;"
+    )
+    assert "private async void OpenModelCenter_Click(object? sender, RoutedEventArgs e)" in codebehind
     assert 'Text="模型连接"' not in xaml
     assert 'Text="模型与网络中心"' not in xaml
     assert 'Text="公式与图片增强"' not in xaml
@@ -285,3 +291,17 @@ def test_real_router_returns_effective_stage_and_saves_switches_only(isolated, m
                 "formula_enabled": True, "vision_enabled": False,
             }
             assert isolated.stage_keys["SRA_LITE_API_KEY"] == "route-super-secret"
+
+
+def test_model_center_click_registration_is_compile_safe():
+    """The new model-center button must not rely on XAML event-name resolution."""
+    root = Path(__file__).resolve().parents[1]
+    xaml = (root / "desktop/SRA.Desktop/Views/MainWindow.axaml").read_text(encoding="utf-8")
+    code = (root / "desktop/SRA.Desktop/Views/MainWindow.axaml.cs").read_text(encoding="utf-8")
+    assert xaml.count('x:Name="ModelCenterLaunchButton"') == 1
+    assert 'Click="OpenModelCenter_Click"' not in xaml
+    assert code.count('ModelCenterLaunchButton.Click += OpenModelCenter_Click;') == 1
+    assert code.index('InitializeComponent();') < code.index(
+        'ModelCenterLaunchButton.Click += OpenModelCenter_Click;'
+    )
+    assert 'private async void OpenModelCenter_Click(object? sender, RoutedEventArgs e)' in code

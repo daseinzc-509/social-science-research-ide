@@ -207,7 +207,12 @@ def test_desktop_settings_are_wired_to_real_client_methods():
     window = (root / "desktop/SRA.Desktop/Views/MainWindow.axaml.cs").read_text()
     new_ui = (root / "desktop/SRA.Desktop/Views/ModelCenterWindow.cs").read_text()
     api = (root / "desktop/SRA.Desktop/Services/SraApiClient.cs").read_text()
-    assert 'Click="OpenModelCenter_Click"' in xaml
+    assert xaml.count('x:Name="ModelCenterLaunchButton"') == 1
+    assert 'Click="OpenModelCenter_Click"' not in xaml
+    assert window.count('ModelCenterLaunchButton.Click += OpenModelCenter_Click;') == 1
+    assert window.index('InitializeComponent();') < window.index(
+        'ModelCenterLaunchButton.Click += OpenModelCenter_Click;'
+    )
     assert 'private async void OpenModelCenter_Click' in window
     assert "await window.ShowDialog(this)" in window
     for method in ("GetModelCenterAsync", "SaveModelCenterNetworkAsync", "SaveNamedModelProfileAsync",

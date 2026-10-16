@@ -200,19 +200,51 @@ def test_vision_model_needs_explicit_request_and_never_writes_card(monkeypatch,t
 
 
 def test_ui_contract_theme_and_visual_settings():
-    project_root=Path(__file__).resolve().parents[1]
-    xaml=(project_root/"desktop/SRA.Desktop/Views/MainWindow.axaml").read_text(encoding="utf-8")
+    """Keep table, regional review, and Vision behavior while using one settings UI."""
+    project_root = Path(__file__).resolve().parents[1]
+    xaml = (
+        project_root / "desktop/SRA.Desktop/Views/MainWindow.axaml"
+    ).read_text(encoding="utf-8")
     import xml.etree.ElementTree as ET
     ET.fromstring(xaml)
-    table=xaml.split('<TabItem Header="表格">',1)[1].split(
-        '<TabItem Header="公式与图片">',1)[0]
+
+    # The paper-reading tabs and table theme must not regress.
+    table = xaml.split('<TabItem Header="表格">', 1)[1].split(
+        '<TabItem Header="公式与图片">', 1
+    )[0]
     assert 'Background="{DynamicResource CodeBrush}"' not in table
     assert table.count('Foreground="{DynamicResource InkBrush}"') >= 2
-    assert 'Click="SaveVisualSettings_Click"' in xaml
     assert 'Click="AnalyzeFigure_Click"' in xaml
     assert 'Click="RegionReview_Click"' in xaml
-    assert 'Settings.VisionModel' in xaml
-    api=(project_root/"desktop/SRA.Desktop/Services/SraApiClient.cs").read_text(encoding="utf-8")
+
+    # There is one editable model-settings entry, not a second Vision editor.
+    assert xaml.count('x:Name="ModelCenterLaunchButton"') == 1
+    assert 'Click="OpenModelCenter_Click"' not in xaml
+    assert 'Click="SaveVisualSettings_Click"' not in xaml
+    assert "Settings.VisionModel" not in xaml
+
+    # Check the real desktop-to-backend path, not the removed button.
+    codebehind = (
+        project_root / "desktop/SRA.Desktop/Views/MainWindow.axaml.cs"
+    ).read_text(encoding="utf-8")
+    dialog = (
+        project_root / "desktop/SRA.Desktop/Views/ModelCenterWindow.cs"
+    ).read_text(encoding="utf-8")
+    api = (
+        project_root / "desktop/SRA.Desktop/Services/SraApiClient.cs"
+    ).read_text(encoding="utf-8")
+    route = (
+        project_root / "src/sociology_research/api/routes/model_center.py"
+    ).read_text(encoding="utf-8")
+
+    assert "new ModelCenterWindow(ViewModel.Api)" in codebehind
+    assert codebehind.count("ModelCenterLaunchButton.Click += OpenModelCenter_Click;") == 1
+    assert "SaveModelCenterEnhancementsAsync(" in dialog
+    assert "SaveModelCenterEnhancementsAsync(" in api
+    assert '"api/v1/settings/model-center/enhancements"' in api
+    assert '@router.put("/enhancements")' in route
+
+    # Keep legacy API compatibility and the original visual-review features.
     assert "GetVisualSettingsAsync(" in api
     assert "AnalyzeFigureAsync(" in api
     assert "GetRegionReviewPageAsync(" in api

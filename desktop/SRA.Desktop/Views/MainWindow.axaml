@@ -653,7 +653,7 @@
                 <StackPanel Grid.Column="1" Spacing="12">
                   <TextBlock Text="在一个窗口内选择 Lite / Pro / Vision 当前生效的配置，设置 API Key、模型参数、网络代理、Docling 权重与公式/图片增强。" Classes="muted" TextWrapping="Wrap"/>
                   <TextBlock Text="原有 API 连接继续有效；首次使用时可在模型中心导入旧配置。不需要重新填写密钥。" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-                  <Button Content="打开模型配置中心" Classes="primary" HorizontalAlignment="Left" Click="OpenModelCenter_Click"/>
+                  <Button x:Name="ModelCenterLaunchButton" Content="打开模型配置中心" Classes="primary" HorizontalAlignment="Left"/>
                 </StackPanel>
               </Grid>
             </Border>
