@@ -322,6 +322,12 @@ def resolved_pro_output_budget(model: str, requested: int) -> int:
         raise ValueError("Pro output token budget is outside safe limits.")
     if model.strip().casefold() != "kimi-k3":
         return requested
+    # A named Pro profile's manually selected output reservation is explicit.
+    # Do not silently replace that choice with the old implicit 8192 default.
+    from .model_profiles import active_token_budget
+    active = active_token_budget("pro", model)
+    if active is not None:
+        return active
     override = os.environ.get("SRA_KIMI_K3_OUTPUT_TOKENS", "").strip()
     if override:
         if not override.isascii() or not override.isdigit():

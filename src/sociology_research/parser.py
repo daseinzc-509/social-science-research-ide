@@ -102,6 +102,14 @@ class DoclingDocumentParser:
 
         def convert(*, full_page: bool, formula: bool):
             options = PdfPipelineOptions()
+            from .model_runtime import verified_artifacts_path
+            managed_path = verified_artifacts_path(formula=formula)
+            if managed_path is not None:
+                # Restrict managed operation to pre-downloaded, offline-verified
+                # models and the OCR backend verified by our worker.
+                from docling.datamodel.pipeline_options import RapidOcrOptions
+                options.artifacts_path = managed_path
+                options.ocr_options = RapidOcrOptions(backend="onnxruntime", lang=["ch"])
             if formula:
                 if not hasattr(options, "do_formula_enrichment"):
                     raise DocumentParseError(

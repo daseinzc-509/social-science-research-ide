@@ -65,6 +65,8 @@ def command_args(
         "--hidden-import", "uvicorn.logging",
         "--hidden-import", "multipart",
         "--hidden-import", "frozen_backend_probe",
+        "--hidden-import", "sociology_research.model_center_worker",
+        "--runtime-hook", str(project / "scripts" / "sra_model_worker_runtime_hook.py"),
         "--collect-submodules", "sociology_research.api",
         "--collect-submodules", "sociology_research.services",
     ]

@@ -79,7 +79,21 @@ class PaperAnalysisPipeline:
         self._client = client
         self.parser = create_default_parser()
         self.progress = progress
-        self.analysis_config = analysis_config or AnalysisConfig()
+        if analysis_config is None:
+            # Named model profiles may override output reservation for future jobs;
+            # the previous per-model defaults remain when no profile is active.
+            from dataclasses import replace
+            from .model_profiles import active_token_budget
+            defaults = AnalysisConfig()
+            lite_tokens = active_token_budget("lite", self.settings.lite_model or "")
+            pro_tokens = active_token_budget("pro", self.settings.pro_model or "")
+            self.analysis_config = replace(
+                defaults,
+                lite_max_completion_tokens=lite_tokens or defaults.lite_max_completion_tokens,
+                pro_max_completion_tokens=pro_tokens or defaults.pro_max_completion_tokens,
+            )
+        else:
+            self.analysis_config = analysis_config
 
     def preview(self, paper_id: str, *, exclude_after_text: str | None = None) -> dict[str, object]:
         record, blocks = self._load_paper_blocks(paper_id, exclude_after_text=exclude_after_text)

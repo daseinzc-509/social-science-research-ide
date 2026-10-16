@@ -1,0 +1,295 @@
+// SRA integrated native settings window: authenticated calls flow through SraApiClient.
+// This file is rendered by the installer with namespaces matching the local project.
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Layout;
+using __CLIENT_NAMESPACE__;
+
+namespace __VIEWS_NAMESPACE__;
+
+internal sealed class ModelCenterWindow : Window
+{
+    private readonly SraApiClient _api;
+    private readonly ComboBox _networkMode = new() { ItemsSource = new[] { "system", "direct", "manual" }, SelectedIndex = 0, MinWidth = 160 };
+    private readonly TextBox _proxyUrl = new() { Watermark = "http://127.0.0.1:7890", MinWidth = 280 };
+    private readonly CheckBox _formula = new() { Content = "同时下载公式增强模型" };
+    private readonly CheckBox _managed = new() { Content = "启用托管模型（未验证成功时阻止 PDF 导入）" };
+    private readonly TextBlock _networkStatus = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly TextBlock _activity = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly ListBox _profiles = new() { MinHeight = 160 };
+    private readonly TextBox _name = new() { Watermark = "例如 Kimi K3 / GLM Flash" };
+    private readonly ComboBox _role = new() { ItemsSource = new[] { "lite", "pro", "vision" }, SelectedIndex = 0 };
+    private readonly TextBox _baseUrl = new() { Watermark = "https://provider.example/v1" };
+    private readonly TextBox _model = new() { Watermark = "模型 API ID" };
+    private readonly TextBox _apiKey = new() { PasswordChar = '●', Watermark = "新增时必填；修改时留空表示保留原密钥" };
+    private readonly TextBlock _profileStatus = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly List<ProviderProfileRow> _rows = new();
+    private string? _currentId;
+
+    internal ModelCenterWindow(SraApiClient api)
+    {
+        _api = api;
+        Title = "SRA · 模型资源与 AI 配置";
+        Width = 900;
+        Height = 760;
+        MinWidth = 660;
+        MinHeight = 560;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        var tabs = new TabControl
+        {
+            Margin = new Thickness(18),
+            ItemsSource = new[]
+            {
+                new TabItem { Header = "Docling 模型 / 下载代理", Content = CreateNetworkView() },
+                new TabItem { Header = "AI API 多配置", Content = CreateProfilesView() },
+            },
+        };
+        Content = tabs;
+        Opened += async (_, _) =>
+        {
+            await SafeRunAsync(LoadNetworkAsync, _activity);
+            await SafeRunAsync(LoadProfilesAsync, _profileStatus);
+        };
+    }
+
+    private static TextBlock Explanation(string text) => new()
+    {
+        Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        Opacity = 0.78, Margin = new Thickness(0, 3, 0, 8),
+    };
+
+    private static Button Action(string caption, Action onClick)
+    {
+        var button = new Button { Content = caption, Margin = new Thickness(0, 0, 8, 8), MinWidth = 92 };
+        button.Click += (_, _) => onClick();
+        return button;
+    }
+
+    private static StackPanel FormRow(string label, Control control)
+    {
+        return new StackPanel
+        {
+            Margin = new Thickness(0, 0, 0, 10),
+            Children = { new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 5) }, control }
+        };
+    }
+
+    private ScrollViewer CreateNetworkView()
+    {
+        var root = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+        root.Children.Add(new TextBlock { Text = "Docling 离线模型资源", FontSize = 20, FontWeight = Avalonia.Media.FontWeight.SemiBold });
+        root.Children.Add(Explanation("模型文件保存在用户数据目录，不随安装包重复下载；代理仅用于模型下载。下载成功后，还需要运行真实离线验证。"));
+        root.Children.Add(FormRow("下载连接方式（system / direct / manual）", _networkMode));
+        root.Children.Add(FormRow("手动代理地址（支持 HTTP(S)；SOCKS5 需安装相应依赖）", _proxyUrl));
+        root.Children.Add(_formula);
+        root.Children.Add(_managed);
+        var row = new WrapPanel();
+        row.Children.Add(Action("保存代理设置", () => _ = SafeRunAsync(SaveNetworkAsync, _activity)));
+        row.Children.Add(Action("测试下载网络", () => _ = SafeRunAsync(TestNetworkAsync, _activity)));
+        row.Children.Add(Action("下载模型资源", () => _ = SafeRunAsync(DownloadAsync, _activity)));
+        row.Children.Add(Action("运行离线验证", () => _ = SafeRunAsync(VerifyAsync, _activity)));
+        row.Children.Add(Action("刷新状态", () => _ = SafeRunAsync(LoadNetworkAsync, _activity)));
+        root.Children.Add(row);
+        root.Children.Add(Explanation("下载和验证为异步任务：点击后可按“刷新状态”检查进度。网络测试成功不代表模型已齐全。正在分析论文时请不要同时下载模型。"));
+        root.Children.Add(_networkStatus);
+        root.Children.Add(_activity);
+        return new ScrollViewer { Content = root, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+    }
+
+    private ScrollViewer CreateProfilesView()
+    {
+        var root = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
+        root.Children.Add(new TextBlock { Text = "模型 API 配置", FontSize = 20, FontWeight = Avalonia.Media.FontWeight.SemiBold });
+        root.Children.Add(Explanation("可保存多套服务商与模型，分别用于 Lite、Pro、Vision。密钥存于操作系统凭据库，不回显；切换后重启 SRA 才保证新分析任务使用这套配置。"));
+        root.Children.Add(_profiles);
+        _profiles.SelectionChanged += (_, _) => ShowSelectedProfile();
+        var listActions = new WrapPanel();
+        listActions.Children.Add(Action("新增配置", ClearEditor));
+        listActions.Children.Add(Action("刷新列表", () => _ = SafeRunAsync(LoadProfilesAsync, _profileStatus)));
+        root.Children.Add(listActions);
+        root.Children.Add(FormRow("配置名称", _name));
+        root.Children.Add(FormRow("模型用途", _role));
+        root.Children.Add(FormRow("OpenAI Compatible Base URL", _baseUrl));
+        root.Children.Add(FormRow("模型 API ID", _model));
+        root.Children.Add(FormRow("API Key（不会回显已保存的密钥）", _apiKey));
+        var actions = new WrapPanel();
+        actions.Children.Add(Action("保存配置", () => _ = SafeRunAsync(SaveProfileAsync, _profileStatus)));
+        actions.Children.Add(Action("设为当前用途", () => _ = SafeRunAsync(ActivateProfileAsync, _profileStatus)));
+        actions.Children.Add(Action("测试 API", () => _ = SafeRunAsync(TestProfileAsync, _profileStatus)));
+        actions.Children.Add(Action("删除配置", () => _ = SafeRunAsync(DeleteProfileAsync, _profileStatus)));
+        root.Children.Add(actions);
+        root.Children.Add(Explanation("连接测试会发起一次小型、可能计费的模型请求，不自动重试。HTTP 429 可能是服务商额度或模型级限制，不是 Docling 下载失败。"));
+        root.Children.Add(_profileStatus);
+        return new ScrollViewer { Content = root };
+    }
+
+    private async Task<JsonElement> RequestAsync(HttpMethod method, string path, object? data = null)
+        => await _api.ModelCenterRequestAsync(method, path, data);
+
+    private async Task SafeRunAsync(Func<Task> action, TextBlock output)
+    {
+        try { await action(); }
+        catch (Exception error)
+        {
+            // Do not echo upstream exception bodies: they may contain provider secrets.
+            output.Text = "操作失败。检查本地 API 是否已启动、版本是否一致，以及网络或密钥设置。" +
+                          " 错误类型：" + error.GetType().Name;
+        }
+    }
+
+    private static string StringProp(JsonElement json, string name)
+        => json.ValueKind == JsonValueKind.Object && json.TryGetProperty(name, out var val)
+           ? val.ToString() : "";
+
+    private async Task LoadNetworkAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Get, "");
+        var network = data.GetProperty("network");
+        var mode = StringProp(network, "mode");
+        _networkMode.SelectedItem = mode;
+        _proxyUrl.Text = StringProp(network, "proxy_url");
+        _formula.IsChecked = network.TryGetProperty("formula_models", out var formula) && formula.GetBoolean();
+        _managed.IsChecked = network.TryGetProperty("use_managed_models", out var managed) && managed.GetBoolean();
+        var models = data.GetProperty("models");
+        var job = data.GetProperty("job");
+        _networkStatus.Text = "模型状态：" + StringProp(models, "state") +
+                              "\n缓存目录：" + StringProp(models, "model_dir") +
+                              "\n下载任务：" + StringProp(job, "state") +
+                              "\n错误类别：" + StringProp(job, "error");
+    }
+
+    private async Task SaveNetworkAsync()
+    {
+        var result = await RequestAsync(HttpMethod.Put, "/network", new
+        {
+            mode = (_networkMode.SelectedItem as string) ?? "system",
+            proxy_url = _proxyUrl.Text ?? "",
+            formula_models = _formula.IsChecked == true,
+            // Use-managed state is explicit: proxy alone never locks out legacy imports.
+            use_managed_models = _managed.IsChecked == true,
+        });
+        _activity.Text = "网络配置已保存。勾选托管模型后，必须先完成下载与离线验证才能继续导入 PDF。";
+        await LoadNetworkAsync();
+    }
+
+    private async Task TestNetworkAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Post, "/test-network");
+        _activity.Text = "测试结果：" + StringProp(data, "reachable") +
+                         "，HTTP：" + StringProp(data, "http_status") +
+                         "，类别：" + StringProp(data, "error_type");
+    }
+
+    private async Task DownloadAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Post, "/download");
+        _activity.Text = "模型下载任务已提交：" + StringProp(data, "id") + "。请稍后点击刷新状态查看结果。";
+        await LoadNetworkAsync();
+    }
+
+    private async Task VerifyAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Post, "/verify");
+        _activity.Text = "离线验证任务已提交：" + StringProp(data, "id") + "。";
+        await LoadNetworkAsync();
+    }
+
+    private void ClearEditor()
+    {
+        _profiles.SelectedItem = null;
+        _currentId = null;
+        _name.Text = "";
+        _baseUrl.Text = "";
+        _model.Text = "";
+        _role.SelectedIndex = 0;
+        _apiKey.Text = "";
+        _profileStatus.Text = "新配置：请填写名称、服务地址、模型 API ID 和密钥。";
+    }
+
+    private void ShowSelectedProfile()
+    {
+        if (_profiles.SelectedItem is not ProviderProfileRow row) return;
+        _currentId = row.Id;
+        _name.Text = row.Name;
+        _role.SelectedItem = row.Role;
+        _baseUrl.Text = row.BaseUrl;
+        _model.Text = row.Model;
+        _apiKey.Text = "";
+        _profileStatus.Text = "正在编辑已保存配置。原密钥不会回显。";
+    }
+
+    private async Task LoadProfilesAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Get, "/profiles");
+        var active = data.TryGetProperty("active", out var activeJson) ? activeJson : default;
+        _rows.Clear();
+        foreach (var item in data.GetProperty("profiles").EnumerateArray())
+        {
+            var role = StringProp(item, "role");
+            var id = StringProp(item, "id");
+            var activeId = active.ValueKind == JsonValueKind.Object ? StringProp(active, role) : "";
+            _rows.Add(new ProviderProfileRow(id, StringProp(item, "name"), role,
+                         StringProp(item, "base_url"), StringProp(item, "model"), id == activeId));
+        }
+        _profiles.ItemsSource = null;
+        _profiles.ItemsSource = _rows.ToArray();
+        if (_currentId != null)
+            _profiles.SelectedItem = _rows.FirstOrDefault(x => x.Id == _currentId);
+        _profileStatus.Text = "已加载配置；API Key 不会通过列表接口返回。";
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        var data = await RequestAsync(HttpMethod.Post, "/profiles", new
+        {
+            id = _currentId,
+            name = _name.Text ?? "",
+            role = (_role.SelectedItem as string) ?? "lite",
+            base_url = _baseUrl.Text ?? "",
+            model = _model.Text ?? "",
+            api_key = _apiKey.Text ?? "",
+        });
+        _currentId = StringProp(data.GetProperty("profile"), "id");
+        _apiKey.Text = "";
+        await LoadProfilesAsync();
+        _profileStatus.Text = "配置已保存到本地，密钥存储在系统凭据库。";
+    }
+
+    private async Task ActivateProfileAsync()
+    {
+        if (string.IsNullOrEmpty(_currentId)) { _profileStatus.Text = "先保存或选中一项配置。"; return; }
+        var data = await RequestAsync(HttpMethod.Post, "/profiles/" + Uri.EscapeDataString(_currentId) + "/activate");
+        await LoadProfilesAsync();
+        _profileStatus.Text = "已保存为当前用途模型。请重启 SRA，再开始新的分析任务。";
+    }
+
+    private async Task TestProfileAsync()
+    {
+        if (string.IsNullOrEmpty(_currentId)) { _profileStatus.Text = "先保存或选中一项配置。"; return; }
+        var data = await RequestAsync(HttpMethod.Post, "/profiles/" + Uri.EscapeDataString(_currentId) + "/test");
+        _profileStatus.Text = "API 测试：" + StringProp(data, "category") +
+                              "；HTTP：" + StringProp(data, "http_status") +
+                              "。测试只发送少量文字。";
+    }
+
+    private async Task DeleteProfileAsync()
+    {
+        if (string.IsNullOrEmpty(_currentId)) { _profileStatus.Text = "先选中一项配置。"; return; }
+        await RequestAsync(HttpMethod.Delete, "/profiles/" + Uri.EscapeDataString(_currentId));
+        ClearEditor();
+        await LoadProfilesAsync();
+        _profileStatus.Text = "配置已删除（不会删除已有论文或分析缓存）。";
+    }
+
+    private sealed record ProviderProfileRow(string Id, string Name, string Role,
+        string BaseUrl, string Model, bool Active)
+    {
+        public override string ToString() => (Active ? "● 当前 | " : "") + Name + " · " + Role + " · " + Model;
+    }
+}

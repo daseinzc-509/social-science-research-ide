@@ -118,9 +118,37 @@ class OpenAICompatibleClient:
         if not base_url.strip().startswith(("https://", "http://")):
             raise ValueError("API base URL must use HTTP or HTTPS")
         self._api_key = api_key.strip()
-        self._endpoint = base_url.rstrip("/") + "/chat/completions"
+        self._base_url = base_url.rstrip("/")
+        self._endpoint = self._base_url + "/chat/completions"
         self._timeout_seconds = timeout_seconds
         self._progress = progress
+        # A per-client opener applies the requested proxy without changing the
+        # download worker or another running AI request.
+        from .network_settings import ai_request_opener
+        self._opener = ai_request_opener()
+
+    def list_model_ids(self) -> list[str]:
+        """Best-effort provider /models listing; not every compatible API offers it."""
+        request = Request(
+            self._base_url + "/models",
+            headers={"Authorization": f"Bearer {self._api_key}", "Accept": "application/json"},
+            method="GET",
+        )
+        sender = self._opener.open if self._opener is not None else urlopen
+        try:
+            with sender(request, timeout=min(30, self._timeout_seconds)) as response:
+                data = json.loads(response.read(1_000_001).decode("utf-8"))
+        except HTTPError as exc:
+            raise ModelRequestError(_http_error_message(exc)) from None
+        except (URLError, OSError, TimeoutError):
+            raise ModelRequestError("Could not retrieve model list from this provider.") from None
+        except (ValueError, UnicodeError):
+            raise ModelRequestError("Provider returned an invalid model list.") from None
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise ModelRequestError("Provider does not expose a compatible /models catalog; enter the model ID manually.")
+        ids = [_safe_provider_id(item.get("id")) for item in data["data"][:200]
+               if isinstance(item, dict)]
+        return sorted({value for value in ids if value})
 
     def complete_json(
         self,
@@ -172,7 +200,8 @@ class OpenAICompatibleClient:
         if self._progress:
             heartbeat_thread.start()
         try:
-            with urlopen(request, timeout=self._timeout_seconds) as response:
+            sender = self._opener.open if self._opener is not None else urlopen
+            with sender(request, timeout=self._timeout_seconds) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raise ModelRequestError(_http_error_message(exc, model=model)) from None

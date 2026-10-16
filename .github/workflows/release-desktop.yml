@@ -154,6 +154,10 @@ jobs:
           # This does not download HF models or claim a complete OCR/layout test.
           "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}" \
             --self-test-bundle --profile "$BUNDLE_PROFILE"
+          # Exercise the runtime-hook dispatcher in the actual frozen EXE.
+          # It must not start the API or download weights when showing --help.
+          "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}" \
+            --sra-model-worker --help
           # Verify the frozen API still boots and rejects unauthorized clients.
           python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
       - name: Assemble complete Windows payload

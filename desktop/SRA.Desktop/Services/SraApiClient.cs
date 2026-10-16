@@ -313,6 +313,74 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<ModelSettingsView>(response, cancellationToken);
     }
 
+    // Model Center: real authenticated localhost API, never expose profile API keys.
+    public Task<JsonElement> GetModelCenterAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>("api/v1/settings/model-center", cancellationToken);
+
+    public async Task<JsonElement> SaveModelCenterNetworkAsync(object data, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            "api/v1/settings/model-center/network", data, _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> SaveNamedModelProfileAsync(object data, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            "api/v1/settings/model-center/profiles", data, _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> ImportExistingNamedModelProfilesAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            "api/v1/settings/model-center/profiles/import-existing", content: null, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeleteNamedModelProfileAsync(string id, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/settings/model-center/profiles/{Uri.EscapeDataString(id)}", cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> ActivateNamedModelProfileAsync(string stage, string id, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            "api/v1/settings/model-center/activate",
+            new { slot = stage, profile_id = id }, _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public Task<JsonElement> GetNamedModelCatalogAsync(string id, CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/settings/model-center/profiles/{Uri.EscapeDataString(id)}/models", cancellationToken);
+
+    public async Task<JsonElement> TestNamedModelProfileAsync(string id, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            $"api/v1/settings/model-center/test/{Uri.EscapeDataString(id)}", content: null, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> SetManagedDoclingModelModeAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            "api/v1/settings/model-center/models/mode", new { enabled }, _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JobAccepted> StartDoclingModelOperationAsync(
+        bool download, bool formula, CancellationToken cancellationToken = default)
+    {
+        var route = download ? "download" : "verify";
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/settings/model-center/models/{route}",
+            new { formula }, _jsonOptions, cancellationToken);
+        return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
+    }
+
     // SRA Region Review v3: authenticated local API bridge
 
     /// <summary>Render a paper PDF page without exposing the desktop token in the URL.</summary>

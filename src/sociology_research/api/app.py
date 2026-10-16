@@ -14,6 +14,7 @@ from ..services import ApplicationServices, create_application_services
 from .routes import analysis, health, imports, jobs, paper_tools, papers, settings, workspace
 from .routes import region_review
 from .routes import visual
+from .routes import model_center
 
 API_PREFIX = "/api/v1"
 
@@ -43,6 +44,7 @@ def create_app(
     app.include_router(analysis.router, prefix=API_PREFIX)
     app.include_router(jobs.router, prefix=API_PREFIX)
     app.include_router(settings.router, prefix=API_PREFIX)
+    app.include_router(model_center.router, prefix=API_PREFIX)
     app.include_router(paper_tools.router, prefix=API_PREFIX)
     app.include_router(workspace.router, prefix=API_PREFIX)
     app.include_router(region_review.router, prefix=API_PREFIX)

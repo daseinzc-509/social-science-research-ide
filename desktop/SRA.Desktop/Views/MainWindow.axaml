@@ -724,6 +724,21 @@
               </Grid>
             </Border>
 
+            <!-- Model Center: authenticated native settings, no secrets in desktop files -->
+            <Border Classes="settings-card" Padding="22">
+              <Grid ColumnDefinitions="210,*" ColumnSpacing="28">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="模型与网络中心" Classes="h2"/>
+                  <TextBlock Text="独立代理、Docling 离线模型与多套 API。" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="10">
+                  <TextBlock Text="管理模型权重下载、验证和缓存；Lite、Pro、Vision 可选不同服务商，不更改当前论文。" TextWrapping="Wrap" Classes="muted" FontSize="11"/>
+                  <Button Content="打开模型中心 / 网络代理 / AI 服务商" Classes="secondary"
+                          HorizontalAlignment="Left" Click="OpenModelCenter_Click"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+
             <!-- Storage management: the paths are returned by the running
                  Python backend; never guess a PDF location from the UI. -->
             <Border Classes="settings-card" Padding="22">
