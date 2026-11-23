@@ -98,6 +98,8 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string jobStage = "准备就绪";
     [ObservableProperty] private double jobProgress;
     [ObservableProperty] private bool jobIndeterminate;
+    [ObservableProperty] private string? activeJobId;
+    [ObservableProperty] private bool isCancellingJob;
     [ObservableProperty] private string researchContext = "";
     [ObservableProperty] private string excludeAfterText = "";
     [ObservableProperty] private string themeMode = "跟随系统";
@@ -124,6 +126,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool HasNoTables => Tables.Count == 0;
     public bool HasNoVisuals => Formulas.Count == 0 && Figures.Count == 0;
     public bool CanRunPaperActions => HasSelection && !IsBusy;
+    public bool CanCancelJob => !string.IsNullOrWhiteSpace(ActiveJobId) && !IsCancellingJob;
     public string AnalyzeButtonText => HasCard ? "重新分析" : "开始分析";
     public Uri? SelectedPdfUri => SelectedPaper is null ? null : _api.PaperPdfUri(SelectedPaper.Id);
 
@@ -155,6 +158,10 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     partial void OnIsBusyChanged(bool value) => RaiseSelectionState();
+
+    partial void OnActiveJobIdChanged(string? value) => OnPropertyChanged(nameof(CanCancelJob));
+
+    partial void OnIsCancellingJobChanged(bool value) => OnPropertyChanged(nameof(CanCancelJob));
 
     partial void OnStudyRationaleChanged(string value) => OnPropertyChanged(nameof(HasStudyRationale));
 
@@ -672,6 +679,7 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var accepted = await _api.StartBatchAnalysisAsync();
+            ActiveJobId = accepted.JobId;
             await _api.WaitForJobAsync(accepted.JobId, snapshot =>
             {
                 DashboardOutput = snapshot.Messages.Count == 0
@@ -684,12 +692,20 @@ public partial class MainWindowViewModel : ObservableObject
             ApplyFilter(SearchText, SelectedPaper?.Id);
             await LoadDashboardAsync();
         }
+        catch (SraJobCancelledException exc)
+        {
+            DashboardOutput += Environment.NewLine + Environment.NewLine + exc.Message;
+            StatusText = exc.Message;
+            await LoadDashboardAsync();
+        }
         catch (Exception exc)
         {
             DashboardOutput += Environment.NewLine + Environment.NewLine + exc.Message;
         }
         finally
         {
+            ActiveJobId = null;
+            IsCancellingJob = false;
             IsBusy = false;
         }
     }
@@ -917,6 +933,27 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    public async Task CancelActiveJobAsync()
+    {
+        var jobId = ActiveJobId;
+        if (string.IsNullOrWhiteSpace(jobId) || IsCancellingJob)
+        {
+            return;
+        }
+        IsCancellingJob = true;
+        StatusText = "正在请求取消后台任务，将在下一个安全检查点停止…";
+        JobStage = "正在取消";
+        try
+        {
+            await _api.CancelJobAsync(jobId);
+        }
+        catch (Exception exc)
+        {
+            StatusText = "取消任务请求失败：" + exc.Message;
+            IsCancellingJob = false;
+        }
+    }
+
     private async Task RunJobAsync(
         string initialMessage,
         Func<Task<JobAccepted>> starter,
@@ -927,6 +964,8 @@ public partial class MainWindowViewModel : ObservableObject
     )
     {
         IsBusy = true;
+        IsCancellingJob = false;
+        ActiveJobId = null;
         StatusText = initialMessage;
         JobLog = initialMessage;
         JobStage = "准备中";
@@ -935,6 +974,7 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var accepted = await starter();
+            ActiveJobId = accepted.JobId;
             var completed = await TrackJobAsync(accepted.JobId);
             if (selectResultPaper)
             {
@@ -964,6 +1004,20 @@ public partial class MainWindowViewModel : ObservableObject
                     + "刷新时连接断开：" + refreshError.Message;
             }
         }
+        catch (SraJobCancelledException exc)
+        {
+            StatusText = exc.Message;
+            JobStage = "已取消";
+            JobIndeterminate = false;
+            JobLog += Environment.NewLine + Environment.NewLine + exc.Message;
+            try
+            {
+                await RefreshAfterJobAsync(preferredPaperId);
+            }
+            catch (Exception)
+            {
+            }
+        }
         catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException)
         {
             // Uncertain POST/GET transport result. The backend may already
@@ -985,6 +1039,8 @@ public partial class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            ActiveJobId = null;
+            IsCancellingJob = false;
             IsBusy = false;
         }
     }
@@ -1023,6 +1079,7 @@ public partial class MainWindowViewModel : ObservableObject
         var last = messages.LastOrDefault() ?? "";
         var all = string.Join("\n", messages);
         if (status == "done") return ("完成", 100, false);
+        if (status == "cancelled") return ("已取消", 0, false);
         if (status == "error") return ("发生错误", 100, false);
         if (all.Contains("Saving Paper Card", StringComparison.OrdinalIgnoreCase) || all.Contains("Paper Card saved", StringComparison.OrdinalIgnoreCase)) return ("保存结果", 96, false);
         if (last.Contains("Pro", StringComparison.OrdinalIgnoreCase) || all.Contains("Pro independent review", StringComparison.OrdinalIgnoreCase)) return ("Pro 深度审读", 82, last.Contains("sending request", StringComparison.OrdinalIgnoreCase));

@@ -14,12 +14,15 @@ import secrets
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from ..db import open_sqlite_connection, sqlite_connection
 
 
 class RegionBounds(BaseModel):
@@ -257,13 +260,15 @@ class RegionReviewStore:
         self._initialize()
 
     def _connect(self):
-        conn = sqlite3.connect(self.database_path, timeout=15)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        return open_sqlite_connection(self.database_path)
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        with sqlite_connection(self.database_path) as conn:
+            yield conn
 
     def _initialize(self):
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS region_reviews (
                     id TEXT PRIMARY KEY,
@@ -288,7 +293,7 @@ class RegionReviewStore:
     def add(self, paper_id: str, pending: PendingPreview, corrected_text: str, note: str):
         identifier = secrets.token_hex(16)
         timestamp = datetime.now(timezone.utc).isoformat()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("""
                 INSERT INTO region_reviews
                 (id,paper_id,pdf_sha256,page_number,bounds_json,
@@ -304,7 +309,7 @@ class RegionReviewStore:
         return identifier
 
     def list(self, paper_id: str):
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM region_reviews WHERE paper_id=? "
                 "ORDER BY created_at DESC, id DESC LIMIT 200", (paper_id,)
@@ -327,7 +332,7 @@ class RegionReviewStore:
         ]
 
     def revoke(self, paper_id: str, review_id: str):
-        with self._connect() as conn:
+        with self._connection() as conn:
             result = conn.execute(
                 "UPDATE region_reviews SET revoked_at=? WHERE id=? AND paper_id=? AND revoked_at IS NULL",
                 (datetime.now(timezone.utc).isoformat(), review_id, paper_id),

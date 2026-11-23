@@ -95,6 +95,11 @@ public partial class MainWindow : Window
         if (ViewModel is not null) await ViewModel.RunBatchReferencesAsync();
     }
 
+    private async void CancelJob_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.CancelActiveJobAsync();
+    }
+
     private async void QuickDoctorPage_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) await ViewModel.RunDoctorAsync(false);

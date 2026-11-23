@@ -12,14 +12,16 @@ import hashlib
 import json
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Iterator, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..config import Settings, AnalysisConfig
+from ..db import open_sqlite_connection, sqlite_connection
 from ..llm_client import OpenAICompatibleClient
 from .region_review_versioning import VersionedRegionReviewStore, block_fingerprint
 
@@ -345,13 +347,15 @@ class ReviewReanalysisStore:
         self._upgrade()
 
     def _connect(self):
-        connection = sqlite3.connect(self.database_path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        return open_sqlite_connection(self.database_path)
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        with sqlite_connection(self.database_path) as conn:
+            yield conn
 
     def _upgrade(self):
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS review_reanalyses (
                     id TEXT PRIMARY KEY,
@@ -380,7 +384,7 @@ class ReviewReanalysisStore:
         identifier = secrets.token_hex(16)
         timestamp = datetime.now(timezone.utc).isoformat()
         markdown = _render_markdown(identifier, plan, result, timestamp)
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # No other connection can mutate paper/cards/revisions until COMMIT.
             fresh = build_plan(
@@ -430,7 +434,7 @@ class ReviewReanalysisStore:
         }
 
     def list_reports(self, paper_id: str) -> list[dict]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT id, created_at, model, review_snapshot_sha256,"
                 "baseline_card_sha256 FROM review_reanalyses "
@@ -440,7 +444,7 @@ class ReviewReanalysisStore:
         return [dict(row) for row in rows]
 
     def get_report(self, paper_id: str, analysis_id: str) -> dict:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM review_reanalyses WHERE paper_id=? AND id=?",
                 (paper_id, analysis_id),

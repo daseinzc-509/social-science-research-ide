@@ -14,15 +14,22 @@ namespace SRA.Desktop.Services;
 public sealed class LocalBackendHost : IDisposable
 {
     private readonly Process? _owned;
+    private readonly IDisposable? _jobObject;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Queue<string> _diagnostics = new();
     private readonly object _lock = new();
 
-    private LocalBackendHost(Uri baseUri, string? token, Process? owned, Task? initialFailure = null)
+    private LocalBackendHost(
+        Uri baseUri,
+        string? token,
+        Process? owned,
+        IDisposable? jobObject = null,
+        Task? initialFailure = null)
     {
         BaseUri = baseUri;
         SessionToken = token;
         _owned = owned;
+        _jobObject = jobObject;
         ReadyTask = initialFailure ?? (owned is null
             ? Task.CompletedTask
             : WaitUntilReadyAsync(_shutdown.Token));
@@ -57,6 +64,8 @@ public sealed class LocalBackendHost : IDisposable
             };
             info.ArgumentList.Add("--port");
             info.ArgumentList.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            info.ArgumentList.Add("--parent-pid");
+            info.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             info.Environment["SRA_DESKTOP_TOKEN"] = token;
             // Confine caches we own to the same per-user SRA root. Respect
             // explicit user overrides and never redirect developer-mode APIs.
@@ -72,7 +81,34 @@ public sealed class LocalBackendHost : IDisposable
             // Never point it at a Program Files/.app resource folder.
             var process = new Process { StartInfo = info, EnableRaisingEvents = true };
             if (!process.Start()) throw new InvalidOperationException("Bundled backend did not start");
-            var host = new LocalBackendHost(baseUri, token, process);
+
+            IDisposable? jobObject = null;
+            string? jobWarning = null;
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var winJob = new WindowsProcessJobObject();
+                    try
+                    {
+                        winJob.Assign(process);
+                        jobObject = winJob;
+                    }
+                    catch
+                    {
+                        winJob.Dispose();
+                        throw;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 若系统环境限制无法附加 Job Object，退化依赖后端的 --parent-pid 守护退出
+                    jobWarning = "Windows Job Object 绑定降级（将由 --parent-pid 守护退出）：" + ex.Message;
+                }
+            }
+
+            var host = new LocalBackendHost(baseUri, token, process, jobObject);
+            if (jobWarning is not null) host.RecordDiagnostic(jobWarning);
             process.OutputDataReceived += (_, eventArgs) => host.RecordDiagnostic(eventArgs.Data);
             process.ErrorDataReceived += (_, eventArgs) => host.RecordDiagnostic(eventArgs.Data);
             process.BeginOutputReadLine();
@@ -82,7 +118,7 @@ public sealed class LocalBackendHost : IDisposable
         }
         catch (Exception ex)
         {
-            return new LocalBackendHost(baseUri, token, null,
+            return new LocalBackendHost(baseUri, token, null, null,
                 Task.FromException(new InvalidOperationException("Unable to launch the bundled Python backend: " + ex.Message)));
         }
     }
@@ -169,6 +205,7 @@ public sealed class LocalBackendHost : IDisposable
             catch (System.ComponentModel.Win32Exception) { }
             _owned.Dispose();
         }
+        _jobObject?.Dispose();
         _shutdown.Dispose();
     }
 }

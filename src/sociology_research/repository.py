@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from .db import open_sqlite_connection, sqlite_connection
 from .models import FigureRegion, PaperCard, PaperMetadata, PaperRecord, ParsedDocument, SourceBlock
 
 
@@ -19,19 +20,12 @@ class ResearchRepository:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        return open_sqlite_connection(self.database_path)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        connection = self._connect()
-        try:
-            with connection:
-                yield connection
-        finally:
-            connection.close()
+        with sqlite_connection(self.database_path) as connection:
+            yield connection
 
     def _initialize(self) -> None:
         with self._connection() as connection:
@@ -667,7 +661,7 @@ class ResearchRepository:
     def add_user_note(self, paper_id: str, note_id: str, note: str) -> None:
         if not note.strip():
             raise ValueError("user note cannot be blank")
-        with self._connect() as connection:
+        with self._connection() as connection:
             exists = connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone()
             if not exists:
                 raise KeyError(f"unknown paper id: {paper_id}")

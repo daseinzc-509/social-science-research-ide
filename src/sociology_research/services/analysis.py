@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from ..analyzer import PaperAnalysisPipeline
 from ..repository import ResearchRepository
-from .jobs import JobService
+from .jobs import JobCancelled, JobService
 
 
 class AnalysisService:
@@ -87,6 +87,8 @@ class AnalysisService:
                 try:
                     self.pipeline_factory(self.repository, progress=progress).analyze(paper_id)
                     done += 1
+                except JobCancelled:
+                    raise
                 except Exception as exc:
                     failed.append({"paper_id": paper_id, "error": str(exc)})
                     progress(f"Failed: {paper.original_name}: {exc}")

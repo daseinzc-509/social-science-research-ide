@@ -11,7 +11,7 @@ from typing import Any, Callable
 from ..pipeline import ImportPipeline
 from ..repository import ResearchRepository
 from ..parser import create_default_parser
-from .jobs import JobService
+from .jobs import JobCancelled, JobService
 
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_BATCH_FILES = 200
@@ -103,31 +103,32 @@ class PaperService:
         temp_path.write_bytes(payload)
         job = self.jobs.create("import")
 
-        def work(progress):
-            try:
-                progress(f"Importing {safe_name}…")
-                pipeline = self.import_pipeline_factory(
-                    self.data_dir,
-                    self.repository,
-                    progress=progress,
-                )
-                record, parsed, created = pipeline.import_pdf(temp_path)
-                progress(
-                    "PDF parsed and stored."
-                    if created
-                    else "This exact PDF was already imported; reused existing record."
-                )
-                return {
-                    "paper_id": record.id,
-                    "created": bool(created),
-                    "page_count": record.page_count,
-                    "parse_status": str(record.parse_status),
-                    "warnings": list(parsed.warnings),
-                }
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+        def cleanup_temp() -> None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-        self.jobs.start(job, work)
+        def work(progress):
+            progress(f"Importing {safe_name}…")
+            pipeline = self.import_pipeline_factory(
+                self.data_dir,
+                self.repository,
+                progress=progress,
+            )
+            record, parsed, created = pipeline.import_pdf(temp_path)
+            self.jobs.message(
+                job.id,
+                "PDF parsed and stored."
+                if created
+                else "This exact PDF was already imported; reused existing record.",
+            )
+            return {
+                "paper_id": record.id,
+                "created": bool(created),
+                "page_count": record.page_count,
+                "parse_status": str(record.parse_status),
+                "warnings": list(parsed.warnings),
+            }
+
+        self.jobs.start(job, work, cleanup=cleanup_temp)
         return job.id
 
     def start_batch_import(self, uploads: list[tuple[str, bytes]]) -> str:
@@ -163,72 +164,75 @@ class PaperService:
 
         job = self.jobs.create("batch-import")
 
+        def cleanup_temp() -> None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
         def work(progress):
-            try:
-                results: list[dict[str, Any]] = []
-                progress(f"Batch import: {len(prepared)} valid PDF file(s) queued…")
-                for index, (safe_name, path) in enumerate(prepared, start=1):
-                    progress(f"Batch import {index}/{len(prepared)}: {safe_name}")
-                    try:
-                        pipeline = self.import_pipeline_factory(
-                            self.data_dir,
-                            self.repository,
-                            progress=progress,
-                        )
-                        record, parsed, created = pipeline.import_pdf(path)
-                        results.append(
-                            {
-                                "filename": safe_name,
-                                "status": "imported" if created else "duplicate",
-                                "paper_id": record.id,
-                                "page_count": record.page_count,
-                                "parse_status": str(record.parse_status),
-                                "warnings": list(parsed.warnings),
-                                "error": None,
-                            }
-                        )
-                    except Exception as exc:  # keep a batch moving after one bad file
-                        results.append(
-                            {
-                                "filename": safe_name,
-                                "status": "failed",
-                                "paper_id": None,
-                                "page_count": None,
-                                "parse_status": None,
-                                "warnings": [],
-                                "error": str(exc),
-                            }
-                        )
-                        progress(f"Failed: {safe_name}: {exc}")
+            results: list[dict[str, Any]] = []
+            progress(f"Batch import: {len(prepared)} valid PDF file(s) queued…")
+            for index, (safe_name, path) in enumerate(prepared, start=1):
+                progress(f"Batch import {index}/{len(prepared)}: {safe_name}")
+                try:
+                    pipeline = self.import_pipeline_factory(
+                        self.data_dir,
+                        self.repository,
+                        progress=progress,
+                    )
+                    record, parsed, created = pipeline.import_pdf(path)
+                    results.append(
+                        {
+                            "filename": safe_name,
+                            "status": "imported" if created else "duplicate",
+                            "paper_id": record.id,
+                            "page_count": record.page_count,
+                            "parse_status": str(record.parse_status),
+                            "warnings": list(parsed.warnings),
+                            "error": None,
+                        }
+                    )
+                except JobCancelled:
+                    raise
+                except Exception as exc:  # keep a batch moving after one bad file
+                    results.append(
+                        {
+                            "filename": safe_name,
+                            "status": "failed",
+                            "paper_id": None,
+                            "page_count": None,
+                            "parse_status": None,
+                            "warnings": [],
+                            "error": str(exc),
+                        }
+                    )
+                    progress(f"Failed: {safe_name}: {exc}")
 
-                results.extend(
-                    {
-                        "filename": item["filename"],
-                        "status": "rejected",
-                        "paper_id": None,
-                        "page_count": None,
-                        "parse_status": None,
-                        "warnings": [],
-                        "error": item["error"],
-                    }
-                    for item in rejected
-                )
-                imported = sum(item["status"] == "imported" for item in results)
-                duplicates = sum(item["status"] == "duplicate" for item in results)
-                failed = sum(item["status"] in {"failed", "rejected"} for item in results)
-                progress(
-                    f"Batch import complete: {imported} imported, {duplicates} duplicate, {failed} failed/rejected."
-                )
-                return {
-                    "results": results,
-                    "imported": imported,
-                    "duplicates": duplicates,
-                    "failed": failed,
+            results.extend(
+                {
+                    "filename": item["filename"],
+                    "status": "rejected",
+                    "paper_id": None,
+                    "page_count": None,
+                    "parse_status": None,
+                    "warnings": [],
+                    "error": item["error"],
                 }
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                for item in rejected
+            )
+            imported = sum(item["status"] == "imported" for item in results)
+            duplicates = sum(item["status"] == "duplicate" for item in results)
+            failed = sum(item["status"] in {"failed", "rejected"} for item in results)
+            self.jobs.message(
+                job.id,
+                f"Batch import complete: {imported} imported, {duplicates} duplicate, {failed} failed/rejected.",
+            )
+            return {
+                "results": results,
+                "imported": imported,
+                "duplicates": duplicates,
+                "failed": failed,
+            }
 
-        self.jobs.start(job, work)
+        self.jobs.start(job, work, cleanup=cleanup_temp)
         return job.id
 
     def save_metadata_overrides(self, paper_id: str, payload: dict[str, Any]) -> dict[str, Any]:

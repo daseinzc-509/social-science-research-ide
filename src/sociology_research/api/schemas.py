@@ -27,6 +27,11 @@ class JobSnapshot(BaseModel):
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
+    cancel_requested: bool = False
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobSnapshot] = Field(default_factory=list)
 
 
 class PaperSummary(BaseModel):

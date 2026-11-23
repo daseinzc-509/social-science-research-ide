@@ -50,8 +50,11 @@ public sealed class JobSnapshot
     [JsonPropertyName("finished_at")]
     public string? FinishedAt { get; init; }
 
+    [JsonPropertyName("cancel_requested")]
+    public bool CancelRequested { get; init; }
+
     [JsonIgnore]
-    public bool IsFinished => Status is "done" or "error";
+    public bool IsFinished => Status is "done" or "error" or "cancelled";
 
     public string? ResultString(string name)
     {

@@ -124,7 +124,7 @@ class VersionedRegionReviewStore(RegionReviewStore):
         self._upgrade()
 
     def _upgrade(self):
-        with self._connect() as conn:
+        with self._connection() as conn:
             present = {
                 row["name"] for row in conn.execute("PRAGMA table_info(region_reviews)")
             }
@@ -188,7 +188,7 @@ class VersionedRegionReviewStore(RegionReviewStore):
         if len(fingerprints) != len(pending.source_block_ids):
             raise ReviewConflict("Preview lacks source fingerprints; select region again")
         identifier = secrets.token_hex(16)
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             paper = conn.execute(
                 "SELECT sha256, parser_version FROM papers WHERE id=?", (paper_id,)
@@ -223,7 +223,7 @@ class VersionedRegionReviewStore(RegionReviewStore):
     def revise(self, paper_id: str, review_id: str, expected_revision: int,
                corrected_text: str, note: str, paper: Any) -> dict[str, Any]:
         """Create vN+1 and archive vN, atomically and without changing evidence."""
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             previous_row = conn.execute(
                 "SELECT * FROM region_reviews WHERE id=? AND paper_id=?",
@@ -288,7 +288,7 @@ class VersionedRegionReviewStore(RegionReviewStore):
         }
 
     def revoke(self, paper_id: str, review_id: str) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             result = conn.execute(
                 "UPDATE region_reviews SET revoked_at=? WHERE id=? AND paper_id=? "
                 "AND revoked_at IS NULL AND superseded_at IS NULL",
@@ -300,7 +300,7 @@ class VersionedRegionReviewStore(RegionReviewStore):
     def list_with_links(self, paper_id: str, paper: Any,
                         live_source_blocks: list[Any]) -> list[dict[str, Any]]:
         live = {block.id: block_fingerprint(block) for block in live_source_blocks}
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM region_reviews WHERE paper_id=? "
                 "ORDER BY created_at DESC, id DESC LIMIT 300", (paper_id,)

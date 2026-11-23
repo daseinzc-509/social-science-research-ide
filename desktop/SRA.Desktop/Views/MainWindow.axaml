@@ -538,9 +538,10 @@
 
             <TabItem Header="日志">
               <Grid Margin="22" RowDefinitions="Auto,*">
-                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,0,0,10">
                   <StackPanel Spacing="2"><TextBlock Text="{Binding JobStage}" Classes="section-title"/><TextBlock Text="{Binding StatusText}" Classes="muted" FontSize="10"/></StackPanel>
                   <ProgressBar Grid.Column="1" Width="180" Height="5" Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="取消任务" Classes="secondary compact" Click="CancelJob_Click" IsVisible="{Binding CanCancelJob}" VerticalAlignment="Center" />
                 </Grid>
                 <TextBox Grid.Row="1" Text="{Binding JobLog}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                          Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
@@ -591,6 +592,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Content="分析待处理论文" Classes="primary" Click="BatchAnalyzePage_Click" />
                   <Button Content="批量提取参考文献" Classes="secondary" Click="BatchReferencesPage_Click" />
+                  <Button Content="取消当前任务" Classes="danger" Click="CancelJob_Click" IsVisible="{Binding CanCancelJob}" />
                 </StackPanel>
                 <TextBox Text="{Binding DashboardOutput}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="240" FontFamily="Consolas" FontSize="10" />
               </StackPanel>

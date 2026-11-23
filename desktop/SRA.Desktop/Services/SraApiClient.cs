@@ -257,6 +257,16 @@ public sealed class SraApiClient : IDisposable
     public Task<JobSnapshot> GetJobAsync(string jobId, CancellationToken cancellationToken = default) =>
         GetJsonAsync<JobSnapshot>($"api/v1/jobs/{Uri.EscapeDataString(jobId)}", cancellationToken);
 
+    public async Task<JobSnapshot> CancelJobAsync(string jobId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            $"api/v1/jobs/{Uri.EscapeDataString(jobId)}/cancel",
+            content: null,
+            cancellationToken
+        );
+        return await ReadJsonAsync<JobSnapshot>(response, cancellationToken);
+    }
+
     public async Task<JobSnapshot> WaitForJobAsync(
         string jobId,
         Action<JobSnapshot>? onProgress = null,
@@ -291,6 +301,10 @@ public sealed class SraApiClient : IDisposable
             if (snapshot.Status == "done")
             {
                 return snapshot;
+            }
+            if (snapshot.Status == "cancelled")
+            {
+                throw new SraJobCancelledException("后台任务已取消。");
             }
             if (snapshot.Status == "error")
             {
@@ -638,3 +652,5 @@ public sealed class SraApiClient : IDisposable
 }
 
 public sealed class SraApiException(string message) : Exception(message);
+
+public sealed class SraJobCancelledException(string message) : Exception(message);

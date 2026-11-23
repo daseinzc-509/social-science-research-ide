@@ -37,13 +37,24 @@ def _run_worker(action: str, *, directory: Path, formula: bool, progress: Callab
                           text=True, encoding="utf-8", errors="replace") as child:
         safe_steps: list[str] = []
         assert child.stdout is not None
-        for line in child.stdout:
-            # Never forward raw third-party errors/URLs (could contain signed URLs or tokens).
-            if line.startswith("SRA stage:"):
-                step = line.strip()[:180]
-                safe_steps.append(step)
-                progress(step)
-        code = child.wait()
+        try:
+            for line in child.stdout:
+                # Never forward raw third-party errors/URLs (could contain signed URLs or tokens).
+                if line.startswith("SRA stage:"):
+                    step = line.strip()[:180]
+                    safe_steps.append(step)
+                    progress(step)
+            code = child.wait()
+        except BaseException:
+            # 任务被取消或出现异常中断时，主动终止子进程避免残留下载/验证孤儿进程
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=3)
+            raise
     if code != 0:
         raise RuntimeError(
             f"Docling model {action} failed (worker exit code {code}). "
