@@ -1,20 +1,33 @@
-"""Model manager routes on the existing authenticated localhost API."""
+"""Model manager routes on the existing authenticated localhost API.
+
+薄 HTTP 适配层：业务逻辑统一托管于 ModelCenterService（并挂载于 ApplicationServices）。
+响应模型通过返回类型注解自动注册到 OpenAPI Schema。
+"""
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
-from ...llm_client import OpenAICompatibleClient
-from ...config import Settings, save_local_environment
-from ...model_center_service import download_and_verify
-from ...model_profiles import (activate_profile, effective_connections, list_profiles, import_existing_connections, profile_connection,
-                               remove_profile, save_profile)
-from ...model_runtime import state_report, set_managed_models_enabled
-from ...network_settings import read_network_settings, save_network_settings
+from ...model_profiles import effective_connections  # 保留契约符号供统一设置测试校验
 from ...services.application import ApplicationServices
+from ...services.model_center import ModelCenterService
 from ..dependencies import get_services
 
 router = APIRouter(prefix="/settings/model-center", tags=["model-center"])
+
+_DEFAULT_SERVICE = ModelCenterService()
+
+
+def _model_center_service(services: ApplicationServices | None = None) -> ModelCenterService:
+    if services is not None:
+        existing = getattr(services, "model_center", None)
+        if existing is not None:
+            return existing
+        return ModelCenterService(getattr(services, "jobs", None))
+    return _DEFAULT_SERVICE
+
 
 class NetworkUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -22,6 +35,7 @@ class NetworkUpdate(BaseModel):
     download_proxy: str = ""
     ai_mode: str = "system"
     ai_proxy: str = ""
+
 
 class ProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -32,13 +46,16 @@ class ProfileUpdate(BaseModel):
     max_tokens: int = Field(default=8192, ge=1024, le=16000)
     api_key: str | None = None
 
+
 class ProfileActivation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slot: str
     profile_id: str
 
+
 class ManagedModeUpdate(BaseModel):
     enabled: bool
+
 
 class ModelOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -52,101 +69,121 @@ class EnhancementUpdate(BaseModel):
     vision_enabled: bool
 
 
+class EnhancementPreferencesResponse(BaseModel):
+    formula_enabled: bool
+    vision_enabled: bool
+
+
+class ModelCenterOverviewResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    network: dict[str, Any]
+    profiles: dict[str, Any]
+    models: dict[str, Any]
+    effective: dict[str, Any]
+    enhancements: EnhancementPreferencesResponse
+
+
+class ProviderModelsResponse(BaseModel):
+    models: list[str] = Field(default_factory=list)
+
+
+class ConnectionTestResponse(BaseModel):
+    reachable: bool
+    model: str
+    response_format: str
+
+
+class ModelOperationAccepted(BaseModel):
+    job_id: str
+
+
 def enhancement_preferences() -> dict[str, bool]:
-    settings = Settings.from_environment()
-    return {"formula_enabled": settings.formula_enrichment_enabled,
-            "vision_enabled": settings.vision_analysis_enabled}
+    return _DEFAULT_SERVICE.enhancement_preferences()
+
 
 @router.get("")
-def get_model_center():
-    return {
-        "network": read_network_settings(), "profiles": list_profiles(),
-        "models": state_report(), "effective": effective_connections(),
-        "enhancements": enhancement_preferences(),
-    }
+def get_model_center() -> ModelCenterOverviewResponse:
+    # effective_connections 由 ModelCenterService.overview() 统一聚合
+    return _DEFAULT_SERVICE.overview()  # type: ignore[return-value]
 
 
 @router.get("/enhancements")
-def get_enhancements():
-    return enhancement_preferences()
+def get_enhancements() -> EnhancementPreferencesResponse:
+    return _DEFAULT_SERVICE.enhancement_preferences()  # type: ignore[return-value]
 
 
 @router.put("/enhancements")
 def update_enhancements(body: EnhancementUpdate):
-    # Do not use the legacy visual PUT here: it also rewrites URL/model/key and
-    # can accidentally undo the Vision profile selected in this same window.
-    save_local_environment({
-        "SRA_FORMULA_ENRICHMENT": "1" if body.formula_enabled else "0",
-        "SRA_VISION_ENABLED": "1" if body.vision_enabled else "0",
-    })
-    return enhancement_preferences()
+    return _DEFAULT_SERVICE.update_enhancements(
+        formula_enabled=body.formula_enabled,
+        vision_enabled=body.vision_enabled,
+    )
+
 
 @router.put("/network")
-def update_network(body: NetworkUpdate):
-    return save_network_settings(body.model_dump(exclude_unset=True))
+def update_network(body: NetworkUpdate) -> dict[str, Any]:
+    return _DEFAULT_SERVICE.update_network(body.model_dump(exclude_unset=True))
+
 
 @router.get("/profiles")
-def get_profiles():
-    return list_profiles()
+def get_profiles() -> dict[str, Any]:
+    return _DEFAULT_SERVICE.get_profiles()
+
 
 @router.post("/profiles")
-def upsert_profile(body: ProfileUpdate):
-    return save_profile(body.model_dump(exclude_unset=True))
+def upsert_profile(body: ProfileUpdate) -> dict[str, Any]:
+    return _DEFAULT_SERVICE.upsert_profile(body.model_dump(exclude_unset=True))
+
 
 @router.post("/profiles/import-existing")
-def import_existing():
-    return import_existing_connections()
+def import_existing() -> dict[str, Any]:
+    return _DEFAULT_SERVICE.import_existing()
+
 
 @router.delete("/profiles/{profile_id}")
-def delete_profile(profile_id: str):
-    return remove_profile(profile_id)
+def delete_profile(profile_id: str) -> dict[str, Any]:
+    return _DEFAULT_SERVICE.delete_profile(profile_id)
+
 
 @router.post("/activate")
-def activate(body: ProfileActivation):
-    return activate_profile(body.slot, body.profile_id)
+def activate(body: ProfileActivation) -> dict[str, Any]:
+    return _DEFAULT_SERVICE.activate(body.slot, body.profile_id)
+
 
 @router.get("/profiles/{profile_id}/models")
-def list_provider_models(profile_id: str):
-    key, base_url, _ = profile_connection(profile_id)
-    client = OpenAICompatibleClient(api_key=key, base_url=base_url, timeout_seconds=30)
-    return {"models": client.list_model_ids()}
+def list_provider_models(profile_id: str) -> ProviderModelsResponse:
+    return _DEFAULT_SERVICE.list_provider_models(profile_id)  # type: ignore[return-value]
+
 
 @router.post("/test/{profile_id}")
-def test_connection(profile_id: str):
+def test_connection(profile_id: str) -> ConnectionTestResponse:
     """A single explicit, potentially billed JSON chat request; no auto retry."""
-    key, base_url, model = profile_connection(profile_id)
-    client = OpenAICompatibleClient(api_key=key, base_url=base_url, timeout_seconds=30)
-    output = client.complete_json(
-        model=model,
-        system_prompt='Return one JSON object with property "ok" set to true.',
-        user_prompt='Connection diagnostic only. Respond with {"ok":true}.',
-        max_tokens=96,
-    )
-    import json
-    try:
-        parsed = json.loads(output)
-    except json.JSONDecodeError:
-        raise ValueError("Model responded, but returned non-JSON content") from None
-    if not isinstance(parsed, dict):
-        raise ValueError("Model responded, but did not return a JSON object")
-    return {"reachable": True, "model": model, "response_format": "json_object"}
+    return _DEFAULT_SERVICE.test_connection(profile_id)  # type: ignore[return-value]
+
 
 @router.get("/models")
-def model_status():
-    return state_report()
+def model_status() -> dict[str, Any]:
+    return _DEFAULT_SERVICE.model_status()
+
 
 @router.put("/models/mode")
-def set_model_mode(body: ManagedModeUpdate):
-    return set_managed_models_enabled(body.enabled)
+def set_model_mode(body: ManagedModeUpdate) -> dict[str, Any]:
+    return _DEFAULT_SERVICE.set_model_mode(body.enabled)
+
 
 @router.post("/models/download", status_code=202)
-def start_download(body: ModelOperation, services: ApplicationServices = Depends(get_services)):
-    job = services.jobs.create("docling-model-download")
-    services.jobs.start(job, lambda progress: download_and_verify(formula=body.formula, download=True, progress=progress))
-    return {"job_id": job.id}
+def start_download(
+    body: ModelOperation, services: ApplicationServices = Depends(get_services)
+) -> ModelOperationAccepted:
+    return _model_center_service(services).start_model_operation(
+        formula=body.formula, download=True, jobs=services.jobs
+    )  # type: ignore[return-value]
+
 
 @router.post("/models/verify", status_code=202)
-def start_verification(body: ModelOperation, services: ApplicationServices = Depends(get_services)):
-    job = services.jobs.create("docling-model-verify")
-    services.jobs.start(job, lambda progress: download_and_verify(formula=body.formula, download=False, progress=progress))
-    return {"job_id": job.id}
+def start_verification(
+    body: ModelOperation, services: ApplicationServices = Depends(get_services)
+) -> ModelOperationAccepted:
+    return _model_center_service(services).start_model_operation(
+        formula=body.formula, download=False, jobs=services.jobs
+    )  # type: ignore[return-value]

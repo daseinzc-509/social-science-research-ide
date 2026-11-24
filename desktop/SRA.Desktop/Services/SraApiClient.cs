@@ -257,6 +257,12 @@ public sealed class SraApiClient : IDisposable
     public Task<JobSnapshot> GetJobAsync(string jobId, CancellationToken cancellationToken = default) =>
         GetJsonAsync<JobSnapshot>($"api/v1/jobs/{Uri.EscapeDataString(jobId)}", cancellationToken);
 
+    public async Task<IReadOnlyList<JobSnapshot>> ListJobsAsync(int limit = 50, CancellationToken cancellationToken = default)
+    {
+        var response = await GetJsonAsync<JobListResponse>($"api/v1/jobs?limit={Math.Clamp(limit, 1, 200)}", cancellationToken);
+        return response.Jobs;
+    }
+
     public async Task<JobSnapshot> CancelJobAsync(string jobId, CancellationToken cancellationToken = default)
     {
         using var response = await _http.PostAsync(

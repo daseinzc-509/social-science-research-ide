@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -21,6 +23,20 @@ def _safe_provider_id(value: object) -> str:
         return ""
     token = str(value)
     return token if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", token) else ""
+
+
+def _safe_request_id(headers: object) -> str:
+    """从响应或异常头中安全提取服务商请求 ID，拒绝任意未校验字符串。"""
+    if headers is None:
+        return ""
+    try:
+        for header in ("x-request-id", "x-tt-logid", "x-requestid"):
+            identifier = _safe_provider_id(headers.get(header, ""))
+            if identifier:
+                return identifier
+    except (TypeError, AttributeError):
+        pass
+    return ""
 
 
 def _http_error_message(exc: HTTPError, *, model: str = "") -> str:
@@ -254,3 +270,82 @@ class OpenAICompatibleClient:
                 "check output token budget. No automatic retry was made."
             )
         return content.strip()
+
+    def complete_vision(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        image_bytes: bytes,
+        max_tokens: int = 4096,
+        image_mime: str = "image/jpeg",
+        detail: str = "high",
+        response_limit_bytes: int = 2_000_000,
+        sender: Callable[..., Any] | None = None,
+    ) -> tuple[object, str]:
+        """发起单次显式多模态视觉请求（复用统一 AI 代理策略，绝不自动重试）。"""
+        if not model.strip():
+            raise ValueError("Model name cannot be blank")
+        request_body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{image_mime};base64,"
+                                + base64.b64encode(image_bytes).decode("ascii"),
+                                "detail": detail,
+                            },
+                        },
+                    ],
+                },
+            ],
+            "stream": False,
+            "max_completion_tokens": max_tokens,
+        }
+        request = Request(
+            self._endpoint,
+            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        transport = sender if sender is not None else (
+            self._opener.open if self._opener is not None else urlopen
+        )
+        try:
+            with transport(request, timeout=self._timeout_seconds) as response:
+                request_id = _safe_request_id(getattr(response, "headers", None))
+                raw = response.read(response_limit_bytes + 1)
+        except HTTPError as exc:
+            suffix = _safe_request_id(getattr(exc, "headers", None))
+            request_note = f"；请求ID={suffix}" if suffix else ""
+            raise ModelRequestError(_http_error_message(exc) + request_note) from None
+        except (URLError, TimeoutError, OSError):
+            raise ModelRequestError(
+                "视觉模型请求网络失败或超时，可能已经产生费用；"
+                "请先检查服务商记录，不要连续点击重试。"
+            ) from None
+
+        if len(raw) > response_limit_bytes:
+            raise ModelRequestError(
+                "视觉模型响应过大，超过本地安全上限；"
+                "不会截断后当作不支持图片处理。"
+            )
+        try:
+            reply = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise ModelRequestError(
+                "视觉模型未返回完整、可解析的 JSON 响应；"
+                "请检查是否使用 Chat Completions Base URL。"
+            ) from None
+        return reply, request_id

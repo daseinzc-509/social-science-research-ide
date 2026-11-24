@@ -1,34 +1,27 @@
 """Authenticated in-app region review API. Mounted under the existing /api/v1.
 
-No external model endpoints, no plaintext PDF URL tokens, no automatic writes to
-source_blocks/Paper Card. Authentication is inherited from DesktopTokenMiddleware.
+薄 HTTP 适配层：持久化 Store 与复核编排统一由 ApplicationServices.region_review
+托管并复用；此处保留前置 fail-closed 护栏与严格响应模型边界。
 """
 from __future__ import annotations
 
-import hashlib
-import math
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
-from ...config import Settings
-from ...llm_client import ModelRequestError
-from ...services.region_review_reanalysis import (
-    ReanalysisError, ReviewReanalysisStore, build_plan, run_pro_comparison,
-    _public_provider,
+from ...services.region_review import ConfirmRequest, PreviewRequest, recognize_region
+from ...services.region_review_reanalysis import run_pro_comparison
+from ...services.region_review_service import RegionReviewService, RegionReviewServiceError
+from ..schemas import (
+    ReanalysisPreviewResponse,
+    ReanalysisReportListResponse,
+    RegionConfirmResponse,
+    RegionPageBlocksResponse,
+    RegionPreviewResponse,
+    RegionReviewListResponse,
+    RegionReviseResponse,
+    RegionRevokeResponse,
 )
-
-from ...services.region_review import (
-    ConfirmRequest, PendingPreview, PreviewExpired, PreviewRequest,
-    as_pdf_box, intersecting_blocks, pdf_page_dimensions, preview_registry, recognize_region,
-    region_original_text, render_png,
-)
-from ...services.region_review_versioning import (
-    ReviewConflict, VersionedRegionReviewStore, source_snapshots,
-)
-import time
 
 router = APIRouter(prefix="/papers/{paper_id}/region-review", tags=["region-review"])
 
@@ -58,55 +51,27 @@ class RunReviewedAnalysisRequest(BaseModel):
 
 def _configured_pro() -> tuple[str, str, str]:
     try:
-        return Settings.from_environment().require_pro_configuration()
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(
-            409, f"Pro model is not configured: {str(exc)[:260]}"
-        ) from None
+        return RegionReviewService._configured_pro()
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
-def _reanalysis_plan(services, record, model, url):
-    review_store = VersionedRegionReviewStore(services.repository.database_path)
-    try:
-        plan = build_plan(
-            services.repository, record.id, model,
-            review_store=review_store,
-            provider_digest=hashlib.sha256(url.strip().rstrip("/").encode("utf-8")).hexdigest(),
-        )
-    except ReanalysisError as exc:
-        raise HTTPException(409, str(exc)) from None
-    return review_store, plan
-
-
-def _resources(request: Request, paper_id: str):
+def _region_service(request: Request) -> RegionReviewService:
     services = request.app.state.services
-    record = services.repository.get_paper(paper_id)
-    if record is None:
-        raise HTTPException(404, "Paper not found")
-    path = Path(services.papers.pdf_path(paper_id))
-    if not path.is_file():
-        raise HTTPException(404, "Stored PDF not found")
-    return services, record, path
-
-
-def _guard_integrity(path: Path, stored_sha256: str):
-    # Reject a replaced or altered PDF before associating a human correction
-    # with the old paper's original evidence IDs.
-    with path.open("rb") as stream:
-        actual = hashlib.file_digest(stream, "sha256").hexdigest()
-    if actual != stored_sha256:
-        raise HTTPException(
-            409, "Stored PDF differs from imported paper; re-import before reviewing"
-        )
+    existing = getattr(services, "region_review", None)
+    if existing is not None:
+        return existing
+    return RegionReviewService(services.repository, services.papers)
 
 
 @router.get("/pages/{page_number}.png")
 def page_image(request: Request, paper_id: str, page_number: int, scale: float = 1.4):
-    _services, _record, pdf_path = _resources(request, paper_id)
     try:
-        png, dimensions, count = render_png(pdf_path, page_number, scale=scale)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        png, dimensions, count = _region_service(request).render_page(
+            paper_id, page_number, scale=scale
+        )
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     return Response(
         png,
         media_type="image/png",
@@ -120,211 +85,96 @@ def page_image(request: Request, paper_id: str, page_number: int, scale: float =
     )
 
 
-@router.get("/pages/{page_number}/blocks")
+@router.get("/pages/{page_number}/blocks", response_model=RegionPageBlocksResponse)
 def page_blocks(request: Request, paper_id: str, page_number: int):
-    services, _record, pdf_path = _resources(request, paper_id)
-    # Use the original PDF's page count, not Docling's potentially partial
-    # parse count. A failed-to-parse page is precisely what users must review.
     try:
-        pdf_page_dimensions(pdf_path, page_number)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    blocks = [b for b in services.repository.get_source_blocks(paper_id)
-              if b.page_number == page_number]
-    return {
-        "page_number": page_number,
-        "source_blocks": [
-            {"id": block.id, "text": block.text[:20000], "bbox": block.bbox, "role": block.role}
-            for block in blocks[:120]
-        ],
-        "truncated": len(blocks) > 120,
-        "provenance": "DOCLING_SOURCE",
-    }
+        return _region_service(request).get_page_blocks(paper_id, page_number)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
-@router.post("/pages/{page_number}/preview")
+@router.post("/pages/{page_number}/preview", response_model=RegionPreviewResponse)
 def preview_region(request: Request, paper_id: str, page_number: int, payload: PreviewRequest):
-    services, record, pdf_path = _resources(request, paper_id)
-    _guard_integrity(pdf_path, record.sha256)
     try:
-        if payload.manual_only:
-            dimensions = pdf_page_dimensions(pdf_path, page_number)
-            candidate, score = "", None
-        else:
-            candidate, score, dimensions = recognize_region(pdf_path, page_number, payload.bounds)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    except (ImportError, OSError, RuntimeError) as exc:
-        # Most likely a frozen OCR model/configuration file is missing.
-        raise HTTPException(503, f"Region OCR unavailable: {type(exc).__name__}: {str(exc)[:300]}") from exc
-    rectangle = as_pdf_box(payload.bounds, dimensions)
-    matches = intersecting_blocks(services.repository.get_source_blocks(paper_id), rectangle)
-    if len(matches) > 256:
-        raise HTTPException(422, "Selection contains too many SourceBlocks; select a smaller region")
-    identifiers = tuple(block.id for block in matches)
-    fingerprints = source_snapshots(matches, identifiers)
-    stat = pdf_path.stat()
-    pending = PendingPreview(
-        paper_id=paper_id,
-        pdf_sha256=record.sha256,
-        file_size=stat.st_size,
-        file_mtime_ns=stat.st_mtime_ns,
-        page_number=page_number,
-        bounds=payload.bounds,
-        original_text=region_original_text(matches),
-        ocr_text=candidate,
-        source_block_ids=tuple(block.id for block in matches),
-        created=time.monotonic(),
-        parser_version=record.parser_version,
-        source_fingerprints=tuple(sorted(fingerprints.items())),
-    )
-    identifier = preview_registry.add(pending)
-    return {
-        "preview_id": identifier,
-        "page_number": page_number,
-        "bounds": payload.bounds.model_dump(),
-        "original_text": pending.original_text,
-        "ocr_candidate": candidate,
-        "ocr_mean_score": score,
-        "source_block_ids": pending.source_block_ids,
-        "provenance": "MANUAL_TRANSCRIPTION_DRAFT" if payload.manual_only else "OCR_CANDIDATE_UNVERIFIED",
-        "warning": "Review against the original PDF before confirming; results are not evidence automatically.",
-    }
+        return _region_service(request).preview_region(
+            paper_id,
+            page_number,
+            bounds=payload.bounds,
+            manual_only=payload.manual_only,
+            recognizer=recognize_region,
+        )
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
-@router.post("/confirm")
+@router.post("/confirm", response_model=RegionConfirmResponse)
 def confirm_region(request: Request, paper_id: str, payload: ConfirmRequest):
-    services, record, pdf_path = _resources(request, paper_id)
     try:
-        pending = preview_registry.get(payload.preview_id, paper_id)
-    except PreviewExpired as exc:
-        raise HTTPException(410, str(exc)) from exc
-    stat = pdf_path.stat()
-    if (
-        record.sha256 != pending.pdf_sha256
-        or stat.st_size != pending.file_size
-        or stat.st_mtime_ns != pending.file_mtime_ns
-    ):
-        raise HTTPException(409, "PDF changed since OCR preview; please recognize again")
-    _guard_integrity(pdf_path, record.sha256)
-    if pending.parser_version != record.parser_version:
-        raise HTTPException(409, "Parser changed since region preview; select again")
-    try:
-        actual = source_snapshots(
-            services.repository.get_source_blocks(paper_id), pending.source_block_ids
+        return _region_service(request).confirm_region(
+            paper_id,
+            preview_id=payload.preview_id,
+            corrected_text=payload.corrected_text,
+            researcher_note=payload.researcher_note,
         )
-        if actual != dict(pending.source_fingerprints):
-            raise ReviewConflict("SourceBlock changed since region preview; select again")
-        store = VersionedRegionReviewStore(services.repository.database_path)
-        identifier = store.add(
-            paper_id, pending, payload.corrected_text.strip(), payload.researcher_note.strip()
-        )
-    except ReviewConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
-    preview_registry.consume(payload.preview_id)
-    return {
-        "id": identifier,
-        "page_number": pending.page_number,
-        "provenance": "HUMAN_REVIEWED",
-        "revision_no": 1,
-        "source_link_status": "CURRENT" if pending.source_block_ids else "PAGE_ONLY",
-        "applied_to_evidence": False,
-        "message": "Researcher correction saved separately; source blocks and Paper Card unchanged.",
-    }
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
-@router.get("/reviews")
+@router.get("/reviews", response_model=RegionReviewListResponse)
 def list_regions(request: Request, paper_id: str):
-    services, record, path = _resources(request, paper_id)
-    store = VersionedRegionReviewStore(services.repository.database_path)
-    records = store.list_with_links(
-        paper_id, record, services.repository.get_source_blocks(paper_id)
-    )
-    # Unlike the packet/export endpoint, history should remain viewable after a
-    # tampered PDF. In that case all links are marked stale, never "CURRENT".
     try:
-        _guard_integrity(path, record.sha256)
-    except HTTPException:
-        for item in records:
-            item["link_status"] = "PDF_CHANGED"
-        return {"reviews": records, "warning": "Stored PDF differs from imported original"}
-    return {"reviews": records}
+        return _region_service(request).list_reviews(paper_id)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
 @router.get("/packet")
 def reviewed_evidence_packet(request: Request, paper_id: str):
     """Only a user-requested local export; never automatically feeds an LLM."""
-    services, record, path = _resources(request, paper_id)
-    _guard_integrity(path, record.sha256)
-    store = VersionedRegionReviewStore(services.repository.database_path)
-    result = store.evidence_packet(
-        paper_id, record, services.repository.get_source_blocks(paper_id)
-    )
+    try:
+        result = _region_service(request).get_evidence_packet(paper_id)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     return JSONResponse(
-        result, headers={"Cache-Control": "no-store, private",
-                         "X-Content-Type-Options": "nosniff"}
+        result,
+        headers={
+            "Cache-Control": "no-store, private",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
-@router.post("/reviews/{review_id}/revise")
+@router.post("/reviews/{review_id}/revise", response_model=RegionReviseResponse)
 def revise_region(request: Request, paper_id: str, review_id: str, payload: ReviseRequest):
-    services, record, path = _resources(request, paper_id)
-    _guard_integrity(path, record.sha256)
-    store = VersionedRegionReviewStore(services.repository.database_path)
     try:
-        result = store.revise(
-            paper_id, review_id, payload.expected_revision,
-            payload.corrected_text.strip(), payload.researcher_note.strip(), record,
+        return _region_service(request).revise_review(
+            paper_id,
+            review_id,
+            expected_revision=payload.expected_revision,
+            corrected_text=payload.corrected_text,
+            researcher_note=payload.researcher_note,
         )
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ReviewConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
-    return result
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
-@router.post("/reviews/{review_id}/revoke")
+@router.post("/reviews/{review_id}/revoke", response_model=RegionRevokeResponse)
 def revoke_region(request: Request, paper_id: str, review_id: str):
-    services, _record, _path = _resources(request, paper_id)
     try:
-        VersionedRegionReviewStore(services.repository.database_path).revoke(
-            paper_id, review_id
-        )
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    return {"id": review_id, "provenance": "REVOKED", "applied_to_evidence": False}
+        return _region_service(request).revoke_review(paper_id, review_id)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
-@router.get("/reanalysis/preview")
+
+@router.get("/reanalysis/preview", response_model=ReanalysisPreviewResponse)
 def preview_reviewed_analysis(request: Request, paper_id: str):
     """Display data scope and potential API cost WITHOUT making any model request."""
-    services, record, pdf_path = _resources(request, paper_id)
-    _guard_integrity(pdf_path, record.sha256)
-    _key, url, model = _configured_pro()
-    _review_store, plan = _reanalysis_plan(services, record, model, url)
-    return {
-        "paper_id": paper_id,
-        "snapshot_digest": plan["snapshot_digest"],
-        "original_card_sha256": plan["original_card_sha256"],
-        "review_count": plan["review_count"],
-        "baseline_claim_count": plan["baseline_claim_count"],
-        "baseline_claims": plan["baseline_claims"],
-        "review_ids": plan["source_review_ids"],
-        "pro_model": model,
-        "provider": _public_provider(url),
-        "provider_configuration_sha256": plan["provider_digest"],
-        "outbound_payload": plan["prompt"],
-        "approximate_input_chars": plan["approximate_input_chars"],
-        "maximum_output_tokens": plan["maximum_output_tokens"],
-        "estimated_charge": "Unknown: depends on API provider, model, and billed tokens",
-        "will_send_to_external_api": True,
-        "requires_explicit_consent": True,
-        "only_one_pro_request": True,
-        "runs_lite": False,
-        "modifies_original_paper_card": False,
-        "modifies_source_blocks": False,
-        "note": "Only approved original claims, linked source excerpts, and "
-                "researcher-reviewed corrections will be sent. No full PDF upload.",
-    }
+    try:
+        return _region_service(request).preview_reanalysis(
+            paper_id, pro_config_loader=_configured_pro
+        )
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
 @router.post("/reanalysis/run")
@@ -336,66 +186,52 @@ def run_reviewed_analysis(
         raise HTTPException(
             422, "Explicit approval for sending source excerpts and API charges is required"
         )
-    services, record, pdf_path = _resources(request, paper_id)
-    _guard_integrity(pdf_path, record.sha256)
-    key, url, model = _configured_pro()
-    review_store, plan = _reanalysis_plan(services, record, model, url)
-    if plan["snapshot_digest"] != payload.expected_snapshot_digest:
-        raise HTTPException(
-            409, "Paper, original Card or researcher correction changed; preview again"
-        )
-
+    service = _region_service(request)
     try:
-        comparison = run_pro_comparison(
-            plan, api_key=key, base_url=url
+        record, pdf_path, key, url, plan = service.prepare_reanalysis_execution(
+            paper_id, pro_config_loader=_configured_pro
         )
-    except (ModelRequestError, ReanalysisError) as exc:
-        # A timed out/rejected model request may still incur provider charges.
-        raise HTTPException(
-            502, f"Pro comparative review failed: {str(exc)[:450]}. "
-                 "Request cost may already have been incurred; no result was saved."
-        ) from None
-
-    _guard_integrity(pdf_path, record.sha256)
-    store = ReviewReanalysisStore(services.repository.database_path)
-    try:
-        result = store.save_if_current(
-            services.repository, plan, comparison, review_store=review_store
+        if plan["snapshot_digest"] != payload.expected_snapshot_digest:
+            raise HTTPException(
+                409, "Paper, original Card or researcher correction changed; preview again"
+            )
+        result = service.execute_reanalysis(
+            record,
+            pdf_path,
+            plan,
+            api_key=key,
+            base_url=url,
+            comparison_runner=run_pro_comparison,
         )
-    except ReanalysisError as exc:
-        raise HTTPException(
-            409, f"{str(exc)}. Model request may already have incurred a charge; "
-                 "no reviewed result was saved."
-        ) from None
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     return JSONResponse(
         result,
-        headers={"Cache-Control": "no-store, private",
-                 "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Cache-Control": "no-store, private",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
-@router.get("/reanalysis/reports")
+@router.get("/reanalysis/reports", response_model=ReanalysisReportListResponse)
 def list_reviewed_analyses(request: Request, paper_id: str):
-    services, _record, _path = _resources(request, paper_id)
-    return {
-        "reports": ReviewReanalysisStore(
-            services.repository.database_path
-        ).list_reports(paper_id)
-    }
+    try:
+        return _region_service(request).list_reanalysis_reports(paper_id)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
 @router.get("/reanalysis/reports/{analysis_id}")
 def get_reviewed_analysis(request: Request, paper_id: str, analysis_id: str):
-    services, _record, _path = _resources(request, paper_id)
     try:
-        report = ReviewReanalysisStore(
-            services.repository.database_path
-        ).get_report(paper_id, analysis_id)
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from None
+        report = _region_service(request).get_reanalysis_report(paper_id, analysis_id)
+    except RegionReviewServiceError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     return JSONResponse(
         report,
-        headers={"Cache-Control": "no-store, private",
-                 "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Cache-Control": "no-store, private",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
-

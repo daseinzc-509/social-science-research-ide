@@ -13,8 +13,11 @@ from .analysis import AnalysisService
 from .exports import ExportService
 from .jobs import JobService
 from .maintenance import MaintenanceService
+from .model_center import ModelCenterService
 from .papers import PaperService
+from .region_review_service import RegionReviewService
 from .settings import SettingsService
+from .visual import VisualService
 
 
 @dataclass(slots=True)
@@ -27,6 +30,9 @@ class ApplicationServices:
     settings: SettingsService
     exports: ExportService
     maintenance: MaintenanceService
+    visual: VisualService
+    region_review: RegionReviewService
+    model_center: ModelCenterService
 
 
 def create_application_services(
@@ -39,16 +45,17 @@ def create_application_services(
     resolved_data_dir = Path(data_dir).expanduser().resolve()
     repo = repository or ResearchRepository(resolved_data_dir / "research.sqlite3")
     jobs = JobService()
+    papers = PaperService(
+        resolved_data_dir,
+        repo,
+        jobs,
+        import_pipeline_factory=import_pipeline_factory,
+    )
     return ApplicationServices(
         data_dir=resolved_data_dir,
         repository=repo,
         jobs=jobs,
-        papers=PaperService(
-            resolved_data_dir,
-            repo,
-            jobs,
-            import_pipeline_factory=import_pipeline_factory,
-        ),
+        papers=papers,
         analysis=AnalysisService(
             repo,
             jobs,
@@ -57,4 +64,7 @@ def create_application_services(
         settings=SettingsService(),
         exports=ExportService(repo),
         maintenance=MaintenanceService(resolved_data_dir, repo),
+        visual=VisualService(repo, papers),
+        region_review=RegionReviewService(repo, papers),
+        model_center=ModelCenterService(jobs),
     )

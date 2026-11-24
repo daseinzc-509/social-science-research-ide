@@ -67,6 +67,12 @@ public sealed class JobSnapshot
     }
 }
 
+public sealed class JobListResponse
+{
+    [JsonPropertyName("jobs")]
+    public List<JobSnapshot> Jobs { get; init; } = [];
+}
+
 public sealed class PaperSummary
 {
     [JsonPropertyName("id")]
