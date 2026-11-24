@@ -6,11 +6,24 @@ import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+from uuid import uuid4
 
 from .db import open_sqlite_connection, sqlite_connection
-from .models import FigureRegion, PaperCard, PaperMetadata, PaperRecord, ParsedDocument, SourceBlock
+from .models import (
+    FigureRegion,
+    PaperCard,
+    PaperMetadata,
+    PaperRecord,
+    ParsedDocument,
+    ProjectPaperEntry,
+    ProjectReadingStatus,
+    ResearchProject,
+    SourceBlock,
+)
+from .search import ensure_fts_schema, rebuild_all_fts, search_documents, sync_paper_fts
 
 
 class ResearchRepository:
@@ -110,6 +123,27 @@ class ResearchRepository:
                     ON reference_entries(paper_id, ordinal);
                 CREATE INDEX IF NOT EXISTS idx_citation_mentions_paper
                     ON citation_mentions(paper_id);
+                CREATE TABLE IF NOT EXISTS research_projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    description TEXT NOT NULL DEFAULT '',
+                    research_question TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS project_papers (
+                    project_id TEXT NOT NULL REFERENCES research_projects(id) ON DELETE CASCADE,
+                    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    reading_status TEXT NOT NULL DEFAULT 'queued',
+                    project_note TEXT NOT NULL DEFAULT '',
+                    position INTEGER NOT NULL DEFAULT 0,
+                    added_at TEXT NOT NULL,
+                    PRIMARY KEY (project_id, paper_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_project_papers_project_pos
+                    ON project_papers(project_id, position, added_at);
+                CREATE INDEX IF NOT EXISTS idx_project_papers_paper
+                    ON project_papers(paper_id);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(source_blocks)")}
@@ -124,6 +158,11 @@ class ResearchRepository:
             paper_columns = {row["name"] for row in connection.execute("PRAGMA table_info(papers)")}
             if "parser_version" not in paper_columns:
                 connection.execute("ALTER TABLE papers ADD COLUMN parser_version TEXT NOT NULL DEFAULT 'legacy'")
+            if ensure_fts_schema(connection):
+                has_papers = connection.execute("SELECT 1 FROM papers LIMIT 1").fetchone() is not None
+                has_fts = connection.execute("SELECT 1 FROM search_fts LIMIT 1").fetchone() is not None
+                if has_papers and not has_fts:
+                    rebuild_all_fts(connection)
 
     def get_by_sha256(self, sha256: str) -> PaperRecord | None:
         with self._connection() as connection:
@@ -168,6 +207,7 @@ class ResearchRepository:
                     for figure in document.figures
                 ],
             )
+            sync_paper_fts(connection, record.id)
         return record
 
     def refresh_parsed_document(self, paper_id: str, document: ParsedDocument) -> None:
@@ -208,6 +248,7 @@ class ResearchRepository:
                 (document.page_count, document.status.value, document.parser_version,
                  json.dumps(document.warnings, ensure_ascii=False), paper_id),
             )
+            sync_paper_fts(connection, paper_id)
 
     def list_papers(self) -> list[PaperRecord]:
         with self._connection() as connection:
@@ -230,6 +271,7 @@ class ResearchRepository:
                 updated_at = CURRENT_TIMESTAMP""",
                 (card.paper_id, card.model_dump_json()),
             )
+            sync_paper_fts(connection, card.paper_id)
 
     def get_card(self, paper_id: str) -> PaperCard | None:
         with self._connection() as connection:
@@ -303,11 +345,13 @@ class ResearchRepository:
                         updated_at = CURRENT_TIMESTAMP""",
                     (paper_id, json.dumps(effective_overrides, ensure_ascii=False), note),
                 )
+            sync_paper_fts(connection, paper_id)
         return self.get_metadata_overrides(paper_id)
 
     def clear_metadata_overrides(self, paper_id: str) -> None:
         with self._connection() as connection:
             connection.execute("DELETE FROM paper_metadata_overrides WHERE paper_id = ?", (paper_id,))
+            sync_paper_fts(connection, paper_id)
 
     def get_source_blocks(self, paper_id: str) -> list[SourceBlock]:
         with self._connection() as connection:
@@ -613,6 +657,7 @@ class ResearchRepository:
             ).fetchone()[0]
             connection.execute("DELETE FROM paper_cards WHERE paper_id = ?", (paper_id,))
             connection.execute("DELETE FROM model_runs WHERE paper_id = ?", (paper_id,))
+            sync_paper_fts(connection, paper_id)
         return {
             "paper_cards": int(card_count),
             "model_runs": int(model_run_count),
@@ -651,6 +696,7 @@ class ResearchRepository:
             stored_path = row["stored_path"]
             original_name = row["original_name"]
             connection.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+            sync_paper_fts(connection, paper_id)
         return {
             "paper_id": paper_id,
             "original_name": original_name,
@@ -668,6 +714,7 @@ class ResearchRepository:
             connection.execute(
                 "INSERT INTO user_notes (id, paper_id, note) VALUES (?, ?, ?)", (note_id, paper_id, note.strip())
             )
+            sync_paper_fts(connection, paper_id)
 
     def save_references(self, paper_id: str, entries: list, mentions: list) -> None:
         """Replace extracted references for one paper; raw source text remains in source_blocks."""
@@ -700,6 +747,278 @@ class ResearchRepository:
             [CitationMention.model_validate_json(row[0]) for row in mentions],
         )
 
+    def sync_paper_search_index(self, paper_id: str) -> int:
+        """同步单篇论文的 FTS5 索引（供局部复核等外部表更新后触发）。"""
+        with self._connection() as connection:
+            return sync_paper_fts(connection, paper_id)
+
+    def rebuild_search_index(self) -> int:
+        """全量重建本地研究库的 SQLite FTS5 全文索引。"""
+        with self._connection() as connection:
+            return rebuild_all_fts(connection)
+
+    def search(
+        self,
+        query: str,
+        *,
+        project_id: str | None = None,
+        source_kinds: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """跨文献全文检索，支持按研究项目（project_id）或来源类别过滤。"""
+        with self._connection() as connection:
+            scoped_ids: set[str] | None = None
+            if project_id is not None:
+                proj = connection.execute(
+                    "SELECT 1 FROM research_projects WHERE id = ?",
+                    (project_id,),
+                ).fetchone()
+                if proj is None:
+                    raise KeyError(f"unknown project id: {project_id}")
+                scoped_ids = {
+                    str(row["paper_id"])
+                    for row in connection.execute(
+                        "SELECT paper_id FROM project_papers WHERE project_id = ?",
+                        (project_id,),
+                    ).fetchall()
+                }
+            return search_documents(
+                connection,
+                query,
+                paper_ids=scoped_ids,
+                source_kinds=set(source_kinds) if source_kinds else None,
+                limit=limit,
+            )
+
+    def create_project(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        research_question: str = "",
+        project_id: str | None = None,
+    ) -> ResearchProject:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("project name cannot be blank")
+        pid = (project_id or "").strip() or str(uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO research_projects (id, name, description, research_question, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        pid,
+                        clean_name,
+                        (description or "").strip(),
+                        (research_question or "").strip(),
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"project already exists: {clean_name}") from exc
+            row = connection.execute(
+                """
+                SELECT p.*, 0 AS paper_count
+                FROM research_projects p
+                WHERE p.id = ?
+                """,
+                (pid,),
+            ).fetchone()
+        return self._project_from_row(row)
+
+    def list_projects(self) -> list[ResearchProject]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT p.*, COUNT(pp.paper_id) AS paper_count
+                FROM research_projects p
+                LEFT JOIN project_papers pp ON pp.project_id = p.id
+                GROUP BY p.id
+                ORDER BY p.updated_at DESC, p.created_at DESC
+                """
+            ).fetchall()
+        return [self._project_from_row(row) for row in rows]
+
+    def get_project(self, project_id: str) -> ResearchProject | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT p.*, COUNT(pp.paper_id) AS paper_count
+                FROM research_projects p
+                LEFT JOIN project_papers pp ON pp.project_id = p.id
+                WHERE p.id = ?
+                GROUP BY p.id
+                """,
+                (project_id,),
+            ).fetchone()
+        return self._project_from_row(row) if row is not None else None
+
+    def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        research_question: str | None = None,
+    ) -> ResearchProject:
+        with self._connection() as connection:
+            existing = connection.execute(
+                "SELECT * FROM research_projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if existing is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            new_name = existing["name"] if name is None else name.strip()
+            if not new_name:
+                raise ValueError("project name cannot be blank")
+            new_desc = existing["description"] if description is None else description.strip()
+            new_rq = (
+                existing["research_question"]
+                if research_question is None
+                else research_question.strip()
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            try:
+                connection.execute(
+                    """
+                    UPDATE research_projects
+                    SET name = ?, description = ?, research_question = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (new_name, new_desc, new_rq, now, project_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"project already exists: {new_name}") from exc
+            row = connection.execute(
+                """
+                SELECT p.*, COUNT(pp.paper_id) AS paper_count
+                FROM research_projects p
+                LEFT JOIN project_papers pp ON pp.project_id = p.id
+                WHERE p.id = ?
+                GROUP BY p.id
+                """,
+                (project_id,),
+            ).fetchone()
+        return self._project_from_row(row)
+
+    def delete_project(self, project_id: str) -> dict[str, object]:
+        """删除研究项目及关联关系，绝不删除底层论文与证据卡片。"""
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT id, name FROM research_projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            member_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM project_papers WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()[0]
+            )
+            connection.execute("DELETE FROM research_projects WHERE id = ?", (project_id,))
+        return {
+            "project_id": str(row["id"]),
+            "name": str(row["name"]),
+            "unlinked_papers": member_count,
+        }
+
+    def add_paper_to_project(
+        self,
+        project_id: str,
+        paper_id: str,
+        *,
+        reading_status: ProjectReadingStatus | str = ProjectReadingStatus.QUEUED,
+        project_note: str = "",
+        position: int | None = None,
+    ) -> ProjectPaperEntry:
+        status_enum = (
+            reading_status
+            if isinstance(reading_status, ProjectReadingStatus)
+            else ProjectReadingStatus(str(reading_status).strip().lower())
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            if connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone() is None:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            current = connection.execute(
+                "SELECT position, added_at FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                (project_id, paper_id),
+            ).fetchone()
+            if position is not None:
+                pos = max(0, int(position))
+            elif current is not None:
+                pos = int(current["position"])
+            else:
+                max_pos = connection.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM project_papers WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()[0]
+                pos = int(max_pos) + 1
+
+            added_at = str(current["added_at"]) if current is not None else now
+            connection.execute(
+                """
+                INSERT INTO project_papers (project_id, paper_id, reading_status, project_note, position, added_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, paper_id) DO UPDATE SET
+                    reading_status = excluded.reading_status,
+                    project_note = excluded.project_note,
+                    position = excluded.position
+                """,
+                (project_id, paper_id, status_enum.value, (project_note or "").strip(), pos, added_at),
+            )
+            connection.execute(
+                "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                (now, project_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                (project_id, paper_id),
+            ).fetchone()
+        return self._project_paper_from_row(row)
+
+    def remove_paper_from_project(self, project_id: str, paper_id: str) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            cursor = connection.execute(
+                "DELETE FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                (project_id, paper_id),
+            )
+            removed = cursor.rowcount > 0
+            if removed:
+                connection.execute(
+                    "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                    (now, project_id),
+                )
+        return removed
+
+    def list_project_papers(self, project_id: str) -> list[ProjectPaperEntry]:
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            rows = connection.execute(
+                """
+                SELECT * FROM project_papers
+                WHERE project_id = ?
+                ORDER BY position ASC, added_at ASC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [self._project_paper_from_row(row) for row in rows]
+
+    def get_project_paper_ids(self, project_id: str) -> set[str]:
+        return {entry.paper_id for entry in self.list_project_papers(project_id)}
+
     @staticmethod
     def _sha256_file(path: Path) -> str:
         hasher = hashlib.sha256()
@@ -714,4 +1033,27 @@ class ResearchRepository:
             id=row["id"], sha256=row["sha256"], original_name=row["original_name"],
             stored_path=row["stored_path"], page_count=row["page_count"], parse_status=row["parse_status"],
             parser_version=row["parser_version"], warnings=json.loads(row["warnings_json"]), created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _project_from_row(row: sqlite3.Row) -> ResearchProject:
+        return ResearchProject(
+            id=str(row["id"]),
+            name=str(row["name"]),
+            description=str(row["description"] or ""),
+            research_question=str(row["research_question"] or ""),
+            paper_count=int(row["paper_count"] or 0),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _project_paper_from_row(row: sqlite3.Row) -> ProjectPaperEntry:
+        return ProjectPaperEntry(
+            project_id=str(row["project_id"]),
+            paper_id=str(row["paper_id"]),
+            reading_status=ProjectReadingStatus(str(row["reading_status"] or "queued")),
+            project_note=str(row["project_note"] or ""),
+            position=int(row["position"] or 0),
+            added_at=str(row["added_at"]),
         )

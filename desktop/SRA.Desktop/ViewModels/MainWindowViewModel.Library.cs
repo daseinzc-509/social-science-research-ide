@@ -8,6 +8,7 @@ namespace SRA.Desktop.ViewModels;
 /// </summary>
 public partial class MainWindowViewModel
 {
+    private CancellationTokenSource? _searchCts;
     [RelayCommand]
     public async Task RefreshAsync()
     {
@@ -79,6 +80,79 @@ public partial class MainWindowViewModel
             : Papers.FirstOrDefault();
     }
 
+    private async Task RunFullTextSearchFilterAsync(string query)
+    {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        var term = (query ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(term) || _allPapers.Count == 0)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        try
+        {
+            await Task.Delay(180, cts.Token);
+            var response = await _api.SearchLibraryAsync(term, limit: 120, cancellationToken: cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            if (!string.Equals((SearchText ?? "").Trim(), term, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var orderedIds = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var hit in response.Hits)
+            {
+                if (seen.Add(hit.PaperId))
+                {
+                    orderedIds.Add(hit.PaperId);
+                }
+            }
+            if (orderedIds.Count == 0)
+            {
+                return;
+            }
+
+            var byId = _allPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
+            var merged = new List<PaperSummary>();
+            foreach (var id in orderedIds)
+            {
+                if (byId.TryGetValue(id, out var matchedPaper))
+                {
+                    merged.Add(matchedPaper);
+                }
+            }
+            foreach (var existing in Papers)
+            {
+                if (seen.Add(existing.Id))
+                {
+                    merged.Add(existing);
+                }
+            }
+
+            var currentSelectedId = SelectedPaper?.Id;
+            Papers.Clear();
+            foreach (var item in merged)
+            {
+                Papers.Add(item);
+            }
+            UpdateLibrarySummary(ftsMatched: true);
+            SelectedPaper = !string.IsNullOrWhiteSpace(currentSelectedId)
+                ? Papers.FirstOrDefault(p => p.Id == currentSelectedId) ?? Papers.FirstOrDefault()
+                : Papers.FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // 本地离线或后端忙碌时保留同步内存过滤结果，不打断用户输入
+        }
+    }
+
     private async Task LoadSelectedPaperAsync(PaperSummary? paper, CancellationToken cancellationToken)
     {
         ClearProjection();
@@ -137,11 +211,13 @@ public partial class MainWindowViewModel
         }
     }
 
-    private void UpdateLibrarySummary()
+    private void UpdateLibrarySummary(bool ftsMatched = false)
     {
         LibrarySummary = string.IsNullOrWhiteSpace(SearchText)
             ? (_allPapers.Count == 1 ? "1 paper" : $"{_allPapers.Count} papers")
-            : $"{Papers.Count} / {_allPapers.Count} papers";
+            : (ftsMatched
+                ? $"{Papers.Count} / {_allPapers.Count} papers · 全文"
+                : $"{Papers.Count} / {_allPapers.Count} papers");
         IsLibraryEmpty = Papers.Count == 0;
     }
 

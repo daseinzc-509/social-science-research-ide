@@ -16,13 +16,81 @@ import argparse
 import importlib.metadata
 import importlib.util
 import os
+import re
+import site
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("full",)
 POLICIES = ("conservative", "compatible")
+
+# 桌面无头后端永不使用的测试造数库、单测运行器、Tcl/Tk GUI 与 PythonWin MFC IDE 外壳。
+# 注意：绝不包含 torch/torchvision/transformers/cv2/docling/rapidocr/win32/pywin32_system32。
+DEV_AND_GUI_EXCLUDES = (
+    "tkinter",
+    "_tkinter",
+    "turtle",
+    "turtledemo",
+    "idlelib",
+    "pytest",
+    "_pytest",
+    "faker",
+    "polyfactory",
+    "pythonwin",
+)
+UNWANTED_BUILD_DISTRIBUTIONS = frozenset({"faker", "polyfactory", "pymupdf"})
+
+
+def _normalize_dist_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).strip("-").lower()
+
+
+def audit_environment_hygiene(site_packages_dirs: Iterable[Path] | None = None) -> dict[str, object]:
+    """扫描构建虚拟环境中的重复多版本 .dist-info 残留与开发/遗留包污染。"""
+    if site_packages_dirs is None:
+        candidates: list[Path] = []
+        for entry in [*site.getsitepackages(), *(Path(p) for p in sys.path if p)]:
+            path = Path(entry)
+            if path.is_dir() and path not in candidates:
+                candidates.append(path)
+        roots = candidates
+    else:
+        roots = [Path(p) for p in site_packages_dirs if Path(p).is_dir()]
+
+    by_package: dict[str, list[str]] = {}
+    unwanted_found: list[str] = []
+    for root in roots:
+        for dist_dir in sorted(root.glob("*.dist-info")):
+            if not dist_dir.is_dir():
+                continue
+            stem = dist_dir.name[: -len(".dist-info")]
+            if "-" not in stem:
+                continue
+            pkg_raw, _version = stem.rsplit("-", 1)
+            pkg = _normalize_dist_name(pkg_raw)
+            if not pkg:
+                continue
+            by_package.setdefault(pkg, [])
+            if dist_dir.name not in by_package[pkg]:
+                by_package[pkg].append(dist_dir.name)
+            if pkg in UNWANTED_BUILD_DISTRIBUTIONS and dist_dir.name not in unwanted_found:
+                unwanted_found.append(dist_dir.name)
+
+    duplicates = {
+        pkg: sorted(names)
+        for pkg, names in sorted(by_package.items())
+        if len(names) > 1
+    }
+    return {
+        "clean": not duplicates and not any(
+            _normalize_dist_name(item.rsplit("-", 1)[0]) == "pymupdf" for item in unwanted_found
+        ),
+        "duplicate_dist_info": duplicates,
+        "unwanted_distributions": sorted(unwanted_found),
+    }
 
 
 def available(module: str) -> bool:
@@ -42,6 +110,7 @@ def command_args(
     profile: str,
     *,
     collection_policy: str = "conservative",
+    exclude_dev_gui: bool = False,
     project: Path = ROOT,
     target: Path | None = None,
 ) -> list[str]:
@@ -67,12 +136,16 @@ def command_args(
         "--hidden-import", "frozen_backend_probe",
         "--hidden-import", "sociology_research.model_center_worker",
         "--runtime-hook", str(project / "scripts" / "sra_model_worker_runtime_hook.py"),
+        "--collect-submodules", "sociology_research.analysis",
         "--collect-submodules", "sociology_research.api",
         "--collect-submodules", "sociology_research.services",
     ]
     # Docling-only: neither PyMuPDF nor the legacy fitz alias is needed.
     # Excluding their import graphs avoids shipping unrelated MuPDF binaries.
     args += ["--exclude-module", "pymupdf", "--exclude-module", "fitz"]
+    if exclude_dev_gui:
+        for module in DEV_AND_GUI_EXCLUDES:
+            args += ["--exclude-module", module]
     if collection_policy == "compatible":
         # Rollback mode keeps broad collection for the remaining dependencies.
         for module in ("keyring", "pydantic", "rapidocr_onnxruntime"):
@@ -141,10 +214,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=PROFILES, default="full")
     parser.add_argument("--collection-policy", choices=POLICIES, default="conservative")
+    parser.add_argument("--exclude-dev-and-gui", action="store_true",
+                        help="Exclude test/faker/tkinter/pythonwin modules not used by the headless backend")
+    parser.add_argument("--check-clean-env", action="store_true",
+                        help="Fail before freezing if duplicate .dist-info metadata or legacy pymupdf remain in site-packages")
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "backend")
     options = parser.parse_args()
     os.environ.setdefault("PYTHONUTF8", "1")
-    cmd = command_args(options.profile, collection_policy=options.collection_policy, target=options.output)
+    hygiene = audit_environment_hygiene()
+    if hygiene["unwanted_distributions"]:
+        print(f"Environment hygiene note - non-runtime distributions present: {hygiene['unwanted_distributions']}", flush=True)
+    if options.check_clean_env and not hygiene["clean"]:
+        raise SystemExit(
+            f"Build environment failed hygiene check: duplicates={hygiene['duplicate_dist_info']}, "
+            f"unwanted={hygiene['unwanted_distributions']}"
+        )
+    cmd = command_args(
+        options.profile,
+        collection_policy=options.collection_policy,
+        exclude_dev_gui=options.exclude_dev_and_gui,
+        target=options.output,
+    )
     print(f"PyInstaller collection policy: {options.collection_policy}; backend: {options.profile}", flush=True)
     subprocess.run(cmd, check=True, cwd=ROOT)
     executable = options.output / "sra-backend" / ("sra-backend.exe" if sys.platform == "win32" else "sra-backend")

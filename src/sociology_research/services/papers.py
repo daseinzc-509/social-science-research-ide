@@ -31,9 +31,23 @@ class PaperService:
         self.jobs = jobs
         self.import_pipeline_factory = import_pipeline_factory
 
-    def list_papers(self) -> list[dict[str, Any]]:
+    def list_papers(
+        self,
+        *,
+        query: str | None = None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        allowed_ids: set[str] | None = None
+        ordered_project_ids: list[str] | None = None
+        if project_id is not None and project_id.strip():
+            entries = self.repository.list_project_papers(project_id.strip())
+            ordered_project_ids = [entry.paper_id for entry in entries]
+            allowed_ids = set(ordered_project_ids)
+
         items: list[dict[str, Any]] = []
         for paper in self.repository.list_papers():
+            if allowed_ids is not None and paper.id not in allowed_ids:
+                continue
             card = None
             card_error = None
             try:
@@ -60,7 +74,64 @@ class PaperService:
                     "warnings": len(card.warnings) if card is not None else len(paper.warnings),
                 }
             )
-        return items
+
+        if ordered_project_ids is not None and not (query and query.strip()):
+            order_index = {pid: idx for idx, pid in enumerate(ordered_project_ids)}
+            items.sort(key=lambda item: order_index.get(item["id"], 10_000))
+
+        clean_query = (query or "").strip()
+        if not clean_query:
+            return items
+
+        fts_rank: dict[str, int] = {}
+        if hasattr(self.repository, "search"):
+            for hit in self.repository.search(
+                clean_query,
+                project_id=project_id.strip() if project_id and project_id.strip() else None,
+                limit=200,
+            ):
+                pid = str(hit["paper_id"])
+                if pid not in fts_rank:
+                    fts_rank[pid] = len(fts_rank)
+
+        lowered = clean_query.casefold()
+        matched: list[dict[str, Any]] = []
+        for item in items:
+            direct_hit = (
+                lowered in str(item["title"]).casefold()
+                or lowered in str(item["original_name"]).casefold()
+                or any(lowered in str(a).casefold() for a in item["authors"])
+                or (item["journal"] and lowered in str(item["journal"]).casefold())
+                or (item["year"] is not None and lowered in str(item["year"]))
+            )
+            if item["id"] in fts_rank or direct_hit:
+                matched.append(item)
+
+        matched.sort(key=lambda item: fts_rank.get(item["id"], 10_000))
+        return matched
+
+    def search_library(
+        self,
+        query: str,
+        *,
+        project_id: str | None = None,
+        source_kinds: list[str] | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        clean = (query or "").strip()
+        if not clean:
+            return {"query": "", "total": 0, "hits": []}
+        hits = self.repository.search(
+            clean,
+            project_id=project_id.strip() if project_id and project_id.strip() else None,
+            source_kinds=source_kinds,
+            limit=limit,
+        )
+        return {
+            "query": clean,
+            "total": len(hits),
+            "hits": hits,
+        }
 
     def dashboard(self) -> dict[str, Any]:
         papers = self.list_papers()

@@ -76,11 +76,59 @@ public sealed class SraApiClient : IDisposable
     public Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync<HealthResponse>("api/v1/health", cancellationToken);
 
-    public async Task<IReadOnlyList<PaperSummary>> GetPapersAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PaperSummary>> GetPapersAsync(
+        CancellationToken cancellationToken = default,
+        string? query = null,
+        string? projectId = null)
     {
-        var response = await GetJsonAsync<PaperListResponse>("api/v1/papers", cancellationToken);
+        var queryParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(query))
+            queryParts.Add("q=" + Uri.EscapeDataString(query.Trim()));
+        if (!string.IsNullOrWhiteSpace(projectId))
+            queryParts.Add("project_id=" + Uri.EscapeDataString(projectId.Trim()));
+        var url = queryParts.Count == 0 ? "api/v1/papers" : "api/v1/papers?" + string.Join("&", queryParts);
+        var response = await GetJsonAsync<PaperListResponse>(url, cancellationToken);
         return response.Papers;
     }
+
+    public Task<SearchResponse> SearchLibraryAsync(
+        string query,
+        string? projectId = null,
+        int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"api/v1/papers/search?q={Uri.EscapeDataString(query ?? "")}&limit={Math.Clamp(limit, 1, 200)}";
+        if (!string.IsNullOrWhiteSpace(projectId))
+            url += $"&project_id={Uri.EscapeDataString(projectId.Trim())}";
+        return GetJsonAsync<SearchResponse>(url, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ProjectSummaryView>> GetProjectsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await GetJsonAsync<ProjectListResponse>("api/v1/projects", cancellationToken);
+        return response.Projects;
+    }
+
+    public async Task<ProjectSummaryView> CreateProjectAsync(
+        string name,
+        string description = "",
+        string researchQuestion = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            "api/v1/projects",
+            new { name, description, research_question = researchQuestion },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<ProjectSummaryView>(response, cancellationToken);
+    }
+
+    public Task<JsonElement> GetProjectEvidenceMatrixAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/evidence-matrix",
+            cancellationToken);
 
     public Task<PaperDetailResponse> GetPaperAsync(string paperId, CancellationToken cancellationToken = default) =>
         GetJsonAsync<PaperDetailResponse>($"api/v1/papers/{Uri.EscapeDataString(paperId)}", cancellationToken);
@@ -273,6 +321,95 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<JobSnapshot>(response, cancellationToken);
     }
 
+    public async Task<JobSnapshot?> TryStreamJobEventsAsync(
+        string jobId,
+        Action<JobSnapshot>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(20));
+        var token = timeoutCts.Token;
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/v1/jobs/{Uri.EscapeDataString(jobId)}/events");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var response = await _http.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
+        await EnsureSuccessAsync(response, token);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(token);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var dataBuffer = new StringBuilder();
+
+        JobSnapshot? DispatchFrame()
+        {
+            if (dataBuffer.Length == 0)
+            {
+                return null;
+            }
+            var json = dataBuffer.ToString();
+            dataBuffer.Clear();
+            var snapshot = JsonSerializer.Deserialize<JobSnapshot>(json, _jsonOptions)
+                ?? throw new SraApiException("SRA SSE stream returned an invalid job payload.");
+            onProgress?.Invoke(snapshot);
+            if (snapshot.Status == "done")
+            {
+                return snapshot;
+            }
+            if (snapshot.Status == "cancelled")
+            {
+                throw new SraJobCancelledException("后台任务已取消。");
+            }
+            if (snapshot.Status == "error")
+            {
+                throw new SraApiException(snapshot.Error ?? "SRA background job failed.");
+            }
+            return null;
+        }
+
+        try
+        {
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(token);
+                if (line is null)
+                {
+                    return DispatchFrame();
+                }
+                if (line.Length == 0)
+                {
+                    var terminal = DispatchFrame();
+                    if (terminal is not null)
+                    {
+                        return terminal;
+                    }
+                    continue;
+                }
+                if (line.StartsWith(':'))
+                {
+                    continue;
+                }
+                if (line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    var payloadPart = line[5..].TrimStart();
+                    if (dataBuffer.Length > 0)
+                    {
+                        dataBuffer.Append('\n');
+                    }
+                    dataBuffer.Append(payloadPart);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+        {
+            throw new TimeoutException("SRA background job did not finish within 20 minutes.");
+        }
+    }
+
     public async Task<JobSnapshot> WaitForJobAsync(
         string jobId,
         Action<JobSnapshot>? onProgress = null,
@@ -280,6 +417,18 @@ public sealed class SraApiClient : IDisposable
     )
     {
         var started = DateTimeOffset.UtcNow;
+        try
+        {
+            var streamed = await TryStreamJobEventsAsync(jobId, onProgress, cancellationToken);
+            if (streamed is not null)
+            {
+                return streamed;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException && !cancellationToken.IsCancellationRequested)
+        {
+            // SSE 连接闪断或不支持时，无缝降级至下方幂等状态轮询，绝不重发上传或付费模型请求
+        }
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();

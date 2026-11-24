@@ -11,7 +11,7 @@ from ..analyzer import PaperAnalysisError
 from ..llm_client import ModelRequestError
 from ..repository import ResearchRepository
 from ..services import ApplicationServices, create_application_services
-from .routes import analysis, health, imports, jobs, paper_tools, papers, settings, workspace
+from .routes import analysis, health, imports, jobs, paper_tools, papers, projects, settings, workspace
 from .routes import region_review
 from .routes import visual
 from .routes import model_center
@@ -40,6 +40,7 @@ def create_app(
     app.state.services = services
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(papers.router, prefix=API_PREFIX)
+    app.include_router(projects.router, prefix=API_PREFIX)
     app.include_router(imports.router, prefix=API_PREFIX)
     app.include_router(analysis.router, prefix=API_PREFIX)
     app.include_router(jobs.router, prefix=API_PREFIX)

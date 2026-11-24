@@ -237,3 +237,72 @@ public sealed class DeletePaperResult
     [JsonPropertyName("file_warning")]
     public string? FileWarning { get; init; }
 }
+
+public sealed class SearchHitView
+{
+    [JsonPropertyName("doc_key")]
+    public string DocKey { get; init; } = "";
+
+    [JsonPropertyName("paper_id")]
+    public string PaperId { get; init; } = "";
+
+    [JsonPropertyName("paper_title")]
+    public string PaperTitle { get; init; } = "";
+
+    [JsonPropertyName("source_kind")]
+    public string SourceKind { get; init; } = "";
+
+    [JsonPropertyName("provenance")]
+    public string Provenance { get; init; } = "";
+
+    [JsonPropertyName("page_number")]
+    public int? PageNumber { get; init; }
+
+    [JsonPropertyName("snippet")]
+    public string Snippet { get; init; } = "";
+
+    [JsonPropertyName("score")]
+    public double Score { get; init; }
+}
+
+public sealed class SearchResponse
+{
+    [JsonPropertyName("query")]
+    public string Query { get; init; } = "";
+
+    [JsonPropertyName("total")]
+    public int Total { get; init; }
+
+    [JsonPropertyName("hits")]
+    public List<SearchHitView> Hits { get; init; } = [];
+}
+
+public sealed class ProjectSummaryView
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("description")]
+    public string Description { get; init; } = "";
+
+    [JsonPropertyName("research_question")]
+    public string ResearchQuestion { get; init; } = "";
+
+    [JsonPropertyName("paper_count")]
+    public int PaperCount { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; init; } = "";
+
+    [JsonPropertyName("updated_at")]
+    public string UpdatedAt { get; init; } = "";
+}
+
+public sealed class ProjectListResponse
+{
+    [JsonPropertyName("projects")]
+    public List<ProjectSummaryView> Projects { get; init; } = [];
+}

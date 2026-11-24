@@ -1,16 +1,42 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from ...services.application import ApplicationServices
 from ..dependencies import get_services
-from ..schemas import DeletePaperRequest, JobAccepted, PaperDetailResponse, PaperListResponse
+from ..schemas import (
+    DeletePaperRequest,
+    JobAccepted,
+    PaperDetailResponse,
+    PaperListResponse,
+    SearchResponse,
+)
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
 @router.get("", response_model=PaperListResponse)
-def list_papers(services: ApplicationServices = Depends(get_services)):
-    return {"papers": services.papers.list_papers()}
+def list_papers(
+    q: str | None = Query(default=None, max_length=500),
+    project_id: str | None = Query(default=None, max_length=120),
+    services: ApplicationServices = Depends(get_services),
+):
+    return {"papers": services.papers.list_papers(query=q, project_id=project_id)}
+
+
+@router.get("/search", response_model=SearchResponse)
+def search_papers(
+    q: str = Query(default="", max_length=500),
+    project_id: str | None = Query(default=None, max_length=120),
+    source_kind: list[str] | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.papers.search_library(
+        q,
+        project_id=project_id,
+        source_kinds=source_kind,
+        limit=limit,
+    )
 
 
 @router.get("/{paper_id}", response_model=PaperDetailResponse)

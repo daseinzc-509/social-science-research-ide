@@ -580,3 +580,39 @@ class PaperRecord(BaseModel):
     parser_version: str = "legacy"
     warnings: list[str] = Field(default_factory=list)
     created_at: str
+
+
+class ProjectReadingStatus(StrEnum):
+    """论文在特定研究项目中的阅读与综合进度状态。"""
+
+    QUEUED = "queued"
+    READING = "reading"
+    REVIEWED = "reviewed"
+    CORE = "core"
+
+
+class ResearchProject(BaseModel):
+    """跨文献研究项目（承载 Reading List、跨文献检索与 Evidence Matrix）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    research_question: str = Field(default="", max_length=1000)
+    paper_count: int = Field(default=0, ge=0)
+    created_at: str
+    updated_at: str
+
+
+class ProjectPaperEntry(BaseModel):
+    """研究项目与单篇论文的多对多归属及项目专属批注。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str
+    paper_id: str
+    reading_status: ProjectReadingStatus = ProjectReadingStatus.QUEUED
+    project_note: str = Field(default="", max_length=2000)
+    position: int = Field(default=0, ge=0)
+    added_at: str

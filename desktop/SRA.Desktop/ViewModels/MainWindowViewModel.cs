@@ -165,7 +165,11 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnActiveJobIdChanged(string? value) => OnPropertyChanged(nameof(CanCancelJob));
     partial void OnIsCancellingJobChanged(bool value) => OnPropertyChanged(nameof(CanCancelJob));
     partial void OnStudyRationaleChanged(string value) => OnPropertyChanged(nameof(HasStudyRationale));
-    partial void OnSearchTextChanged(string value) => ApplyFilter(value);
+    partial void OnSearchTextChanged(string value)
+    {
+        ApplyFilter(value);
+        _ = RunFullTextSearchFilterAsync(value);
+    }
 
     partial void OnThemeModeChanged(string value)
     {

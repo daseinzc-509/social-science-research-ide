@@ -19,6 +19,8 @@ from pathlib import Path
 MIB = 1024 * 1024
 DEVELOPMENT_SUFFIXES = frozenset({".lib", ".a", ".h", ".hpp", ".hxx"})
 VALID_TARGETS = ("win-x64", "osx-arm64")
+DEV_TEST_DIRS = frozenset({"faker", "polyfactory", "pytest", "_pytest"})
+TCL_TK_GUI_DIRS = frozenset({"tkinter", "tcl8", "_tcl_data", "_tk_data", "idlelib", "turtledemo"})
 
 
 @dataclass(frozen=True)
@@ -84,12 +86,79 @@ def _is_opencv_video_codec(relative: Path) -> bool:
     )
 
 
+def _version_sort_key(version_text: str) -> tuple[int, object]:
+    try:
+        from packaging.version import Version
+        return (1, Version(version_text))
+    except Exception:
+        tokens = [
+            int(tok) if tok.isdigit() else tok.casefold()
+            for tok in re.split(r"([0-9]+)", version_text)
+            if tok
+        ]
+        return (0, tuple(tokens))
+
+
+def _find_stale_duplicate_dist_infos(backend_root: Path) -> set[str]:
+    """识别 _internal 下同一包并存多个 .dist-info 时的旧版本元数据目录名（小写）。"""
+    internal = backend_root / "_internal"
+    if not internal.is_dir() or _is_link_or_junction(internal):
+        return set()
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    for entry in internal.iterdir():
+        if _is_link_or_junction(entry) or not entry.is_dir():
+            continue
+        lower_name = entry.name.casefold()
+        if not lower_name.endswith(".dist-info"):
+            continue
+        stem = entry.name[: -len(".dist-info")]
+        if "-" not in stem:
+            continue
+        pkg_raw, version_raw = stem.rsplit("-", 1)
+        pkg_norm = re.sub(r"[-_.]+", "-", pkg_raw).strip("-").casefold()
+        if not pkg_norm or not version_raw:
+            continue
+        grouped.setdefault(pkg_norm, []).append((version_raw, lower_name))
+
+    stale: set[str] = set()
+    for items in grouped.values():
+        if len(items) < 2:
+            continue
+        ordered = sorted(items, key=lambda pair: (_version_sort_key(pair[0]), pair[1]))
+        # 保留最高版本，其余旧版本 .dist-info 列为陈旧冗余元数据
+        for _ver, folder_lower in ordered[:-1]:
+            stale.add(folder_lower)
+    return stale
+
+
+def _dev_or_gui_bloat_reason(relative: Path, stale_dist_infos: set[str]) -> str | None:
+    """精确识别混入 _internal 的测试库、Tcl/Tk 桌面 GUI、PythonWin IDE 及重复旧版 .dist-info。"""
+    parts = tuple(part.casefold() for part in relative.parts)
+    if len(parts) < 3 or parts[0] != "_internal":
+        return None
+    top_dir = parts[1]
+    if top_dir in DEV_TEST_DIRS or re.fullmatch(r"(faker|polyfactory|pytest)-.+\.dist-info", top_dir):
+        return "Development/test-only package leaked into frozen backend"
+    if top_dir in TCL_TK_GUI_DIRS:
+        return "Tcl/Tk desktop GUI asset unused by headless API backend"
+    if top_dir == "pythonwin":
+        return "PythonWin MFC IDE component unused by headless API backend"
+    if top_dir in stale_dist_infos:
+        return "Stale duplicate .dist-info metadata from uncleaned build environment"
+    return None
+
+
 def _eligible_files(
     root: Path, component: str, *, remove_opencv_video: bool = False,
-    remove_type_stubs: bool = False,
+    remove_type_stubs: bool = False, remove_dev_gui_bloat: bool = False,
 ) -> list[PrunableFile]:
     candidates: list[PrunableFile] = []
     root_resolved = root.resolve(strict=True)
+    stale_dist_infos = (
+        _find_stale_duplicate_dist_infos(root)
+        if component == "backend" and remove_dev_gui_bloat
+        else set()
+    )
     for path in root.rglob("*"):
         if _is_link_or_junction(path) or not path.is_file():
             continue
@@ -99,6 +168,11 @@ def _eligible_files(
         relative = path.relative_to(root)
         if any(_is_link_or_junction(parent) for parent in path.parents if parent != root and parent.is_relative_to(root)):
             raise ValueError(f"Link/junction parent inside release tree: {relative}")
+        bloat_reason = (
+            _dev_or_gui_bloat_reason(relative, stale_dist_infos)
+            if component == "backend" and remove_dev_gui_bloat
+            else None
+        )
         if component == "desktop" and path.suffix.casefold() == ".pdb":
             reason = "Release debug symbol (PDB), not a runtime dependency"
         elif component == "backend" and _is_pymupdf_dev_artifact(relative):
@@ -107,16 +181,38 @@ def _eligible_files(
             reason = "Optional OpenCV video/FFmpeg codec (PDF image decode is runtime-tested)"
         elif component == "backend" and remove_type_stubs and _is_optional_type_stub(relative):
             reason = "Type-checker only .pyi stub in experimental lean release"
+        elif bloat_reason is not None:
+            reason = bloat_reason
         else:
             continue
         candidates.append(PrunableFile(component, path, relative.as_posix(), path.stat().st_size, reason))
     return sorted(candidates, key=lambda item: (item.component, item.relative.casefold()))
 
 
+def _cleanup_empty_dirs(root: Path) -> None:
+    """安全移除裁剪后遗留的空目录，不触碰根构建目录或符号链接。"""
+    internal = root / "_internal"
+    if not internal.is_dir() or _is_link_or_junction(internal):
+        return
+    dirs = sorted(
+        (p for p in internal.rglob("*") if p.is_dir() and not _is_link_or_junction(p)),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for directory in dirs:
+        try:
+            next(directory.iterdir())
+        except StopIteration:
+            directory.rmdir()
+        except OSError:
+            continue
+
+
 def prune(
     backend: Path, desktop: Path, *, apply: bool = False,
     remove_opencv_video: bool = False,
     remove_type_stubs: bool = False,
+    remove_dev_gui_bloat: bool = False,
 ) -> dict:
     """Return an audit report. No file is removed unless apply=True."""
     backend = _require_release_tree(backend, component="backend")
@@ -126,23 +222,33 @@ def prune(
         backend_canonical.is_relative_to(desktop_canonical) or
         desktop_canonical.is_relative_to(backend_canonical)):
         raise ValueError("Backend and desktop roots must be independent release outputs")
-    files = _eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video,
-                            remove_type_stubs=remove_type_stubs) + _eligible_files(desktop, "desktop")
+    files = _eligible_files(
+        backend, "backend",
+        remove_opencv_video=remove_opencv_video,
+        remove_type_stubs=remove_type_stubs,
+        remove_dev_gui_bloat=remove_dev_gui_bloat,
+    ) + _eligible_files(desktop, "desktop")
     total = sum(file.size for file in files)
     if apply:
         for file in files:
             if _is_link_or_junction(file.path) or not file.path.is_file():
                 raise RuntimeError(f"Candidate changed during prune: {file.component}/{file.relative}")
             file.path.unlink()
-        if (_eligible_files(backend, "backend", remove_opencv_video=remove_opencv_video,
-                            remove_type_stubs=remove_type_stubs)
-                or _eligible_files(desktop, "desktop")):
+        if remove_dev_gui_bloat:
+            _cleanup_empty_dirs(backend)
+        if (_eligible_files(
+                backend, "backend",
+                remove_opencv_video=remove_opencv_video,
+                remove_type_stubs=remove_type_stubs,
+                remove_dev_gui_bloat=remove_dev_gui_bloat,
+            ) or _eligible_files(desktop, "desktop")):
             raise RuntimeError("Eligible files remained after pruning")
     return {
         "schema_version": 2,
         "applied": apply,
         "remove_opencv_video": remove_opencv_video,
         "remove_type_stubs": remove_type_stubs,
+        "remove_dev_gui_bloat": remove_dev_gui_bloat,
         "removed_files": len(files) if apply else 0,
         "candidate_files": len(files),
         "candidate_bytes": total,
@@ -167,6 +273,7 @@ def _report_markdown(report: dict, target: str) -> str:
         f"- Uncompressed candidate size: **{report['candidate_mib']:.2f} MiB**",
         "- Desktop `.pdb` and PyMuPDF development libraries/headers are eligible.",
         "- Optional Windows video codec removal: **" + ("enabled" if report.get("remove_opencv_video") else "disabled") + "**.",
+        "- Optional dev/GUI bloat & stale metadata removal: **" + ("enabled" if report.get("remove_dev_gui_bloat") else "disabled") + "**.",
         "- Experimental lean type stub removal: **" + ("enabled" if report.get("remove_type_stubs") else "disabled") + "**.",
         "- Torch, Docling, OCR, OpenCV image decoder, `.pyd`, `.so` and `.dylib` runtime binaries are preserved.",
         "- **Compressed installer size is measured separately** by Build Size Audit.", "",
@@ -204,6 +311,8 @@ def main() -> None:
                         help="Windows only; remove the narrow cv2 FFmpeg video plugin allowlist")
     parser.add_argument("--remove-type-stubs", action="store_true",
                         help="Experimental lean only: remove packaged .pyi type stubs beneath _internal")
+    parser.add_argument("--remove-dev-gui-bloat", action="store_true",
+                        help="Remove non-runtime test libraries, Tcl/Tk GUI, PythonWin IDE, and stale duplicate .dist-info")
     parser.add_argument("--output-dir", type=Path, default=Path("dist/build-size-audit"))
     args = parser.parse_args()
     if args.remove_opencv_video_codecs and args.target != "win-x64":
@@ -216,7 +325,8 @@ def main() -> None:
             parser.error("--output-dir must be outside both release directories")
     report = prune(args.backend, args.desktop, apply=args.apply,
                    remove_opencv_video=args.remove_opencv_video_codecs,
-                   remove_type_stubs=args.remove_type_stubs)
+                   remove_type_stubs=args.remove_type_stubs,
+                   remove_dev_gui_bloat=args.remove_dev_gui_bloat)
     md, _ = write_reports(report, target=args.target, output_dir=args.output_dir)
     action = "removed" if args.apply else "would remove"
     print(f"SAFE PRUNING: {action} {report['candidate_files']} file(s) / {report['candidate_mib']:.2f} MiB (uncompressed)")

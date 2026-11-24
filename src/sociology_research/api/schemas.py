@@ -305,3 +305,137 @@ class ReanalysisPreviewResponse(BaseModel):
 
 class ReanalysisReportListResponse(BaseModel):
     reports: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SearchHitView(BaseModel):
+    doc_key: str
+    paper_id: str
+    paper_title: str
+    source_kind: str
+    provenance: str
+    page_number: int | None = None
+    snippet: str
+    score: float = 0.0
+
+
+class SearchResponse(BaseModel):
+    query: str
+    total: int = 0
+    hits: list[SearchHitView] = Field(default_factory=list)
+
+
+class ProjectCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    research_question: str = Field(default="", max_length=1000)
+
+
+class ProjectUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    research_question: str | None = Field(default=None, max_length=1000)
+
+
+class ProjectPaperUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reading_status: str = "queued"
+    project_note: str = Field(default="", max_length=2000)
+    position: int | None = Field(default=None, ge=0)
+
+
+class ProjectSummaryView(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    research_question: str = ""
+    paper_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectSummaryView] = Field(default_factory=list)
+
+
+class ProjectPaperEntryView(BaseModel):
+    project_id: str
+    paper_id: str
+    reading_status: str
+    project_note: str = ""
+    position: int = 0
+    added_at: str
+
+
+class ProjectPaperItemView(ProjectPaperEntryView):
+    paper: PaperSummary
+
+
+class ProjectDetailResponse(BaseModel):
+    project: ProjectSummaryView
+    papers: list[ProjectPaperItemView] = Field(default_factory=list)
+
+
+class ProjectDeleteResponse(BaseModel):
+    project_id: str
+    name: str
+    unlinked_papers: int = 0
+
+
+class ProjectPaperRemoveResponse(BaseModel):
+    project_id: str
+    paper_id: str
+    removed: bool = True
+
+
+class MatrixCitationView(BaseModel):
+    evidence_id: str | None = None
+    source_block_id: str
+    page_number: int
+    quote: str
+
+
+class MatrixClaimCellView(BaseModel):
+    claim_id: str | None = None
+    field_name: str
+    statement: str
+    provenance: str
+    verification: str
+    semantic_support: str | None = None
+    citations: list[MatrixCitationView] = Field(default_factory=list)
+
+
+class EvidenceMatrixRowView(BaseModel):
+    paper_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+    journal: str | None = None
+    reading_status: str = "queued"
+    project_note: str = ""
+    has_card: bool = False
+    study_type: str | None = None
+    method: str | None = None
+    identification_strategy: str | None = None
+    population: str | None = None
+    data_source: str | None = None
+    research_questions: list[MatrixClaimCellView] = Field(default_factory=list)
+    theories_and_concepts: list[MatrixClaimCellView] = Field(default_factory=list)
+    research_design: list[MatrixClaimCellView] = Field(default_factory=list)
+    major_findings: list[MatrixClaimCellView] = Field(default_factory=list)
+    author_explanations: list[MatrixClaimCellView] = Field(default_factory=list)
+    author_limitations: list[MatrixClaimCellView] = Field(default_factory=list)
+    ai_limitations: list[MatrixClaimCellView] = Field(default_factory=list)
+
+
+class ProjectEvidenceMatrixResponse(BaseModel):
+    project: ProjectSummaryView
+    total_papers: int = 0
+    analyzed_papers: int = 0
+    makes_llm_calls: bool = False
+    provenance_policy: str = "STRICT_SOURCE_SEPARATION"
+    rows: list[EvidenceMatrixRowView] = Field(default_factory=list)

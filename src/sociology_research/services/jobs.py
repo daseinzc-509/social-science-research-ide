@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -107,9 +108,11 @@ class JobService:
         max_default_workers: int = 2,
     ) -> None:
         self._jobs: dict[str, JobState] = {}
+        self._versions: dict[str, int] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._cleanups: dict[str, CleanupCallback] = {}
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._max_messages = max(20, int(max_messages))
         self._max_retained_jobs = max(20, int(max_retained_jobs))
         self._lanes: dict[JobLane, _BoundedLanePool] = {
@@ -134,14 +137,46 @@ class JobService:
         job = JobState(id=str(uuid.uuid4()), kind=clean_kind)
         with self._lock:
             self._jobs[job.id] = job
+            self._versions[job.id] = 1
             self._cancel_events[job.id] = threading.Event()
             self._prune_finished_locked()
+            self._condition.notify_all()
         return job
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
             return job.snapshot() if job is not None else None
+
+    def get_with_version(self, job_id: str) -> tuple[dict[str, Any] | None, int]:
+        """原子获取任务当前快照与单调递增修订序号（供 SSE 首帧同步使用）。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None, 0
+            return job.snapshot(), self._versions.get(job_id, 1)
+
+    def wait_for_change(
+        self,
+        job_id: str,
+        *,
+        after_version: int = 0,
+        timeout: float = 1.0,
+    ) -> tuple[dict[str, Any] | None, int]:
+        """阻塞等待指定任务版本更新或进入终态，供 SSE 流在工作线程中零轮询唤醒。"""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        with self._condition:
+            while True:
+                job = self._jobs.get(job_id)
+                if job is None:
+                    return None, 0
+                version = self._versions.get(job_id, 1)
+                if version > after_version or job.status in TERMINAL_JOB_STATUSES:
+                    return job.snapshot(), version
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return job.snapshot(), version
+                self._condition.wait(remaining)
 
     def list_jobs(self, *, limit: int = 50) -> list[dict[str, Any]]:
         capped = max(1, min(int(limit), self._max_retained_jobs))
@@ -177,12 +212,14 @@ class JobService:
                 self._append_message_locked(job, "Cancelled before execution started.")
                 cleanup_to_run = self._cleanups.pop(job_id, None)
                 self._cancel_events.pop(job_id, None)
+                self._bump_version_locked(job_id)
                 self._prune_finished_locked()
             elif not already_requested:
                 self._append_message_locked(
                     job,
                     "Cancellation requested; stopping at next safe checkpoint…",
                 )
+                self._bump_version_locked(job_id)
             snapshot = job.snapshot()
 
         if cleanup_to_run is not None:
@@ -213,6 +250,7 @@ class JobService:
                     job.finished_at = datetime.now(timezone.utc).isoformat()
                 pending_cleanup = self._cleanups.pop(job.id, None)
                 self._cancel_events.pop(job.id, None)
+                self._bump_version_locked(job.id)
                 self._prune_finished_locked()
 
         if already_cancelled:
@@ -233,6 +271,7 @@ class JobService:
                         current.status = "cancelled"
                         current.cancel_requested = True
                         current.finished_at = datetime.now(timezone.utc).isoformat()
+                        self._bump_version_locked(job.id)
                     pending = self._cleanups.pop(job.id, None)
                     self._cancel_events.pop(job.id, None)
                     self._prune_finished_locked()
@@ -240,6 +279,7 @@ class JobService:
                 else:
                     current.status = "running"
                     current.started_at = datetime.now(timezone.utc).isoformat()
+                    self._bump_version_locked(job.id)
                     pending = None
                     start_allowed = True
 
@@ -286,6 +326,7 @@ class JobService:
             if job is None:
                 return
             self._append_message_locked(job, clean)
+            self._bump_version_locked(job_id)
 
     def _finish(
         self,
@@ -307,12 +348,21 @@ class JobService:
                 job.finished_at = datetime.now(timezone.utc).isoformat()
                 if final_message:
                     self._append_message_locked(job, final_message)
+                self._bump_version_locked(job_id)
             cleanup_to_run = self._cleanups.pop(job_id, None)
             self._cancel_events.pop(job_id, None)
             self._prune_finished_locked()
 
         if cleanup_to_run is not None:
             self._run_cleanup_safely(cleanup_to_run)
+
+    def _bump_version_locked(self, job_id: str) -> int:
+        if job_id not in self._jobs:
+            return 0
+        next_ver = self._versions.get(job_id, 1) + 1
+        self._versions[job_id] = next_ver
+        self._condition.notify_all()
+        return next_ver
 
     def _append_message_locked(self, job: JobState, message: str) -> None:
         clean = str(message).strip()
@@ -333,8 +383,11 @@ class JobService:
         ]
         for job_id in removable[:overflow]:
             self._jobs.pop(job_id, None)
+            self._versions.pop(job_id, None)
             self._cancel_events.pop(job_id, None)
             self._cleanups.pop(job_id, None)
+        if removable[:overflow]:
+            self._condition.notify_all()
 
     @staticmethod
     def _run_cleanup_safely(cleanup: CleanupCallback) -> None:

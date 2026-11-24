@@ -220,6 +220,8 @@ class RegionReviewService:
         except ReviewConflict as exc:
             raise RegionReviewServiceError(409, str(exc)) from exc
         preview_registry.consume(preview_id)
+        if hasattr(self.repository, "sync_paper_search_index"):
+            self.repository.sync_paper_search_index(paper_id)
         return {
             "id": identifier,
             "page_number": pending.page_number,
@@ -262,7 +264,7 @@ class RegionReviewService:
         record, path = self._paper_and_pdf(paper_id)
         self._guard_integrity(path, record.sha256)
         try:
-            return self.review_store.revise(
+            result = self.review_store.revise(
                 paper_id,
                 review_id,
                 expected_revision,
@@ -274,6 +276,9 @@ class RegionReviewService:
             raise RegionReviewServiceError(404, str(exc)) from exc
         except ReviewConflict as exc:
             raise RegionReviewServiceError(409, str(exc)) from exc
+        if hasattr(self.repository, "sync_paper_search_index"):
+            self.repository.sync_paper_search_index(paper_id)
+        return result
 
     def revoke_review(self, paper_id: str, review_id: str) -> dict[str, Any]:
         self._paper_and_pdf(paper_id)
@@ -281,6 +286,8 @@ class RegionReviewService:
             self.review_store.revoke(paper_id, review_id)
         except KeyError as exc:
             raise RegionReviewServiceError(404, str(exc)) from exc
+        if hasattr(self.repository, "sync_paper_search_index"):
+            self.repository.sync_paper_search_index(paper_id)
         return {"id": review_id, "provenance": "REVOKED", "applied_to_evidence": False}
 
     def preview_reanalysis(
