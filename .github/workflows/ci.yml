@@ -36,6 +36,7 @@ jobs:
             tests/test_api_phase2.py \
             tests/test_api_ui_parity.py \
             tests/test_desktop_chrome.py \
+            tests/test_desktop_md3_and_ux_contract.py \
             tests/test_secure_distribution.py \
             tests/test_desktop_release_pipeline.py \
             tests/test_crossplatform_desktop.py \
@@ -45,7 +46,11 @@ jobs:
             tests/test_release_pruning.py \
             tests/test_dependency_collection.py \
             tests/test_packaged_runtime_regression.py \
-            tests/test_macos_dmg_packaging.py
+            tests/test_macos_dmg_packaging.py \
+            tests/test_p0_architecture_hardening.py \
+            tests/test_p0_stability_regressions.py \
+            tests/test_p1_architecture_refactoring.py \
+            tests/test_p2_architecture_evolution.py
 
   desktop-compile:
     name: Compile ${{ matrix.target }}
