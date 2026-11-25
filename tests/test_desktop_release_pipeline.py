@@ -51,7 +51,10 @@ def test_release_packages_real_backend_and_blocks_private_files():
     assert "choco install innosetup" in workflow
     assert "unins000.exe" in workflow
     assert "SHA256SUMS" in workflow
-    assert "--prerelease" in workflow  # unsigned mac previews not stable releases
+    assert "--prerelease" in workflow  # pre-release tags stay marked as prerelease
+    assert 'if [[ "$TAG" == *-* ]]; then' in workflow
+    assert "--notes-file" in workflow
+    assert (ROOT / "CHANGELOG.md").is_file()
 
 
 def test_update_client_only_discovers_official_release_page():

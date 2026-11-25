@@ -1,7 +1,7 @@
 ; SRA complete Desktop installer: .NET client and frozen Python backend.
 ; Compile using ISCC.exe with /DAppVersion=x.y.z /DPublishDir=... /DOutputDir=...
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.2.2"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\..\artifacts\win-x64"

@@ -1,8 +1,7 @@
-# SRA Desktop — Windows + macOS bundled release (0.2 alpha)
+# SRA Desktop — Windows + macOS Bundled Distribution (`v0.2.2`)
 
-This phase combines **Avalonia/.NET 8 self-contained desktop + bundled Python/FastAPI research backend**.
-It does **not** rewrite the Python research engine or change SQLite's schema. One program launches
-both processes; a per-process session token protects the private localhost API.
+This distribution combines **Avalonia/.NET 8 self-contained desktop (Material Design 3) + bundled Python/FastAPI/Docling research backend**.
+It does **not** rewrite the Python research engine in C#. One executable launches both processes, uses a 256-bit per-process session token on `127.0.0.1`, and cleans up the backend process automatically on exit (Windows Job Object + parent PID watchdog).
 
 ## Platform packages
 
@@ -75,35 +74,19 @@ notarization and stapling. An unsigned/ad-hoc preview is *not* equivalent to not
 
 ## CI lifecycle
 
-- `ci.yml`: Python/API/privacy regressions and Release C#/AXAML compilation on both supported OS/arch targets,
-  on push and PR. These quick jobs **do not build the enormous Docling backend**.
-- `release-desktop.yml`: run manually for a pre-release preview or push a tag `v0.2.0-alpha.1`.
-  This freezes PyInstaller Python on both native runners, smoke-tests its authenticated
-  health endpoint, publishes self-contained .NET, assembles OS-specific packages, scans the
-  outputs and uploads GitHub Actions artifacts.
-- A **tagged run** creates one GitHub Release containing both supported targets only after every job
-  passes. A manual run just produces private workflow artifacts for testing.
-- `workflow_dispatch` can select `core` to debug bundling with PyMuPDF only. Normal tagged
-  releases select `full` on Windows and macOS ARM64. Intel Mac is not packaged.
-- Native PyTorch, Docling parser, OCR and app signing may require extra disk and time. The
-  generated bundles have not been cross-platform executed in this development environment;
-  GitHub Actions is their real build/boot smoke gate, followed by human GUI/real-PDF testing.
+- `ci.yml`: Python/API/architecture/MD3/privacy regressions and Release C#/AXAML compilation on both supported OS/arch targets,
+  on push and PR. These quick jobs **do not build the heavy Docling backend**.
+- `release-desktop.yml`: run manually (`workflow_dispatch`) for an internal preview bundle or push a tag such as `v0.2.2` (stable release) or `v0.2.2-rc.1` (pre-release).
+  This freezes PyInstaller Python on both native runners, runs `--self-test-bundle` and `smoke_backend.py`, publishes self-contained .NET, assembles OS-specific packages, runs Windows install/uninstall data-survival tests and macOS `codesign`/`hdiutil verify`, scans outputs, and uploads artifacts.
+- A **tagged run** creates one GitHub Release containing both supported targets only after every job passes. Tags with a hyphen suffix (e.g. `-alpha`, `-beta`, `-rc`) are published with `--prerelease`; clean semantic tags (e.g. `v0.2.2`) are published as standard Releases with notes extracted from `CHANGELOG.md`.
+- Only the Docling-only `full` backend profile is supported on Windows x64 and macOS ARM64; Intel Mac (`osx-x64`) is not packaged.
 
-### Publishing a preview
+### Publishing a release
 
-1. Copy all files from the upgrade ZIP into the project root, preserving paths and taking a
-   Git snapshot first. This overlay builds on the previous secure-distribution version.
-2. Ensure the previous v0.1 API, Services, and Desktop files are present. The ZIP is *not*
-   a complete copy of the entire repository.
-3. Run local Python regression tests and `dotnet build` on Windows.
-4. Commit, push to GitHub. Inspect CI on Windows and macOS Apple Silicon.
-5. In **Actions > Release / Windows + macOS bundled Desktop > Run workflow**, choose
-   `0.2.0-alpha.1`, backend profile `full`. Download the two bundles from Artifacts.
-6. Test on a real Apple Silicon Mac before tagging a public release.
-7. After both pass, `git tag v0.2.0-alpha.1; git push origin v0.2.0-alpha.1`.
-
-Do **not** tag v0.1.0 to trigger a supposedly stable full installer; use a clear alpha tag until
-Docling real-document tests, Apple notarization and all native UI interactions pass.
+1. Run full local regression tests (`pytest -q tests`), Release desktop build (`dotnet build desktop/SRA.Desktop/SRA.Desktop.csproj -c Release`), and `python scripts/check_release_safety.py source .`.
+2. Update `CHANGELOG.md`, version metadata (`pyproject.toml`, `desktop/SRA.Desktop/SRA.Desktop.csproj`, `installer/windows/SRA.Desktop.iss`), and docs; push to `main` and confirm `CI / Windows + macOS Desktop` passes on both platforms.
+3. Optionally run **Actions > Release / Windows + macOS bundled Desktop > Run workflow** with a preview version (e.g. `0.2.2-rc.1`) to verify bundled installers before tagging.
+4. Tag and push the release: `git tag -a v0.2.2 -m "SRA v0.2.2" && git push origin v0.2.2`.
 
 ## Limitations that remain
 

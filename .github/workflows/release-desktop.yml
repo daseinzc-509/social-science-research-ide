@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Preview version, e.g. 0.2.0-alpha.1 (no v prefix)'
+        description: 'Preview version, e.g. 0.2.2-rc.1 (no v prefix)'
         required: true
-        default: '0.2.0-alpha.1'
+        default: '0.2.2-rc.1'
       backend_profile:
         description: 'Docling-only backend (full)'
         required: true
@@ -310,10 +310,49 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*win-x64*.zip' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*osx-arm64*.dmg' -print -quit)"
       - name: Upload one GitHub Release for all platforms
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          gh release create "$TAG" release-assets/* \
-            --title "SRA $TAG – Windows + macOS alpha" --prerelease \
-            --notes "Bundled Windows + macOS desktop builds with private Python API. Windows and macOS Apple Silicon ship Docling. macOS Intel is not supported in this release. Docling may fetch model weights on first use. macOS packages are ad-hoc signed previews, NOT Apple notarized; manual security approval may be required. User PDF and API credentials are NOT bundled."
+          set -euo pipefail
+          NOTES_FILE="$(mktemp)"
+          python - "$TAG" "$NOTES_FILE" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          tag = sys.argv[1]
+          out = Path(sys.argv[2])
+          is_prerelease = "-" in tag
+          changelog = Path("CHANGELOG.md")
+          body = ""
+          if changelog.is_file():
+              text = changelog.read_text(encoding="utf-8")
+              pattern = rf"(?ms)^## \[{re.escape(tag)}\][^\n]*\n(.*?)(?=^## \[|\Z)"
+              match = re.search(pattern, text)
+              if match:
+                  body = match.group(1).strip()
+          if not body:
+              kind = "preview" if is_prerelease else "release"
+              body = f"Bundled Windows x64 + macOS Apple Silicon {kind} `{tag}` with private Python/Docling backend."
+          footer = (
+              "\n\n---\n"
+              "### Platform & Privacy Notes\n"
+              "- **Windows x64**: Run `SRA-Desktop-Setup-win-x64-*.exe` (recommended, per-user install; silent uninstall preserves personal data) or extract `SRA-win-x64-*.zip`. Not Authenticode-signed.\n"
+              "- **macOS Apple Silicon (ARM64, macOS 14+)**: Open `.dmg` and drag `SRA.app` to Applications. Intel Mac is not supported. Packages are ad-hoc signed and **not** Apple notarized; first launch may require right-click Open / Privacy & Security approval.\n"
+              "- **Docling weights**: Docling may fetch model weights on first use (or manage them offline in Model Center).\n"
+              "- **Privacy & Integrity**: Verify downloads with `SHA256SUMS-*.txt`. User PDFs, SQLite databases, and API credentials are never bundled."
+          )
+          out.write_text(body + footer + "\n", encoding="utf-8")
+          PY
+          if [[ "$TAG" == *-* ]]; then
+            gh release create "$TAG" release-assets/* \
+              --title "SRA $TAG – Windows + macOS Preview" \
+              --prerelease \
+              --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "SRA $TAG – Windows + macOS Desktop" \
+              --notes-file "$NOTES_FILE"
+          fi
