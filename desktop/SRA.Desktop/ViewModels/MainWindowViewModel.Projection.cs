@@ -77,6 +77,7 @@ public partial class MainWindowViewModel
         {
             Keywords.Add(keyword);
         }
+        OnPropertyChanged(nameof(HasKeywords));
     }
 
     private void ProjectStudyProfile(JsonElement card)
@@ -151,6 +152,7 @@ public partial class MainWindowViewModel
         Replace(AnalysisClaims, analysis);
         Replace(AiLimitations, limitations);
         Replace(ReadingRecommendations, recommendation is null ? [] : [recommendation]);
+        RaiseProjectionSectionState();
     }
 
     private static ClaimItem MergeAudit(ClaimItem source, JsonElement audit)
@@ -238,6 +240,34 @@ public partial class MainWindowViewModel
         ManualMetadataNote = "";
         ReviewPlanText = "—";
         ReferenceStatusText = "尚未提取参考文献。";
+        RaiseProjectionSectionState();
+    }
+
+    private void RaiseProjectionSectionState()
+    {
+        OnPropertyChanged(nameof(HasKeywords));
+        OnPropertyChanged(nameof(HasMetadataClaims));
+        OnPropertyChanged(nameof(HasBasicFacts));
+        OnPropertyChanged(nameof(HasResearchQuestions));
+        OnPropertyChanged(nameof(HasTheoryConcepts));
+        OnPropertyChanged(nameof(HasResearchDesignClaims));
+        OnPropertyChanged(nameof(HasMajorFindings));
+        OnPropertyChanged(nameof(HasAuthorExplanations));
+        OnPropertyChanged(nameof(HasAuthorLimitations));
+        OnPropertyChanged(nameof(HasAnalysisClaims));
+        OnPropertyChanged(nameof(HasAiLimitations));
+        OnPropertyChanged(nameof(HasReadingRecommendations));
+        OnPropertyChanged(nameof(MetadataClaimsCount));
+        OnPropertyChanged(nameof(BasicFactsCount));
+        OnPropertyChanged(nameof(ResearchQuestionsCount));
+        OnPropertyChanged(nameof(TheoryConceptsCount));
+        OnPropertyChanged(nameof(ResearchDesignCount));
+        OnPropertyChanged(nameof(MajorFindingsCount));
+        OnPropertyChanged(nameof(AuthorExplanationsCount));
+        OnPropertyChanged(nameof(AuthorLimitationsCount));
+        OnPropertyChanged(nameof(AnalysisClaimsCount));
+        OnPropertyChanged(nameof(AiLimitationsCount));
+        OnPropertyChanged(nameof(ReadingRecommendationsCount));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> values)

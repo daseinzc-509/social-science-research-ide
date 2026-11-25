@@ -126,9 +126,35 @@ public partial class MainWindowViewModel : ObservableObject
     public bool CanOpenUpdateRelease => !string.IsNullOrWhiteSpace(UpdateReleaseUrl);
     public bool HasSelection => SelectedPaper is not null;
     public bool HasCard => SelectedPaper?.HasCard == true;
+    public bool IsUnanalyzedSelected => HasSelection && !HasCard;
+    public bool HasSearchText => !string.IsNullOrWhiteSpace(SearchText);
+    public bool IsApiConnected => ApiStatusText.Contains("已连接", StringComparison.Ordinal);
     public bool HasStudyRationale => !string.IsNullOrWhiteSpace(StudyRationale);
     public bool HasNoTables => Tables.Count == 0;
     public bool HasNoVisuals => Formulas.Count == 0 && Figures.Count == 0;
+    public bool HasKeywords => Keywords.Count > 0;
+    public bool HasMetadataClaims => MetadataClaims.Count > 0;
+    public bool HasBasicFacts => BasicFacts.Count > 0;
+    public bool HasResearchQuestions => ResearchQuestions.Count > 0;
+    public bool HasTheoryConcepts => TheoryConcepts.Count > 0;
+    public bool HasResearchDesignClaims => ResearchDesignClaims.Count > 0;
+    public bool HasMajorFindings => MajorFindings.Count > 0;
+    public bool HasAuthorExplanations => AuthorExplanations.Count > 0;
+    public bool HasAuthorLimitations => AuthorLimitations.Count > 0;
+    public bool HasAnalysisClaims => AnalysisClaims.Count > 0;
+    public bool HasAiLimitations => AiLimitations.Count > 0;
+    public bool HasReadingRecommendations => ReadingRecommendations.Count > 0;
+    public string MetadataClaimsCount => MetadataClaims.Count.ToString();
+    public string BasicFactsCount => BasicFacts.Count.ToString();
+    public string ResearchQuestionsCount => ResearchQuestions.Count.ToString();
+    public string TheoryConceptsCount => TheoryConcepts.Count.ToString();
+    public string ResearchDesignCount => ResearchDesignClaims.Count.ToString();
+    public string MajorFindingsCount => MajorFindings.Count.ToString();
+    public string AuthorExplanationsCount => AuthorExplanations.Count.ToString();
+    public string AuthorLimitationsCount => AuthorLimitations.Count.ToString();
+    public string AnalysisClaimsCount => AnalysisClaims.Count.ToString();
+    public string AiLimitationsCount => AiLimitations.Count.ToString();
+    public string ReadingRecommendationsCount => ReadingRecommendations.Count.ToString();
     public bool CanRunPaperActions => HasSelection && !IsBusy;
     public bool CanCancelJob => !string.IsNullOrWhiteSpace(ActiveJobId) && !IsCancellingJob;
     public string AnalyzeButtonText => HasCard ? "重新分析" : "开始分析";
@@ -165,8 +191,10 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnActiveJobIdChanged(string? value) => OnPropertyChanged(nameof(CanCancelJob));
     partial void OnIsCancellingJobChanged(bool value) => OnPropertyChanged(nameof(CanCancelJob));
     partial void OnStudyRationaleChanged(string value) => OnPropertyChanged(nameof(HasStudyRationale));
+    partial void OnApiStatusTextChanged(string value) => OnPropertyChanged(nameof(IsApiConnected));
     partial void OnSearchTextChanged(string value)
     {
+        OnPropertyChanged(nameof(HasSearchText));
         ApplyFilter(value);
         _ = RunFullTextSearchFilterAsync(value);
     }
@@ -223,6 +251,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(HasCard));
+        OnPropertyChanged(nameof(IsUnanalyzedSelected));
         OnPropertyChanged(nameof(CanRunPaperActions));
         OnPropertyChanged(nameof(AnalyzeButtonText));
         OnPropertyChanged(nameof(SelectedPdfUri));

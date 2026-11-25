@@ -9,6 +9,9 @@ namespace SRA.Desktop.ViewModels;
 public partial class MainWindowViewModel
 {
     private CancellationTokenSource? _searchCts;
+
+    [RelayCommand]
+    public void ClearSearch() => SearchText = "";
     [RelayCommand]
     public async Task RefreshAsync()
     {

@@ -3,52 +3,136 @@
              xmlns:models="using:SRA.Desktop.Models"
              x:Class="SRA.Desktop.Controls.ClaimCard"
              x:DataType="models:ClaimItem">
-  <Border Classes="claim-card" Padding="22,19" Margin="0,0,0,13">
-    <StackPanel Spacing="13">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-        <WrapPanel ItemSpacing="7" LineSpacing="6" VerticalAlignment="Center">
-          <Border Background="{DynamicResource BlueSoftBrush}" CornerRadius="99" Padding="9,4">
-            <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
-          </Border>
-          <Border Classes="badge" Padding="9,4">
-            <TextBlock Text="{Binding FieldLabel}" Classes="muted" FontSize="10" FontWeight="SemiBold" />
-          </Border>
-        </WrapPanel>
-        <TextBlock Grid.Column="1" Text="{Binding AuditLine}" Classes="tertiary" FontSize="10" VerticalAlignment="Center" />
-      </Grid>
+  <Border Classes="claim-card" Margin="0,0,0,14" ClipToBounds="True">
+    <Grid ColumnDefinitions="4,*">
+      <!-- 左侧语义来源色条：一眼区分作者陈述 / AI 审读 / 个人笔记 -->
+      <Border Grid.Column="0" IsVisible="{Binding IsAuthorProvenance}" Background="{DynamicResource BlueInkBrush}" Opacity="0.72" />
+      <Border Grid.Column="0" IsVisible="{Binding IsAiProvenance}" Background="{DynamicResource PurpleInkBrush}" Opacity="0.78" />
+      <Border Grid.Column="0" IsVisible="{Binding IsUserNoteProvenance}" Background="{DynamicResource InkTertiaryBrush}" Opacity="0.65" />
 
-      <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontSize="14" LineHeight="24" />
+      <StackPanel Grid.Column="1" Margin="20,17,20,17" Spacing="12">
+        <!-- 顶行：语义来源胶囊 + 字段/主张类型 + 彩色审计状态徽章 -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <WrapPanel ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+            <Border IsVisible="{Binding IsAuthorProvenance}"
+                    Background="{DynamicResource BlueSoftBrush}"
+                    BorderBrush="{DynamicResource BlueLineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource BlueInkBrush}"
+                         FontSize="10.5" FontWeight="SemiBold" LetterSpacing="0.4" />
+            </Border>
+            <Border IsVisible="{Binding IsAiProvenance}"
+                    Background="{DynamicResource PurpleSoftBrush}"
+                    BorderBrush="{DynamicResource PurpleLineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource PurpleInkBrush}"
+                         FontSize="10.5" FontWeight="SemiBold" LetterSpacing="0.4" />
+            </Border>
+            <Border IsVisible="{Binding IsUserNoteProvenance}"
+                    Background="{DynamicResource SurfaceMutedBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource InkSecondaryBrush}"
+                         FontSize="10.5" FontWeight="SemiBold" LetterSpacing="0.4" />
+            </Border>
 
-      <Border IsVisible="{Binding HasScope}" Classes="claim-scope" Padding="13,10">
-        <StackPanel Spacing="6">
-          <TextBlock Text="适用范围 / 限定条件" Foreground="{DynamicResource InkSecondaryBrush}" FontSize="10" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding Scope}" Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="20" />
-        </StackPanel>
-      </Border>
+            <Border Classes="badge" Padding="9,3">
+              <TextBlock Text="{Binding FieldLabel}" Classes="muted" FontSize="11" FontWeight="SemiBold" />
+            </Border>
 
-      <Border IsVisible="{Binding HasRationale}" Classes="claim-rationale" Padding="13,11">
-        <StackPanel Spacing="6">
-          <TextBlock Text="AI 审读说明" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding Rationale}" Foreground="{DynamicResource InkBrush}" FontSize="12" LineHeight="20" TextWrapping="Wrap" />
-        </StackPanel>
-      </Border>
+            <Border IsVisible="{Binding HasClaimTypeTag}"
+                    Background="Transparent" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
+                    CornerRadius="999" Padding="8,2.5">
+              <TextBlock Text="{Binding ClaimTypeLabel}" Classes="tertiary" FontSize="10.5" FontWeight="Medium" />
+            </Border>
+          </WrapPanel>
 
-      <Expander Header="{Binding EvidenceSummary}" IsVisible="{Binding HasEvidence}" IsExpanded="False" Classes="evidence-expander">
-        <ItemsControl ItemsSource="{Binding Evidence}" Margin="0,8,0,3">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:EvidenceItem">
-              <Border Classes="evidence-block" Padding="14,12" Margin="0,0,0,8">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="{Binding MetaLine}" ToolTip.Tip="{Binding SourceBlockId}"
-                             Foreground="{DynamicResource BlueInkBrush}" FontSize="11" FontWeight="SemiBold" />
-                  <TextBlock Text="{Binding Quote}" Foreground="{DynamicResource InkSecondaryBrush}" FontSize="12"
-                             LineHeight="20" TextWrapping="Wrap" />
-                </StackPanel>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </Expander>
-    </StackPanel>
+          <!-- 右上角语义审计状态徽章（悬浮可见完整原始 AuditLine） -->
+          <Panel Grid.Column="1" VerticalAlignment="Center" IsVisible="{Binding HasAuditBadge}"
+                 ToolTip.Tip="{Binding AuditLine}">
+            <Border IsVisible="{Binding IsAuditPositive}"
+                    Background="{DynamicResource EmeraldSoftBrush}"
+                    BorderBrush="{DynamicResource EmeraldLineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                <Ellipse Width="6" Height="6" Fill="{DynamicResource EmeraldInkBrush}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}"
+                           FontSize="10.5" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+            <Border IsVisible="{Binding IsAuditWarning}"
+                    Background="{DynamicResource AmberSoftBrush}"
+                    BorderBrush="{DynamicResource AmberLineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                <Ellipse Width="6" Height="6" Fill="{DynamicResource AmberInkBrush}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}"
+                           FontSize="10.5" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+            <Border IsVisible="{Binding IsAuditNegative}"
+                    Background="{DynamicResource RedSoftBrush}"
+                    BorderBrush="{DynamicResource RedLineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                <Ellipse Width="6" Height="6" Fill="{DynamicResource RedInkBrush}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource RedInkBrush}"
+                           FontSize="10.5" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+            <Border IsVisible="{Binding IsAuditNeutral}"
+                    Background="{DynamicResource SurfaceMutedBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1" CornerRadius="999" Padding="9,3">
+              <TextBlock Text="{Binding AuditBadgeLabel}" Classes="tertiary"
+                         FontSize="10.5" FontWeight="SemiBold" />
+            </Border>
+          </Panel>
+        </Grid>
+
+        <!-- 核心陈述正文（精装书级阅读行距） -->
+        <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontSize="14.5" LineHeight="25" />
+
+        <!-- 适用范围与限定条件 -->
+        <Border IsVisible="{Binding HasScope}" Classes="claim-scope" Padding="14,10">
+          <StackPanel Spacing="5">
+            <TextBlock Text="适用范围 / 限定条件" Classes="eyebrow" Foreground="{DynamicResource InkSecondaryBrush}" />
+            <TextBlock Text="{Binding Scope}" Classes="muted" FontSize="12.5" TextWrapping="Wrap" LineHeight="21" />
+          </StackPanel>
+        </Border>
+
+        <!-- AI 审读说明 / 判断依据 -->
+        <Border IsVisible="{Binding HasRationale}" Classes="claim-rationale" Padding="14,11">
+          <StackPanel Spacing="5">
+            <TextBlock Text="AI 审读说明" Classes="eyebrow" Foreground="{DynamicResource PurpleInkBrush}" />
+            <TextBlock Text="{Binding Rationale}" Foreground="{DynamicResource InkBrush}" FontSize="12.5" LineHeight="21" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <!-- 学术书摘风格原文证据折叠区 -->
+        <Expander Header="{Binding EvidenceSummary}" IsVisible="{Binding HasEvidence}" IsExpanded="False" Classes="evidence-expander">
+          <ItemsControl ItemsSource="{Binding Evidence}" Margin="0,8,0,2">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:EvidenceItem">
+                <Border Classes="evidence-block" Padding="14,11" Margin="0,0,0,8">
+                  <StackPanel Spacing="7">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <TextBlock Grid.Column="0" Text="{Binding MetaLine}" ToolTip.Tip="{Binding SourceBlockId}"
+                                 Foreground="{DynamicResource BlueInkBrush}" FontSize="11.5" FontWeight="SemiBold"
+                                 VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="定位 PDF 原文 →" Classes="tonal compact"
+                              Tag="{Binding}" Click="EvidenceJump_Click"
+                              ToolTip.Tip="在原文对照窗口跳转到该证据所在 PDF 页并高亮对应段落" />
+                    </Grid>
+                    <TextBlock Text="{Binding Quote}" Foreground="{DynamicResource InkBrush}" Opacity="0.88"
+                               FontSize="12.5" LineHeight="21" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Expander>
+      </StackPanel>
+    </Grid>
   </Border>
 </UserControl>

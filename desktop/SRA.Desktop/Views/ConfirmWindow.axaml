@@ -2,15 +2,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="SRA.Desktop.Views.ConfirmWindow"
         Width="520"
-        Height="260"
+        Height="264"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
-  <Grid RowDefinitions="Auto,*,Auto" Margin="22">
-    <TextBlock x:Name="TitleText" Grid.Row="0" Classes="h1" />
-    <TextBlock x:Name="MessageText" Grid.Row="1" Margin="0,14,0,14" TextWrapping="Wrap" Classes="muted" />
-    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-      <Button Content="取消" Classes="secondary" Click="Cancel_Click" />
-      <Button x:Name="ConfirmButton" Content="确认" Classes="danger" Click="Confirm_Click" />
-    </StackPanel>
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Grid.Row="0" Classes="page-header" Padding="24,18">
+      <TextBlock x:Name="TitleText" Classes="h1" />
+    </Border>
+    <TextBlock x:Name="MessageText" Grid.Row="1" Margin="24,18" TextWrapping="Wrap"
+               Classes="muted" FontSize="13" LineHeight="22" VerticalAlignment="Center" />
+    <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="24,14">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="9">
+        <Button Content="取消" Classes="secondary" Click="Cancel_Click" />
+        <Button x:Name="ConfirmButton" Content="确认" Classes="danger" Click="Confirm_Click" />
+      </StackPanel>
+    </Border>
   </Grid>
 </Window>

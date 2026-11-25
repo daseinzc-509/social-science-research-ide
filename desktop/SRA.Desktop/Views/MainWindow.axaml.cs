@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using SRA.Desktop.Models;
@@ -17,6 +18,9 @@ public partial class MainWindow : Window
         // Explicit subscription avoids Avalonia XAML event-handler resolution
         // failures (AVLN3000) for the model-center launcher.
         ModelCenterLaunchButton.Click += OpenModelCenter_Click;
+        AttachEvidenceNavigation();
+        AttachDragAndDrop();
+        KeyDown += MainWindow_KeyDown;
         NavigateTo("papers");
     }
 
@@ -43,7 +47,156 @@ public partial class MainWindow : Window
 
         bool showLibrary = page == "papers";
         SidebarPane.IsVisible = showLibrary;
-        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 302 : 0);
+        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 304 : 0);
+    }
+
+    /// <summary>
+    /// 绑定全局高频快捷键：Ctrl+F 搜索、Ctrl+/ 专注阅读开关、Ctrl+O 导入 PDF、Esc 清空检索。
+    /// </summary>
+    private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var modifiers = e.KeyModifiers;
+        if (modifiers == KeyModifiers.Control)
+        {
+            if (e.Key == Key.F)
+            {
+                NavigateTo("papers");
+                LibrarySearchBox.Focus();
+                LibrarySearchBox.SelectAll();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key is Key.OemQuestion or Key.Divide)
+            {
+                ViewModel.ShowInspector = !ViewModel.ShowInspector;
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.O)
+            {
+                ImportPdf_Click(this, new RoutedEventArgs());
+                e.Handled = true;
+                return;
+            }
+        }
+        else if (modifiers == KeyModifiers.None && e.Key == Key.Escape && ViewModel.HasSearchText)
+        {
+            ViewModel.SearchText = "";
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// 支持将单个 PDF、多篇 PDF 或文件夹直接拖放到主窗口导入研究库。
+    /// </summary>
+    private void AttachDragAndDrop()
+    {
+        AddHandler(DragDrop.DragEnterEvent, OnWindowDragOver);
+        AddHandler(DragDrop.DragOverEvent, OnWindowDragOver);
+        AddHandler(DragDrop.DragLeaveEvent, OnWindowDragLeave);
+        AddHandler(DragDrop.DropEvent, OnWindowDrop);
+    }
+
+    private void OnWindowDragOver(object? sender, DragEventArgs e)
+    {
+        var files = e.DataTransfer.TryGetFiles();
+        var hasItems = files is not null && files.Length > 0;
+        e.DragEffects = hasItems ? DragDropEffects.Copy : DragDropEffects.None;
+        DropOverlay.IsVisible = hasItems;
+        e.Handled = true;
+    }
+
+    private void OnWindowDragLeave(object? sender, DragEventArgs e)
+    {
+        var pos = e.GetPosition(this);
+        if (pos.X <= 0 || pos.Y <= 0 || pos.X >= Bounds.Width || pos.Y >= Bounds.Height)
+        {
+            DropOverlay.IsVisible = false;
+        }
+    }
+
+    private async void OnWindowDrop(object? sender, DragEventArgs e)
+    {
+        DropOverlay.IsVisible = false;
+        e.Handled = true;
+        if (ViewModel is null) return;
+
+        var items = e.DataTransfer.TryGetFiles();
+        if (items is null || items.Length == 0) return;
+
+        var pdfFiles = new List<(IStorageFile? StorageFile, string? LocalPath, string Name)>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (item is IStorageFile file)
+            {
+                if (!file.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) continue;
+                var local = file.TryGetLocalPath();
+                if (!string.IsNullOrWhiteSpace(local) && !seenPaths.Add(local)) continue;
+                pdfFiles.Add((file, local, file.Name));
+            }
+            else if (item is IStorageFolder folder)
+            {
+                var localDir = folder.TryGetLocalPath();
+                if (string.IsNullOrWhiteSpace(localDir) || !Directory.Exists(localDir)) continue;
+                foreach (var path in Directory.EnumerateFiles(localDir, "*.pdf", SearchOption.AllDirectories))
+                {
+                    if (seenPaths.Add(path))
+                    {
+                        pdfFiles.Add((null, path, Path.GetFileName(path)));
+                    }
+                    if (pdfFiles.Count >= 200) break;
+                }
+            }
+            if (pdfFiles.Count >= 200) break;
+        }
+
+        if (pdfFiles.Count == 0)
+        {
+            ViewModel.StatusText = "未检测到 PDF 文件，请拖入单个/多个 PDF 或包含 PDF 的文件夹。";
+            return;
+        }
+
+        NavigateTo("papers");
+        if (pdfFiles.Count == 1)
+        {
+            var entry = pdfFiles[0];
+            try
+            {
+                await using Stream stream = entry.StorageFile is not null
+                    ? await entry.StorageFile.OpenReadAsync()
+                    : File.OpenRead(entry.LocalPath!);
+                await ViewModel.ImportPdfAsync(stream, entry.Name);
+            }
+            catch (Exception ex)
+            {
+                ViewModel.StatusText = "拖放导入 PDF 失败：" + ex.Message;
+            }
+            return;
+        }
+
+        var uploads = new List<(Stream Stream, string FileName)>();
+        try
+        {
+            foreach (var entry in pdfFiles.Take(200))
+            {
+                Stream stream = entry.StorageFile is not null
+                    ? await entry.StorageFile.OpenReadAsync()
+                    : File.OpenRead(entry.LocalPath!);
+                uploads.Add((stream, entry.Name));
+            }
+            await ViewModel.ImportBatchAsync(uploads, $"拖放导入 {uploads.Count} 个 PDF");
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusText = "批量拖放导入失败：" + ex.Message;
+        }
+        finally
+        {
+            foreach (var (stream, _) in uploads) stream.Dispose();
+        }
     }
 
     private static void SetSelected(Button button, bool selected)

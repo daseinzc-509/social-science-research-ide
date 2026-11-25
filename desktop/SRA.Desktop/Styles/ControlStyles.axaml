@@ -5,30 +5,32 @@
     <Setter Property="FontSize" Value="14" />
   </Style>
 
+  <!-- MD3 Type Scale：清晰呼吸感排版阶梯 -->
   <Style Selector="TextBlock">
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
   </Style>
   <Style Selector="TextBlock.display">
     <Setter Property="FontSize" Value="28" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="LineHeight" Value="35" />
+    <Setter Property="LineHeight" Value="36" />
   </Style>
   <Style Selector="TextBlock.document-title">
-    <Setter Property="FontSize" Value="25" />
+    <Setter Property="FontSize" Value="24" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="LineHeight" Value="33" />
+    <Setter Property="LineHeight" Value="32" />
   </Style>
   <Style Selector="TextBlock.h1">
     <Setter Property="FontSize" Value="21" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.h2">
-    <Setter Property="FontSize" Value="17" />
+    <Setter Property="FontSize" Value="16.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.eyebrow">
-    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontSize" Value="10.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.9" />
     <Setter Property="Foreground" Value="{DynamicResource InkTertiaryBrush}" />
   </Style>
   <Style Selector="TextBlock.muted">
@@ -38,41 +40,57 @@
     <Setter Property="Foreground" Value="{DynamicResource InkTertiaryBrush}" />
   </Style>
 
+  <!-- MD3 Expressive 大圆角卡片（以 Tonal Surface 分层为主，描边极克制） -->
   <Style Selector="Border.card">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
   </Style>
   <Style Selector="Border.soft-card">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="CornerRadius" Value="16" />
+  </Style>
+  <Style Selector="Border.tonal-card">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="16" />
   </Style>
   <Style Selector="Border.badge">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
     <Setter Property="CornerRadius" Value="999" />
-    <Setter Property="Padding" Value="7,2" />
+    <Setter Property="Padding" Value="9,3" />
   </Style>
   <Style Selector="Border.badge-accent">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
     <Setter Property="CornerRadius" Value="999" />
-    <Setter Property="Padding" Value="7,2" />
+    <Setter Property="Padding" Value="9,3" />
+  </Style>
+  <Style Selector="Border.badge-count">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="8,2.5" />
+    <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
+  <!-- MD3 全药丸按钮系统：Filled (primary) / Filled Tonal (tonal) / Outlined (secondary) / Text (ghost) / Error (danger) -->
   <Style Selector="Button">
-    <Setter Property="Padding" Value="13,7" />
-    <Setter Property="MinHeight" Value="34" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="16,8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="CornerRadius" Value="20" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="12.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.14" />
-        <BrushTransition Property="BorderBrush" Duration="0:0:0.14" />
-        <BrushTransition Property="Foreground" Duration="0:0:0.14" />
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+        <BrushTransition Property="Foreground" Duration="0:0:0.15" />
         <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
@@ -80,31 +98,60 @@
   <Style Selector="Button:pointerover">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
   </Style>
+
+  <!-- Filled Button -->
   <Style Selector="Button.primary">
-    <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-    <Setter Property="Foreground" Value="White" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentOnFillBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
   <Style Selector="Button.primary:pointerover">
-    <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentFillHoverBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentOnFillBrush}" />
   </Style>
   <Style Selector="Button.primary:pressed">
-    <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentFillPressedBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentOnFillBrush}" />
   </Style>
+  <Style Selector="Button.primary:disabled">
+    <Setter Property="Opacity" Value="0.45" />
+  </Style>
+
+  <!-- Filled Tonal Button（MD3 最具辨识度的次级主操作按钮） -->
+  <Style Selector="Button.tonal">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.tonal:pointerover">
+    <Setter Property="Background" Value="{DynamicResource TonalFillHoverBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+  </Style>
+  <Style Selector="Button.tonal:pressed">
+    <Setter Property="Background" Value="{DynamicResource TonalFillPressedBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+  </Style>
+  <Style Selector="Button.tonal:disabled">
+    <Setter Property="Opacity" Value="0.45" />
+  </Style>
+
+  <!-- Outlined Button -->
   <Style Selector="Button.secondary">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource LineStrongBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="Button.secondary:pointerover">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
   <Style Selector="Button.secondary:pressed">
     <Setter Property="Opacity" Value="0.86" />
   </Style>
+
+  <!-- Text Button -->
   <Style Selector="Button.ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
@@ -115,42 +162,114 @@
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
   </Style>
   <Style Selector="Button.ghost:pressed">
-    <Setter Property="Opacity" Value="0.83" />
+    <Setter Property="Opacity" Value="0.82" />
   </Style>
-  <Style Selector="Button.primary:disabled">
-    <Setter Property="Opacity" Value="0.55" />
-  </Style>
+
+  <!-- Error Container Button -->
   <Style Selector="Button.danger">
     <Setter Property="Background" Value="{DynamicResource RedSoftBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource RedInkBrush}" />
-    <Setter Property="BorderBrush" Value="#E8C8C4" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
+  <Style Selector="Button.danger:pointerover">
+    <Setter Property="Background" Value="{DynamicResource RedHoverBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource RedInkBrush}" />
+  </Style>
+  <Style Selector="Button.danger:pressed">
+    <Setter Property="Opacity" Value="0.86" />
+  </Style>
+
   <Style Selector="Button.compact">
-    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="Padding" Value="12,5" />
     <Setter Property="MinHeight" Value="30" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontSize" Value="11.5" />
   </Style>
   <Style Selector="Button.icon">
-    <Setter Property="Width" Value="34" />
-    <Setter Property="MinWidth" Value="34" />
+    <Setter Property="Width" Value="36" />
+    <Setter Property="MinWidth" Value="36" />
+    <Setter Property="Height" Value="36" />
     <Setter Property="Padding" Value="0" />
   </Style>
 
+  <!-- MD3 柔和圆角输入框与全药丸 Search Bar -->
   <Style Selector="TextBox">
-    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="CornerRadius" Value="12" />
     <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowestBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+    <Setter Property="Padding" Value="12,9" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="TextBox:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource LineStrongBrush}" />
   </Style>
   <Style Selector="TextBox:focus">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
 
+  <!-- MD3 Search Bar（全药丸填充式，无默认硬描边，聚焦亮起柔和主色） -->
+  <Style Selector="Border.search-shell">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.search-shell:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighestBrush}" />
+  </Style>
+  <Style Selector="Border.search-shell:focus-within">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowestBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+  </Style>
+  <Style Selector="TextBox.search-input">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="4,8" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="MinHeight" Value="36" />
+  </Style>
+  <Style Selector="TextBox.search-input:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="TextBox.search-input:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- MD3 Linear Progress Indicator & ComboBox -->
+  <Style Selector="ProgressBar">
+    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighestBrush}" />
+    <Setter Property="CornerRadius" Value="999" />
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowestBrush}" />
+    <Setter Property="Padding" Value="12,8" />
+  </Style>
+
+  <!-- MD3 Primary Tabs：3px 圆顶指示条 -->
   <Style Selector="TabItem">
     <Setter Property="FontWeight" Value="Medium" />
-    <Setter Property="Padding" Value="14,12" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Padding" Value="18,13" />
+    <Setter Property="FontSize" Value="13" />
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+    <Setter Property="Cursor" Value="Hand" />
   </Style>
   <Style Selector="TabItem:selected">
     <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
@@ -159,8 +278,33 @@
   <!-- Fluent TabItem template pipe would otherwise use Windows accent (potentially red). -->
   <Style Selector="TabControl.paper-tabs TabItem:selected /template/ Border#PART_SelectedPipe">
     <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Height" Value="3" />
+    <Setter Property="CornerRadius" Value="3,3,0,0" />
   </Style>
   <Style Selector="TabControl.paper-tabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="CornerRadius" Value="10,10,0,0" />
+  </Style>
+
+  <!-- 统一极简线性图标尺寸与 MD3 Active Pill 变色 -->
+  <Style Selector="PathIcon.nav-icon">
+    <Setter Property="Width" Value="15" />
+    <Setter Property="Height" Value="15" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+  </Style>
+  <Style Selector="Button.chrome-nav:pointerover PathIcon.nav-icon">
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="Button.chrome-nav.selected PathIcon.nav-icon">
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+  </Style>
+
+  <!-- 拖放导入蒙层 -->
+  <Style Selector="Border.drop-overlay-card">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardHoverShadow}" />
   </Style>
 </Styles>

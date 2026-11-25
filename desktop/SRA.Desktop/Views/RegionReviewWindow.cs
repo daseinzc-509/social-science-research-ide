@@ -1,24 +1,22 @@
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using SRA.Desktop.Services;
 
 namespace SRA.Desktop.Views;
 
 /// <summary>
-/// Displays the authoritative PDF raster beside the original Docling source
-/// blocks. A selected rectangle can be OCR'd into an unverified proposal;
-/// the researcher's confirmation is an independent, revocable annotation.
-/// Original PDF/source blocks/Paper Card are never modified by this window.
+/// 展示权威 PDF 页面栅格与原始 Docling SourceBlocks 的对照窗口。
+/// 框选区域可执行局部 OCR 生成未验证候选；研究者确认后保存为独立、可撤回的人工修订。
+/// 本窗口绝不修改原始 PDF、SourceBlocks 或既有 Paper Card。
 /// </summary>
 public sealed class RegionReviewWindow : Window
 {
@@ -37,65 +35,86 @@ public sealed class RegionReviewWindow : Window
 
     private readonly SraApiClient _api;
     private readonly string _paperId;
+    private readonly int _initialPage;
+    private string? _pendingHighlightBlockId;
+
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
     private readonly Image _image = new() { Stretch = Stretch.None };
+    private readonly Rectangle _highlightShape = new()
+    {
+        Stroke = new SolidColorBrush(Color.FromArgb(225, 217, 119, 6)),
+        StrokeThickness = 2.5,
+        Fill = new SolidColorBrush(Color.FromArgb(58, 245, 158, 11)),
+        RadiusX = 4,
+        RadiusY = 4,
+        IsVisible = false,
+        IsHitTestVisible = false,
+    };
     private readonly Rectangle _selectionShape = new()
     {
-        Stroke = Brushes.DeepSkyBlue,
+        Stroke = new SolidColorBrush(Color.FromRgb(103, 80, 164)),
         StrokeThickness = 2,
-        Fill = new SolidColorBrush(Color.FromArgb(38, 0, 135, 255)),
+        Fill = new SolidColorBrush(Color.FromArgb(44, 103, 80, 164)),
+        RadiusX = 3,
+        RadiusY = 3,
         IsVisible = false,
+        IsHitTestVisible = false,
     };
-    private readonly TextBlock _pageLabel = new() { Text = "载入 PDF…" };
+    private readonly ScrollViewer _pdfScroller;
+    private readonly TabControl _sideTabs;
+
+    private readonly TextBlock _pageLabel = new()
+    {
+        Text = "载入 PDF…",
+        FontSize = 12.5,
+        FontWeight = FontWeight.SemiBold,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
     private readonly TextBlock _status = new()
     {
         Text = "框选左侧 PDF 的一段文字或表格，再运行局部 OCR。",
         TextWrapping = TextWrapping.Wrap,
+        FontSize = 12,
     };
-    private readonly TextBox _source = ReadOnlyBox(130);
-    private readonly TextBox _selectedSource = ReadOnlyBox(115);
+    private readonly TextBox _source = ReadOnlyBox(115, 210);
+    private readonly TextBox _selectedSource = ReadOnlyBox(105, 200);
     private readonly TextBox _ocrResult = new()
     {
         PlaceholderText = "识别后的候选文字将在此显示；请对照左侧原文手动校正。",
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
-        MinHeight = 120,
-        MaxHeight = 300,
+        MinHeight = 115,
+        MaxHeight = 260,
     };
     private readonly TextBox _note = new()
     {
         PlaceholderText = "可选：写下修正理由，例如「原文中的样本量为 4,519」。",
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
-        MinHeight = 44,
+        MinHeight = 46,
     };
-    private readonly TextBox _history = ReadOnlyBox(120);
-    private readonly Button _ocrButton = new() { Content = "识别选中区域", IsEnabled = false };
-    private readonly Button _manualButton = new() { Content = "仅人工录入（跳过 OCR）", IsEnabled = false };
-    private readonly Button _saveButton = new() { Content = "确认并保存人工修订", IsEnabled = false };
-    private readonly Button _undoButton = new() { Content = "撤回刚保存的修订", IsEnabled = false };
-    private readonly ComboBox _revisionSelector = new() { MinWidth = 240 };
-    private readonly Button _loadRevisionButton = new()
-    {
-        Content = "载入选中修订，准备修改", IsEnabled = false,
-    };
-    private readonly Button _saveRevisionButton = new()
-    {
-        Content = "保存为新版本（保留历史）", IsEnabled = false,
-    };
-    private readonly Button _copyPacketButton = new()
-    {
-        Content = "复制人工复核材料（不会自动分析）",
-    };
+    private readonly TextBox _history = ReadOnlyBox(180, 380);
 
-    private readonly Button _reviewPlanButton = new()
+    private readonly Button _ocrButton = StyledButton("识别选中区域", "primary", enabled: false);
+    private readonly Button _manualButton = StyledButton("仅人工录入（跳过 OCR）", "tonal", enabled: false);
+    private readonly Button _saveButton = StyledButton("确认并保存人工修订", "primary", enabled: false);
+    private readonly Button _undoButton = StyledButton("撤回刚保存的修订", "danger", "compact", enabled: false);
+    private readonly ComboBox _revisionSelector = new()
     {
-        Content = "① 预检复评范围（不调用 API）",
+        MinWidth = 240,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
     };
+    private readonly Button _loadRevisionButton = StyledButton("载入选中修订，准备修改", "tonal", enabled: false);
+    private readonly Button _saveRevisionButton = StyledButton("保存为新版本（保留历史）", "tonal", enabled: false);
+    private readonly Button _copyPacketButton = StyledButton("复制人工复核材料（不会自动分析）", "secondary");
+
+    private readonly Button _reviewPlanButton = StyledButton("① 预检复评范围（不调用 API）", "tonal");
     private readonly TextBlock _reviewPlanDescription = new()
     {
         Text = "尚未预检。需要先确认人工修订与原始证据关联均有效。",
         TextWrapping = TextWrapping.Wrap,
+        FontSize = 12.5,
+        LineHeight = 20,
     };
     private readonly TextBox _outboundPayloadPreview = new()
     {
@@ -104,21 +123,16 @@ public sealed class RegionReviewWindow : Window
         TextWrapping = TextWrapping.Wrap,
         MaxHeight = 225,
         MinHeight = 100,
+        FontFamily = new FontFamily("Consolas"),
+        FontSize = 11,
     };
     private readonly CheckBox _externalConsent = new()
     {
         Content = "我确认发送列出的原文摘录、原 Card 主张和人工修订到已配置的 Pro API，并知晓可能产生费用。",
         IsChecked = false,
     };
-    private readonly Button _reviewRunButton = new()
-    {
-        Content = "② 明确授权并执行一次 Pro 独立复评",
-        IsEnabled = false,
-    };
-    private readonly Button _latestReviewButton = new()
-    {
-        Content = "打开最近一次独立复评（左右对照）",
-    };
+    private readonly Button _reviewRunButton = StyledButton("② 明确授权并执行一次 Pro 独立复评", "primary", enabled: false);
+    private readonly Button _latestReviewButton = StyledButton("打开最近一次独立复评（左右对照）", "secondary");
     private string? _reviewRunPlanDigest;
 
     private Bitmap? _bitmap;
@@ -139,29 +153,42 @@ public sealed class RegionReviewWindow : Window
     private bool _loading;
     private int _selectionRevision;
 
-    public RegionReviewWindow(SraApiClient api, string paperId, string title)
+    public RegionReviewWindow(
+        SraApiClient api,
+        string paperId,
+        string title,
+        int initialPage = 1,
+        string? highlightSourceBlockId = null)
     {
         _api = api;
         _paperId = paperId;
+        _initialPage = Math.Max(1, initialPage);
+        _totalPages = _initialPage;
+        _pendingHighlightBlockId = string.IsNullOrWhiteSpace(highlightSourceBlockId)
+            ? null
+            : highlightSourceBlockId.Trim();
+
         Title = "SRA · 原文对照 / 局部 OCR · " + title;
-        Width = 1370;
-        Height = 880;
-        MinWidth = 980;
+        Width = 1400;
+        Height = 900;
+        MinWidth = 1020;
         MinHeight = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
         _canvas.Children.Add(_image);
+        _canvas.Children.Add(_highlightShape);
         _canvas.Children.Add(_selectionShape);
         _canvas.PointerPressed += CanvasPressed;
         _canvas.PointerMoved += CanvasMoved;
         _canvas.PointerReleased += CanvasReleased;
 
-        var previous = new Button { Content = "上一页" };
+        var previous = StyledButton("‹ 上一页", "secondary", "compact");
         previous.Click += async (_, _) => await LoadPageAsync(Math.Max(1, _page - 1));
-        var next = new Button { Content = "下一页" };
+        var next = StyledButton("下一页 ›", "secondary", "compact");
         next.Click += async (_, _) => await LoadPageAsync(Math.Min(_totalPages, _page + 1));
-        var refresh = new Button { Content = "刷新" };
+        var refresh = StyledButton("刷新", "ghost", "compact");
         refresh.Click += async (_, _) => await LoadPageAsync(_page);
+
         _ocrButton.Click += async (_, _) => await RunOcrAsync(manualOnly: false);
         _manualButton.Click += async (_, _) => await RunOcrAsync(manualOnly: true);
         _saveButton.Click += async (_, _) => await ConfirmAsync();
@@ -172,92 +199,202 @@ public sealed class RegionReviewWindow : Window
         _reviewPlanButton.Click += async (_, _) => await PrepareReviewedComparisonAsync();
         _reviewRunButton.Click += async (_, _) => await RunReviewedComparisonAsync();
         _latestReviewButton.Click += async (_, _) => await OpenLatestReviewedComparisonAsync();
-        var tools = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            Margin = new Thickness(12, 10),
-            Children = { previous, _pageLabel, next, refresh },
-        };
 
-        var pdfScroller = new ScrollViewer
+        var pageBadge = new Border
+        {
+            Padding = new Thickness(12, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = _pageLabel,
+        };
+        pageBadge.Classes.Add("badge-accent");
+
+        var toolsBar = new Border
+        {
+            Padding = new Thickness(14, 10),
+            Margin = new Thickness(14, 14, 8, 10),
+            Child = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+                Children =
+                {
+                    Put(new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Children = { previous, pageBadge, next },
+                    }, col: 0),
+                    Put(new TextBlock
+                    {
+                        Text = "在 PDF 上拖拽框选局部区域进行 OCR 或人工校订",
+                        FontSize = 12,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Classes = { "muted" },
+                    }, col: 1),
+                    Put(refresh, col: 2),
+                },
+            },
+        };
+        toolsBar.Classes.Add("soft-card");
+
+        _pdfScroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = _canvas,
-        };
-        var leftPane = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        Grid.SetRow(tools, 0);
-        Grid.SetRow(pdfScroller, 1);
-        leftPane.Children.Add(tools);
-        leftPane.Children.Add(pdfScroller);
-
-        var side = new StackPanel
-        {
-            Spacing = 10,
-            Margin = new Thickness(14, 12),
-            Children =
+            Content = new Border
             {
-                Heading("对照与局部复核"),
-                Caption("左侧为 PDF 原始页面；右侧原始文字来自 Docling，不因新 OCR 自动改变。"),
-                Heading("该页已提取的原始文字"),
-                _source,
-                Heading("当前框选区域对应的原始证据"),
-                _selectedSource,
-                _ocrButton,
-                _manualButton,
-                Heading("OCR 候选 / 人工录入（需核对）"),
-                _ocrResult,
-                Heading("研究者修订说明"),
-                _note,
-                _saveButton,
-                Caption("保存的是独立的人工修订记录，不覆盖 PDF、Docling SourceBlock 或旧 Paper Card。"),
-                _undoButton,
-                Heading("历史版本与证据关联"),
-                Caption("旧版本保留可追溯，重新解析会标记关联失效。只允许修改仍指向当前 SourceBlock 的有效修订。"),
-                _revisionSelector,
-                _loadRevisionButton,
-                _saveRevisionButton,
-                _copyPacketButton,
-                Caption("复制的是研究者人工复核补充材料，不是作者原文；不会改写 Paper Card 或自动调用 Lite/Pro。"),
-                Heading("该论文最近的人工修订（含过期关联）"),
-                _history,
-                Heading("v5 · 人工复核后独立复评（Pro API）"),
-                Caption("此阶段不会重跑整篇 Lite/Pro 提取，不创建正式的新 Paper Card。"
-                        + " 它只对原 Card 与人工确认的证据差异做一次独立 Pro 复评，结果保存为第二份可审计对照卡。"),
-                _reviewPlanButton,
-                _reviewPlanDescription,
-                new Expander
-                {
-                    Header = "查看即将发送给 Pro API 的完整文字（本地预检）",
-                    IsExpanded = false,
-                    Content = _outboundPayloadPreview,
-                },
-                _externalConsent,
-                _reviewRunButton,
-                _latestReviewButton,
-                Caption("预检不连接云端。点击执行后仅发送预检列出的原主张、相关原文与人工修订。"
-                        + " 如果请求超时，请先查询历史记录，避免重复产生 API 费用。"),
+                Padding = new Thickness(16),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Top,
+                Child = _canvas,
             },
         };
-        var sideScroller = new ScrollViewer
+        var pdfSurface = new Border
         {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = side,
+            Margin = new Thickness(14, 0, 8, 12),
+            ClipToBounds = true,
+            Child = _pdfScroller,
         };
+        pdfSurface.Classes.Add("tonal-card");
+
+        var leftPane = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        Grid.SetRow(toolsBar, 0);
+        Grid.SetRow(pdfSurface, 1);
+        leftPane.Children.Add(toolsBar);
+        leftPane.Children.Add(pdfSurface);
+
+        // 右侧重构为三个清晰 MD3 子分页，彻底消除超长单列滚筒
+        var reviewTabContent = new StackPanel
+        {
+            Spacing = 14,
+            Margin = new Thickness(14, 14, 16, 22),
+            Children =
+            {
+                Card("soft-card",
+                    Heading("原文证据对照"),
+                    Caption("左侧为 PDF 原始页面；下方原始文字来自 Docling，不因局部 OCR 自动改变。"),
+                    Label("当前框选 / 定位的原始证据"),
+                    _selectedSource,
+                    new Expander
+                    {
+                        Header = "查看该页全部 Docling 提取文字",
+                        IsExpanded = false,
+                        Content = _source,
+                    }),
+                Card("card",
+                    Heading("局部 OCR 与人工校订"),
+                    Caption("框选左侧区域后可运行局部 OCR 或直接人工抄录；确认后保存为独立人工修订记录。"),
+                    ButtonRow(_ocrButton, _manualButton),
+                    Label("OCR 候选 / 人工录入（需对照左侧原文核对）"),
+                    _ocrResult,
+                    Label("研究者修订说明（可选）"),
+                    _note,
+                    ButtonRow(_saveButton, _saveRevisionButton),
+                    Caption("保存的是独立的人工修订记录，不覆盖 PDF、Docling SourceBlock 或旧 Paper Card。"),
+                    ButtonRow(_undoButton)),
+            },
+        };
+
+        var historyTabContent = new StackPanel
+        {
+            Spacing = 14,
+            Margin = new Thickness(14, 14, 16, 22),
+            Children =
+            {
+                Card("card",
+                    Heading("版本管理与修订延续"),
+                    Caption("旧版本保留可追溯，重新解析会标记关联失效。选择有效版本载入后会自动切回「框选校订」页编辑并保存为新版本。"),
+                    Label("选择有效修订版本"),
+                    _revisionSelector,
+                    ButtonRow(_loadRevisionButton)),
+                Card("soft-card",
+                    Heading("复核材料导出与审计历史"),
+                    Caption("复制的是研究者人工复核补充材料，不是作者原文；不会改写 Paper Card 或自动调用 Lite/Pro。"),
+                    ButtonRow(_copyPacketButton),
+                    Label("该论文最近的人工修订（含过期关联）"),
+                    _history),
+            },
+        };
+
+        var proReviewTabContent = new StackPanel
+        {
+            Spacing = 14,
+            Margin = new Thickness(14, 14, 16, 22),
+            Children =
+            {
+                Card("tonal-card",
+                    Heading("v5 · 人工复核后独立复评（Pro API）"),
+                    Caption("此阶段不会重跑整篇 Lite/Pro 提取，不创建正式的新 Paper Card。"
+                            + " 它只对原 Card 与人工确认的证据差异做一次独立 Pro 复评，结果保存为第二份可审计对照卡。"),
+                    ButtonRow(_reviewPlanButton),
+                    _reviewPlanDescription,
+                    new Expander
+                    {
+                        Header = "查看即将发送给 Pro API 的完整文字（本地预检）",
+                        IsExpanded = false,
+                        Content = _outboundPayloadPreview,
+                    }),
+                Card("card",
+                    Heading("明确授权与执行"),
+                    _externalConsent,
+                    ButtonRow(_reviewRunButton),
+                    ButtonRow(_latestReviewButton),
+                    Caption("预检不连接云端。点击执行后仅发送预检列出的原主张、相关原文与人工修订。"
+                            + " 如果请求超时，请先查询历史记录，避免重复产生 API 费用。")),
+            },
+        };
+
+        _sideTabs = new TabControl
+        {
+            Classes = { "paper-tabs" },
+            ItemsSource = new[]
+            {
+                new TabItem { Header = "① 框选校订", Content = WrapScroll(reviewTabContent) },
+                new TabItem { Header = "② 版本历史", Content = WrapScroll(historyTabContent) },
+                new TabItem { Header = "③ 独立复评 (Pro)", Content = WrapScroll(proReviewTabContent) },
+            },
+            SelectedIndex = 0,
+        };
+
+        var sideSurface = new Border
+        {
+            Margin = new Thickness(6, 14, 14, 12),
+            ClipToBounds = true,
+            Child = _sideTabs,
+        };
+        sideSurface.Classes.Add("workspace-surface");
+
         var content = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*") };
         Grid.SetColumn(leftPane, 0);
-        Grid.SetColumn(sideScroller, 1);
+        Grid.SetColumn(sideSurface, 1);
         content.Children.Add(leftPane);
-        content.Children.Add(sideScroller);
+        content.Children.Add(sideSurface);
+
+        var statusBar = new Border
+        {
+            Padding = new Thickness(16, 8),
+            Child = _status,
+        };
+        statusBar.Classes.Add("statusbar");
+
         var layout = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         Grid.SetRow(content, 0);
-        Grid.SetRow(_status, 1);
-        _status.Margin = new Thickness(14, 8);
+        Grid.SetRow(statusBar, 1);
         layout.Children.Add(content);
-        layout.Children.Add(_status);
+        layout.Children.Add(statusBar);
         Content = layout;
-        Opened += async (_, _) => await LoadPageAsync(1);
+
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape && _selected is not null)
+            {
+                ClearSelection();
+                _status.Text = "已清除当前框选。";
+                e.Handled = true;
+            }
+        };
+        Opened += async (_, _) => await LoadPageAsync(_initialPage);
         Closed += (_, _) =>
         {
             _pageCancellation?.Cancel();
@@ -266,28 +403,77 @@ public sealed class RegionReviewWindow : Window
         };
     }
 
+    private static T Put<T>(T control, int col) where T : Control
+    {
+        Grid.SetColumn(control, col);
+        return control;
+    }
+
+    private static ScrollViewer WrapScroll(Control content) => new()
+    {
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        Content = content,
+    };
+
+    private static Border Card(string styleClass, params Control[] children)
+    {
+        var stack = new StackPanel { Spacing = 10 };
+        foreach (var child in children) stack.Children.Add(child);
+        var border = new Border
+        {
+            Padding = new Thickness(16, 15),
+            Child = stack,
+        };
+        border.Classes.Add(styleClass);
+        return border;
+    }
+
+    private static WrapPanel ButtonRow(params Control[] children)
+    {
+        var panel = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
+        foreach (var child in children) panel.Children.Add(child);
+        return panel;
+    }
+
+    private static Button StyledButton(string text, string primaryClass, string? extraClass = null, bool enabled = true)
+    {
+        var button = new Button { Content = text, IsEnabled = enabled };
+        button.Classes.Add(primaryClass);
+        if (!string.IsNullOrEmpty(extraClass)) button.Classes.Add(extraClass);
+        return button;
+    }
+
     private static TextBlock Heading(string text) => new()
     {
         Text = text,
         FontWeight = FontWeight.SemiBold,
-        FontSize = 14,
+        FontSize = 15,
+    };
+
+    private static TextBlock Label(string text) => new()
+    {
+        Text = text,
+        FontWeight = FontWeight.SemiBold,
+        FontSize = 12,
+        Classes = { "muted" },
     };
 
     private static TextBlock Caption(string text) => new()
     {
         Text = text,
         TextWrapping = TextWrapping.Wrap,
-        Opacity = 0.75,
-        FontSize = 11,
+        FontSize = 11.5,
+        LineHeight = 18,
+        Classes = { "muted" },
     };
 
-    private static TextBox ReadOnlyBox(double minHeight) => new()
+    private static TextBox ReadOnlyBox(double minHeight, double maxHeight = 240) => new()
     {
         IsReadOnly = true,
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
         MinHeight = minHeight,
-        MaxHeight = 260,
+        MaxHeight = maxHeight,
     };
 
     private async Task LoadPageAsync(int nextPage)
@@ -300,7 +486,7 @@ public sealed class RegionReviewWindow : Window
         try
         {
             var token = _pageCancellation.Token;
-            _status.Text = "加载原始 PDF 页面与 SourceBlocks…";
+            _status.Text = $"正在载入 PDF 第 {nextPage} 页与 SourceBlocks…";
             var bitmapData = await _api.GetRegionReviewPageAsync(_paperId, nextPage, token);
             using var bytes = new MemoryStream(bitmapData.Png);
             var bitmap = new Bitmap(bytes);
@@ -346,7 +532,10 @@ public sealed class RegionReviewWindow : Window
                 _source.Text += "\n\n[该页过长，前 120 个证据块之外的部分未列出]";
             ClearSelection();
             await RefreshHistoryAsync();
-            _status.Text = "请框选 PDF 区域。原始文字在右侧，人工确认不会改变原始证据。";
+            if (!TryApplyEvidenceHighlight())
+            {
+                _status.Text = "请框选 PDF 区域。原始文字在右侧，人工确认不会改变原始证据。";
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception exc)
@@ -359,6 +548,54 @@ public sealed class RegionReviewWindow : Window
         }
     }
 
+    /// <summary>
+    /// 从 ClaimCard 点击证据跳转打开时，自动在 PDF 栅格上以琥珀高亮标记对应 SourceBlock 并滚入视野。
+    /// </summary>
+    private bool TryApplyEvidenceHighlight()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingHighlightBlockId))
+        {
+            _highlightShape.IsVisible = false;
+            return false;
+        }
+
+        var targetId = _pendingHighlightBlockId;
+        _pendingHighlightBlockId = null;
+
+        var match = _blocks.FirstOrDefault(b =>
+            string.Equals(b.Id, targetId, StringComparison.OrdinalIgnoreCase));
+        if (match is null || _pageWidthPoints <= 0 || _pageHeightPoints <= 0)
+        {
+            _highlightShape.IsVisible = false;
+            _status.Text = $"已跳转到 PDF 第 {_page} 页；该证据块未记录页面坐标，请在左侧页内直接核验。";
+            return true;
+        }
+
+        var scaleX = _imageWidth / _pageWidthPoints;
+        var scaleY = _imageHeight / _pageHeightPoints;
+        var left = Math.Max(0, match.Box.X * scaleX - 4);
+        var top = Math.Max(0, match.Box.Y * scaleY - 4);
+        var width = Math.Clamp(match.Box.Width * scaleX + 8, 12, Math.Max(12, _imageWidth - left));
+        var height = Math.Clamp(match.Box.Height * scaleY + 8, 12, Math.Max(12, _imageHeight - top));
+
+        Canvas.SetLeft(_highlightShape, left);
+        Canvas.SetTop(_highlightShape, top);
+        _highlightShape.Width = width;
+        _highlightShape.Height = height;
+        _highlightShape.IsVisible = true;
+
+        _selectedSource.Text = $"[已定位原文证据块 · PDF 第 {_page} 页]\n\n{match.Text}";
+        _status.Text = $"已定位到 PDF 第 {_page} 页的原文证据块（琥珀色高亮区域）。可直接核对或拖拽框选校订。";
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _pdfScroller.Offset = new Vector(
+                Math.Max(0, left - 48),
+                Math.Max(0, top - 120));
+        }, DispatcherPriority.Background);
+        return true;
+    }
+
     private void ClearSelection()
     {
         _selectionRevision++;
@@ -367,10 +604,11 @@ public sealed class RegionReviewWindow : Window
         _previewId = null;
         _loadedRevisionId = null;
         _saveRevisionButton.IsEnabled = false;
-        _selectedSource.Text = "请先框选左侧区域";
+        _selectedSource.Text = "请先在左侧拖拽框选区域（或由证据卡片跳转定位）";
         _ocrResult.Text = "";
         _note.Text = "";
         _selectionShape.IsVisible = false;
+        _highlightShape.IsVisible = false;
         _ocrButton.IsEnabled = false;
         _manualButton.IsEnabled = false;
         _saveButton.IsEnabled = false;
@@ -389,6 +627,7 @@ public sealed class RegionReviewWindow : Window
         _dragStart = Clamp(eventArgs.GetPosition(_canvas));
         _previewId = null;
         _loadedRevisionId = null;
+        _highlightShape.IsVisible = false;
         _saveRevisionButton.IsEnabled = false;
         _saveButton.IsEnabled = false;
         _ocrButton.IsEnabled = false;
@@ -432,6 +671,7 @@ public sealed class RegionReviewWindow : Window
             _selectionShape.Height / _imageHeight);
         _ocrButton.IsEnabled = true;
         _manualButton.IsEnabled = true;
+        _sideTabs.SelectedIndex = 0;
         UpdateSelectedSource();
     }
 
@@ -610,8 +850,7 @@ public sealed class RegionReviewWindow : Window
         }
         catch (Exception exc)
         {
-            // After a model timeout, do not blindly enable Retry: it could
-            // duplicate a billed request. Check history first.
+            // 模型超时后绝不自动启用重试，避免重复扣费；请先检查历史记录。
             ResetReviewRunPlan();
             _status.Text = "复评未确认成功：" + exc.Message
                            + "。请先查看历史记录，勿直接重试扣费请求。";
@@ -658,8 +897,7 @@ public sealed class RegionReviewWindow : Window
             _status.Text = "请先选择需要修改的有效修订版本。";
             return;
         }
-        // Loading is deliberate: do not clobber a new OCR candidate just
-        // because the history selection changes.
+        // 显式载入历史版本，并切回「框选校订」页便于直接编辑和保存为新版本。
         _loadedRevisionId = choice.Id;
         _loadedRevisionNumber = choice.Revision;
         _previewId = null;
@@ -667,7 +905,8 @@ public sealed class RegionReviewWindow : Window
         _ocrResult.Text = choice.Text;
         _note.Text = choice.Note;
         _saveRevisionButton.IsEnabled = true;
-        _status.Text = $"已载入 PDF p.{choice.Page} 的 v{choice.Revision}。修改文字并保存为 v{choice.Revision + 1}；旧版本会保留。";
+        _sideTabs.SelectedIndex = 0;
+        _status.Text = $"已载入 PDF p.{choice.Page} 的 v{choice.Revision}。请编辑后点击「保存为新版本（保留历史）」生成 v{choice.Revision + 1}。";
     }
 
     private async Task SaveNewRevisionAsync()
@@ -723,7 +962,7 @@ public sealed class RegionReviewWindow : Window
 
     private async Task RefreshHistoryAsync()
     {
-        // Revising/revoking/selecting new evidence invalidates the old plan.
+        // 修订、撤回或重新选择证据均使旧预检计划失效。
         ResetReviewRunPlan();
         try
         {

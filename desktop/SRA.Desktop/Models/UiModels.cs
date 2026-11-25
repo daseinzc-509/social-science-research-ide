@@ -58,6 +58,77 @@ public sealed class ClaimItem
         "USER_NOTE" => "MY NOTE",
         _ => string.IsNullOrWhiteSpace(Provenance) ? "SOURCE" : Provenance,
     };
+
+    public bool IsAuthorProvenance => string.Equals(Provenance, "AUTHOR_STATED", StringComparison.OrdinalIgnoreCase);
+    public bool IsAiProvenance => string.Equals(Provenance, "AI_INFERRED", StringComparison.OrdinalIgnoreCase);
+    public bool IsUserNoteProvenance => !IsAuthorProvenance && !IsAiProvenance;
+
+    public string ClaimTypeLabel => (ClaimType ?? "").Trim().ToUpperInvariant() switch
+    {
+        "CAUSAL" => "因果主张",
+        "ASSOCIATION" => "相关关系",
+        "MECHANISM" => "机制解释",
+        "DESCRIPTIVE" => "描述事实",
+        "METHOD" => "方法",
+        "MEASUREMENT" => "测量",
+        "THEORETICAL" => "理论",
+        "NORMATIVE" => "规范论述",
+        "LIMITATION" => "研究局限",
+        _ => "",
+    };
+    public bool HasClaimTypeTag => !string.IsNullOrWhiteSpace(ClaimTypeLabel);
+
+    public string AuditBadgeLabel
+    {
+        get
+        {
+            var semantic = (SemanticSupport ?? "").Trim().ToUpperInvariant();
+            if (!string.IsNullOrEmpty(semantic))
+            {
+                return semantic switch
+                {
+                    "SUPPORTS" => "语义支持",
+                    "PARTIALLY_SUPPORTS" => "部分支持",
+                    "QUALIFIES" => "附带限定",
+                    "CONTRADICTS" => "存在冲突",
+                    "BACKGROUND_ONLY" => "仅背景提及",
+                    "UNCLEAR" => "支持度待核",
+                    _ => semantic,
+                };
+            }
+            return (Verification ?? "").Trim().ToUpperInvariant() switch
+            {
+                "SUPPORTED" => "已溯源",
+                "NEEDS_REVIEW" => "待核验",
+                "NO_SOURCE" => "无原文出处",
+                var other => other,
+            };
+        }
+    }
+    public bool HasAuditBadge => !string.IsNullOrWhiteSpace(AuditBadgeLabel);
+
+    public bool IsAuditPositive
+    {
+        get
+        {
+            var semantic = (SemanticSupport ?? "").Trim().ToUpperInvariant();
+            if (!string.IsNullOrEmpty(semantic)) return semantic == "SUPPORTS";
+            return string.Equals(Verification, "SUPPORTED", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+    public bool IsAuditNegative => string.Equals(SemanticSupport, "CONTRADICTS", StringComparison.OrdinalIgnoreCase);
+    public bool IsAuditWarning
+    {
+        get
+        {
+            if (IsAuditPositive || IsAuditNegative) return false;
+            var semantic = (SemanticSupport ?? "").Trim().ToUpperInvariant();
+            if (semantic is "PARTIALLY_SUPPORTS" or "QUALIFIES" or "BACKGROUND_ONLY" or "UNCLEAR") return true;
+            return string.Equals(Verification, "NEEDS_REVIEW", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+    public bool IsAuditNeutral => HasAuditBadge && !IsAuditPositive && !IsAuditNegative && !IsAuditWarning;
+
     public string AuditLine => string.Join(" · ", new[] { ClaimType, Verification, SemanticSupport }
         .Where(value => !string.IsNullOrWhiteSpace(value)));
 

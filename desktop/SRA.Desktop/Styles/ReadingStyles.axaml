@@ -1,48 +1,86 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- MD3 Tonal 摘要引言卡 -->
   <Style Selector="Border.reading-lead">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
-    <Setter Property="BorderThickness" Value="3,0,0,0" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="4,0,0,0" />
+    <Setter Property="CornerRadius" Value="14" />
   </Style>
+
+  <!-- MD3 研究设计画像 Tonal 卡片 -->
   <Style Selector="Border.design-cell">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="11" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+      </Transitions>
+    </Setter>
   </Style>
+  <Style Selector="Border.design-cell:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
+  </Style>
+
+  <!-- MD3 Expressive 核心主张卡片：16px 大圆角 + 轻盈描边与悬浮抬升 -->
   <Style Selector="Border.claim-card">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
     <Setter Property="Transitions">
-      <Transitions><BrushTransition Property="BorderBrush" Duration="0:0:0.16" /></Transitions>
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.16" />
+        <BoxShadowsTransition Property="BoxShadow" Duration="0:0:0.18" />
+      </Transitions>
     </Setter>
   </Style>
   <Style Selector="Border.claim-card:pointerover">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentLineBrush}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardHoverShadow}" />
   </Style>
+
   <Style Selector="Border.claim-scope">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
   </Style>
   <Style Selector="Border.claim-rationale">
     <Setter Property="Background" Value="{DynamicResource PurpleSoftBrush}" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="BorderBrush" Value="{DynamicResource PurpleInkBrush}" />
+    <Setter Property="BorderThickness" Value="3.5,0,0,0" />
+    <Setter Property="CornerRadius" Value="12" />
   </Style>
+
+  <!-- 学术书摘风格可交互原文证据块（悬停态呼应点击跳 PDF 原文） -->
   <Style Selector="Border.evidence-block">
     <Setter Property="Background" Value="{DynamicResource BlueSoftBrush}" />
-    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BlueInkBrush}" />
+    <Setter Property="BorderThickness" Value="3.5,0,0,0" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.14" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.evidence-block:pointerover">
+    <Setter Property="Background" Value="{DynamicResource BlueLineBrush}" />
   </Style>
   <Style Selector="Expander.evidence-expander">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource BlueInkBrush}" />
     <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
   </Style>
   <Style Selector="TextBlock.section-title">
-    <Setter Property="FontSize" Value="18" />
+    <Setter Property="FontSize" Value="17" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.15" />
   </Style>
 </Styles>

@@ -7,14 +7,14 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Media;
 using SRA.Desktop.Services;
 
 namespace SRA.Desktop.Views;
 
 /// <summary>
-/// The only editable UI for model connections, proxy policies and Docling models.
-/// Lite/Pro/Vision ultimately use the SRA secure stage settings written by the
-/// profile service, not any independent desktop-side file or credential cache.
+/// 统一模型配置中心：管理 Lite / Pro / Vision 三阶段连接、网络代理以及 Docling 离线模型与增强开关。
+/// 所有配置直接写入 SRA 后端统一加密存储，不生成桌面端独立凭据缓存。
 /// </summary>
 public sealed class ModelCenterWindow : Window
 {
@@ -23,21 +23,44 @@ public sealed class ModelCenterWindow : Window
     private readonly ComboBox _aiMode = Picker("系统代理", "直连", "自定义 HTTP 代理");
     private readonly TextBox _downloadProxy = Edit("http://127.0.0.1:7890");
     private readonly TextBox _aiProxy = Edit("http://127.0.0.1:7890");
-    private readonly TextBlock _modelState = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly TextBlock _modelState = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 12.5,
+        LineHeight = 20,
+    };
     private readonly CheckBox _includeFormula = new() { Content = "下载时包含公式模型权重" };
     private readonly CheckBox _useManagedModels = new() { Content = "使用已离线验证的托管 Docling 模型" };
     private readonly CheckBox _formulaEnabled = new() { Content = "启用本地公式识别（不调用付费 AI）" };
     private readonly CheckBox _visionEnabled = new() { Content = "允许按需分析单张图片（调用 Vision API 可能计费）" };
-    private readonly TextBlock _effectiveConnections = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
-    private readonly ComboBox _profiles = new() { MinWidth = 260 };
+    private readonly TextBlock _effectiveConnections = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 12.5,
+        LineHeight = 22,
+    };
+    private readonly ComboBox _profiles = new()
+    {
+        MinWidth = 260,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly ComboBox _stage = Picker("Lite · 事实索引", "Pro · 深度审读", "Vision · 图片分析");
-    private readonly ComboBox _remoteModels = new() { MinWidth = 260 };
+    private readonly ComboBox _remoteModels = new()
+    {
+        MinWidth = 260,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly TextBox _name = Edit("如：火山方舟 GLM");
     private readonly TextBox _url = Edit("如：https://.../v1 或服务商指定 Base URL");
     private readonly TextBox _model = Edit("如：kimi-k3");
     private readonly TextBox _key = Edit("API Key（更新时留空表示保留原密钥）");
     private readonly TextBox _tokens = Edit("8192");
-    private readonly TextBlock _status = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly TextBlock _status = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 12,
+        LineHeight = 19,
+    };
     private List<ProfileEntry> _profileEntries = new();
     private bool _loading;
 
@@ -62,50 +85,94 @@ public sealed class ModelCenterWindow : Window
     private static TextBox Edit(string placeholder) => new()
     {
         PlaceholderText = placeholder,
-        MinWidth = 260,
+        MinWidth = 200,
     };
 
-    private static Button Action(string text, Action callback)
+    private static Button Action(string text, Action callback, string styleClass = "secondary", string? extraClass = null)
     {
-        var button = new Button { Content = text, Padding = new Thickness(14, 9) };
+        var button = new Button { Content = text };
+        button.Classes.Add(styleClass);
+        if (!string.IsNullOrEmpty(extraClass)) button.Classes.Add(extraClass);
         button.Click += (_, _) => callback();
         return button;
     }
 
-    private static StackPanel Section(string title, string description)
+    private static TextBlock FieldLabel(string text) => new()
     {
-        var section = new StackPanel { Spacing = 11, Margin = new Thickness(0, 0, 0, 18) };
-        section.Children.Add(new TextBlock { Text = title, FontSize = 17, FontWeight = Avalonia.Media.FontWeight.SemiBold });
-        section.Children.Add(new TextBlock
+        Text = text,
+        FontSize = 12,
+        FontWeight = FontWeight.SemiBold,
+        Classes = { "muted" },
+    };
+
+    private static TextBlock Hint(string text) => new()
+    {
+        Text = text,
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 11.5,
+        LineHeight = 18,
+        Classes = { "muted" },
+    };
+
+    private static Border Card(string styleClass, string title, string? description, params Control[] children)
+    {
+        var stack = new StackPanel { Spacing = 11 };
+        stack.Children.Add(new TextBlock
         {
-            Text = description,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-            Opacity = 0.73,
+            Text = title,
+            FontSize = 15.5,
+            FontWeight = FontWeight.SemiBold,
         });
-        return section;
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            stack.Children.Add(Hint(description));
+        }
+        foreach (var child in children) stack.Children.Add(child);
+        var border = new Border
+        {
+            Padding = new Thickness(20, 18),
+            Child = stack,
+        };
+        border.Classes.Add(styleClass);
+        return border;
     }
 
-    private static StackPanel Buttons(params Control[] children)
+    private static StackPanel FieldGroup(string label, Control input) => new()
     {
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9 };
+        Spacing = 5,
+        Children = { FieldLabel(label), input },
+    };
+
+    private static WrapPanel Buttons(params Control[] children)
+    {
+        var panel = new WrapPanel { ItemSpacing = 9, LineSpacing = 8 };
         foreach (var child in children) panel.Children.Add(child);
         return panel;
     }
 
-    private static ScrollViewer TabPage(StackPanel content) => new()
+    private static ScrollViewer TabPage(params Control[] cards)
     {
-        Content = content,
-        VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-    };
+        var content = new StackPanel
+        {
+            Spacing = 14,
+            Margin = new Thickness(4, 14, 12, 22),
+        };
+        foreach (var card in cards) content.Children.Add(card);
+        return new ScrollViewer
+        {
+            Content = content,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+        };
+    }
 
     public ModelCenterWindow(SraApiClient api)
     {
         _api = api;
         Title = "SRA · 模型配置中心";
-        Width = 900;
-        Height = 780;
-        MinWidth = 700;
-        MinHeight = 570;
+        Width = 940;
+        Height = 820;
+        MinWidth = 720;
+        MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         _key.PasswordChar = '●';
         _profiles.SelectionChanged += (_, _) => ShowSelectedProfile();
@@ -114,102 +181,154 @@ public sealed class ModelCenterWindow : Window
             if (_remoteModels.SelectedItem is string modelId) _model.Text = modelId;
         };
 
-        var accounts = Section("当前实际生效的模型", "这里显示分析器当前使用的 Lite、Pro、Vision，而不是仅显示已保存的配置名称。旧设置仍然有效，可以一键导入。");
-        accounts.Children.Add(_effectiveConnections);
-        accounts.Children.Add(new TextBlock { Text = "已保存的 API 服务商 / 模型配置" });
-        accounts.Children.Add(_profiles);
-        accounts.Children.Add(Buttons(
-            Action("新建配置", ClearEditor),
-            Action("导入原有 Lite / Pro / Vision", () => _ = RunAsync(ImportExistingAsync)),
-            Action("删除选中", () => _ = RunAsync(DeleteProfileAsync))));
-        accounts.Children.Add(new TextBlock { Text = "配置名称" });
-        accounts.Children.Add(_name);
-        accounts.Children.Add(new TextBlock { Text = "Base URL" });
-        accounts.Children.Add(_url);
-        accounts.Children.Add(new TextBlock { Text = "Model ID（以服务商实际 ID 为准）" });
-        accounts.Children.Add(_model);
-        accounts.Children.Add(Buttons(Action("从服务商读取模型列表", () => _ = RunAsync(GetRemoteModelsAsync))));
-        accounts.Children.Add(_remoteModels);
-        accounts.Children.Add(new TextBlock { Text = "API Key（加密保存，不会回显）" });
-        accounts.Children.Add(_key);
-        accounts.Children.Add(new TextBlock { Text = "单次最大输出 Token（Lite/Pro）" });
-        accounts.Children.Add(_tokens);
-        accounts.Children.Add(Buttons(
-            Action("仅保存到配置列表", () => _ = RunAsync(SaveProfileAsync)),
-            Action("测试已保存配置（可能计费）", () => _ = RunAsync(TestProfileAsync))));
-        accounts.Children.Add(new TextBlock { Text = "为哪个分析阶段应用此配置？" });
-        accounts.Children.Add(_stage);
-        accounts.Children.Add(Buttons(Action("保存并应用到选定阶段", () => _ = RunAsync(SaveAndActivateAsync))));
-        accounts.Children.Add(new TextBlock
-        {
-            Text = "“仅保存”不影响分析；“保存并应用”立即更新下一次分析的真实连接。已经运行的分析不切换。Vision 仍需在图片操作时明确确认外发。",
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-            Opacity = 0.73,
-        });
+        // Tab 1: AI 服务商（三张清晰 MD3 卡片）
+        var effectiveCard = Card(
+            "tonal-card",
+            "当前实际生效的模型",
+            "展示分析器当前实际使用的 Lite、Pro、Vision 连接，而非仅显示配置名称。旧设置仍然有效，可一键导入。",
+            _effectiveConnections);
 
-        var network = Section("网络与代理", "Docling 模型下载与 AI API 各自使用独立代理。自定义代理填写 HTTP/Mixed 端口；不要填 SOCKS-only 端口。");
-        network.Children.Add(new TextBlock { Text = "Docling / Hugging Face 下载代理" });
-        network.Children.Add(_downloadMode);
-        network.Children.Add(_downloadProxy);
-        network.Children.Add(new TextBlock { Text = "AI API 请求代理（国内 API 可单独直连）" });
-        network.Children.Add(_aiMode);
-        network.Children.Add(_aiProxy);
-        network.Children.Add(Buttons(Action("保存网络设置", () => _ = RunAsync(SaveNetworkAsync))));
+        var nameTokenRow = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("2*,*"),
+            ColumnSpacing = 12,
+        };
+        var nameField = FieldGroup("配置名称", _name);
+        var tokensField = FieldGroup("单次最大输出 Token（Lite/Pro）", _tokens);
+        Grid.SetColumn(nameField, 0);
+        Grid.SetColumn(tokensField, 1);
+        nameTokenRow.Children.Add(nameField);
+        nameTokenRow.Children.Add(tokensField);
 
-        var weights = Section("Docling 离线解析", "权重下载结束后会在独立离线进程中运行一次 PDF/OCR 转换，成功才标记为可用。");
-        weights.Children.Add(_modelState);
-        weights.Children.Add(_includeFormula);
-        weights.Children.Add(_useManagedModels);
-        weights.Children.Add(Buttons(Action("保存本地模型使用模式", () => _ = RunAsync(SetModelModeAsync))));
-        weights.Children.Add(Buttons(
-            Action("下载并验证", () => _ = RunAsync(() => StartModelOperationAsync(true))),
-            Action("验证已有模型", () => _ = RunAsync(() => StartModelOperationAsync(false))),
-            Action("刷新状态", () => _ = RunAsync(LoadAsync))));
-        weights.Children.Add(new TextBlock { Text = "本地公式与图片分析开关" });
-        weights.Children.Add(_formulaEnabled);
-        weights.Children.Add(new TextBlock
-        {
-            Text = "公式开关在新解析任务中生效。如果需要额外公式权重，请先勾选上面的下载选项并完成验证。",
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-            Opacity = 0.73,
-        });
-        weights.Children.Add(_visionEnabled);
-        weights.Children.Add(new TextBlock
-        {
-            Text = "Vision 的模型和密钥统一在“AI 服务商”页指定；这里只控制是否允许使用，不会覆盖已经选择的 Vision 配置。",
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-            Opacity = 0.73,
-        });
-        weights.Children.Add(Buttons(Action("保存公式 / 图片开关", () => _ = RunAsync(SaveEnhancementsAsync))));
+        var profileEditorCard = Card(
+            "card",
+            "API 服务商与命名配置",
+            "编辑参数后可先「仅保存」或直接应用到指定阶段；API Key 加密存储，不会明文回显。",
+            FieldGroup("已保存的 API 服务商 / 模型配置", _profiles),
+            Buttons(
+                Action("新建配置", ClearEditor, "secondary", "compact"),
+                Action("导入原有 Lite / Pro / Vision", () => _ = RunAsync(ImportExistingAsync), "tonal", "compact"),
+                Action("删除选中", () => _ = RunAsync(DeleteProfileAsync), "danger", "compact")),
+            nameTokenRow,
+            FieldGroup("Base URL", _url),
+            FieldGroup("Model ID（以服务商实际 ID 为准）", _model),
+            Buttons(Action("从服务商读取模型列表", () => _ = RunAsync(GetRemoteModelsAsync), "tonal", "compact")),
+            _remoteModels,
+            FieldGroup("API Key（加密保存，不会回显）", _key),
+            Buttons(
+                Action("仅保存到配置列表", () => _ = RunAsync(SaveProfileAsync), "secondary"),
+                Action("测试已保存配置（可能计费）", () => _ = RunAsync(TestProfileAsync), "tonal")));
 
-        var title = new StackPanel { Spacing = 6, Margin = new Thickness(0, 0, 0, 15) };
-        title.Children.Add(new TextBlock { Text = "统一模型配置中心", FontSize = 23, FontWeight = Avalonia.Media.FontWeight.Bold });
-        title.Children.Add(new TextBlock
+        var activationCard = Card(
+            "soft-card",
+            "应用到分析阶段",
+            "“仅保存”不影响分析；“保存并应用”立即更新下一次分析的真实连接。已经运行的分析不切换。Vision 仍需在图片操作时明确确认外发。",
+            FieldGroup("为哪个分析阶段应用此配置？", _stage),
+            Buttons(Action("保存并应用到选定阶段", () => _ = RunAsync(SaveAndActivateAsync), "primary")));
+
+        // Tab 2: 网络代理
+        var downloadProxyCard = Card(
+            "card",
+            "Docling / Hugging Face 下载代理",
+            "仅用于本地解析模型权重下载。自定义代理填写 HTTP/Mixed 端口，不要填 SOCKS-only 端口。",
+            FieldGroup("下载代理模式", _downloadMode),
+            FieldGroup("自定义代理地址", _downloadProxy));
+
+        var aiProxyCard = Card(
+            "card",
+            "AI API 请求代理",
+            "与模型下载代理完全独立；使用国内 API 服务商时可单独设为直连。",
+            FieldGroup("AI API 代理模式", _aiMode),
+            FieldGroup("自定义代理地址", _aiProxy),
+            Buttons(Action("保存网络设置", () => _ = RunAsync(SaveNetworkAsync), "primary")));
+
+        // Tab 3: Docling / 增强
+        var doclingStateBox = new Border
         {
-            Text = "一个入口管理三类 AI 任务、代理及 Docling；配置同步到 SRA 原有加密存储，不生成第二份生效设置。",
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Padding = new Thickness(14, 12),
+            Child = _modelState,
+        };
+        doclingStateBox.Classes.Add("tonal-card");
+
+        var doclingCard = Card(
+            "card",
+            "Docling 离线解析权重",
+            "权重下载结束后会在独立离线进程中运行一次 PDF/OCR 转换，验证通过才标记为可用。",
+            doclingStateBox,
+            _includeFormula,
+            _useManagedModels,
+            Buttons(
+                Action("下载并验证", () => _ = RunAsync(() => StartModelOperationAsync(true)), "primary"),
+                Action("验证已有模型", () => _ = RunAsync(() => StartModelOperationAsync(false)), "tonal"),
+                Action("保存本地模型使用模式", () => _ = RunAsync(SetModelModeAsync), "secondary"),
+                Action("刷新状态", () => _ = RunAsync(LoadAsync), "ghost")));
+
+        var enhancementsCard = Card(
+            "card",
+            "本地公式与图片分析开关",
+            "公式开关在新解析任务中生效；Vision 模型和密钥统一在“AI 服务商”页指定，这里只控制是否允许按需使用。",
+            _formulaEnabled,
+            Hint("如果需要额外公式权重，请先在上方勾选下载选项并完成离线验证。"),
+            _visionEnabled,
+            Hint("开启后不会自动外发图片，也不会覆盖已经选择的 Vision 配置；每张图片分析均需研究者明确确认。"),
+            Buttons(Action("保存公式 / 图片开关", () => _ = RunAsync(SaveEnhancementsAsync), "primary")));
+
+        var header = new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 0, 14) };
+        header.Children.Add(new TextBlock
+        {
+            Text = "MODEL CENTER",
+            Classes = { "eyebrow" },
         });
+        header.Children.Add(new TextBlock
+        {
+            Text = "统一模型配置中心",
+            Classes = { "h1" },
+        });
+        header.Children.Add(Hint("一个入口管理三类 AI 任务、网络代理与 Docling；配置同步到 SRA 原有加密存储，不生成第二份生效设置。"));
+
         var tabs = new TabControl
         {
+            Classes = { "paper-tabs" },
             ItemsSource = new[]
             {
-                new TabItem { Header = "AI 服务商", Content = TabPage(accounts) },
-                new TabItem { Header = "网络代理", Content = TabPage(network) },
-                new TabItem { Header = "Docling / 增强", Content = TabPage(weights) },
+                new TabItem { Header = "AI 服务商", Content = TabPage(effectiveCard, profileEditorCard, activationCard) },
+                new TabItem { Header = "网络代理", Content = TabPage(downloadProxyCard, aiProxyCard) },
+                new TabItem { Header = "Docling / 增强", Content = TabPage(doclingCard, enhancementsCard) },
             },
             SelectedIndex = 0,
         };
-        _status.Text = "正在加载配置…";
-        var footer = new StackPanel { Spacing = 5, Margin = new Thickness(0, 12, 0, 0) };
-        footer.Children.Add(new TextBlock { Text = "运行状态", FontWeight = Avalonia.Media.FontWeight.SemiBold });
-        footer.Children.Add(_status);
 
-        var shell = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(24) };
-        Grid.SetRow(title, 0);
-        Grid.SetRow(tabs, 1);
+        var tabsSurface = new Border
+        {
+            Padding = new Thickness(12, 4, 8, 8),
+            ClipToBounds = true,
+            Child = tabs,
+        };
+        tabsSurface.Classes.Add("workspace-surface");
+
+        _status.Text = "正在加载配置…";
+        var footer = new Border
+        {
+            Margin = new Thickness(0, 12, 0, 0),
+            Padding = new Thickness(16, 11),
+            Child = new StackPanel
+            {
+                Spacing = 3,
+                Children =
+                {
+                    new TextBlock { Text = "运行状态", FontSize = 11.5, FontWeight = FontWeight.SemiBold, Classes = { "muted" } },
+                    _status,
+                },
+            },
+        };
+        footer.Classes.Add("soft-card");
+
+        var shell = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(24, 20, 24, 20) };
+        Grid.SetRow(header, 0);
+        Grid.SetRow(tabsSurface, 1);
         Grid.SetRow(footer, 2);
-        shell.Children.Add(title);
-        shell.Children.Add(tabs);
+        shell.Children.Add(header);
+        shell.Children.Add(tabsSurface);
         shell.Children.Add(footer);
         Content = shell;
         Opened += async (_, _) => await RunAsync(LoadAsync);
@@ -442,7 +561,7 @@ public sealed class ModelCenterWindow : Window
         var accepted = await _api.StartDoclingModelOperationAsync(download, _includeFormula.IsChecked == true);
         for (var i = 0; i < 3600; i++)
         {
-            if (!IsVisible) return; // The server job continues; stop polling the hidden UI.
+            if (!IsVisible) return;
             await Task.Delay(TimeSpan.FromSeconds(2));
             var job = await _api.GetJobAsync(accepted.JobId);
             _status.Text = job.Messages.LastOrDefault() ?? "模型任务正在运行…";

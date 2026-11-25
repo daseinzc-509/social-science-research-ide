@@ -6,64 +6,152 @@
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="CanvasBrush" Color="#F7F6FA" />
+          <!-- Google Material Design 3 (Seed #6750A4 学术紫) 五级 Tonal Surface 色阶 -->
+          <SolidColorBrush x:Key="SurfaceContainerLowestBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SurfaceContainerLowBrush" Color="#F7F2FA" />
+          <SolidColorBrush x:Key="SurfaceContainerBrush" Color="#F3EDF7" />
+          <SolidColorBrush x:Key="SurfaceContainerHighBrush" Color="#ECE6F0" />
+          <SolidColorBrush x:Key="SurfaceContainerHighestBrush" Color="#E6E0E9" />
+
+          <!-- 核心语义表面映射（向后兼容全部视图与测试契约） -->
+          <SolidColorBrush x:Key="CanvasBrush" Color="#FBF8FD" />
           <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#FAF9FD" />
-          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F0EEF5" />
-          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#F1EEF8" />
-          <SolidColorBrush x:Key="InkBrush" Color="#1D2529" />
-          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#657078" />
-          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#8A949B" />
-          <SolidColorBrush x:Key="LineBrush" Color="#E3E7E9" />
-          <SolidColorBrush x:Key="LineStrongBrush" Color="#CDD4D8" />
+          <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#F7F2FA" />
+          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#ECE6F0" />
+          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EFE8F7" />
+
+          <!-- MD3 On-Surface 墨色阶梯 -->
+          <SolidColorBrush x:Key="InkBrush" Color="#1D1B20" />
+          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#49454F" />
+          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#79747E" />
+
+          <!-- MD3 OutlineVariant / Outline 细腻描边 -->
+          <SolidColorBrush x:Key="OutlineSubtleBrush" Color="#E7E0EC" />
+          <SolidColorBrush x:Key="LineBrush" Color="#DCD5E3" />
+          <SolidColorBrush x:Key="LineStrongBrush" Color="#C4BDD0" />
+
           <SolidColorBrush x:Key="RailBrush" Color="#20282B" />
           <SolidColorBrush x:Key="RailHoverBrush" Color="#2A3437" />
           <SolidColorBrush x:Key="RailInkBrush" Color="#DCE6E4" />
           <SolidColorBrush x:Key="RailMutedBrush" Color="#8FA09D" />
-          <SolidColorBrush x:Key="AccentBrush" Color="#7464AD" />
-          <SolidColorBrush x:Key="AccentHoverBrush" Color="#63549D" />
-          <SolidColorBrush x:Key="AccentPressedBrush" Color="#534584" />
-          <SolidColorBrush x:Key="AccentSoftBrush" Color="#F0ECFA" />
-          <SolidColorBrush x:Key="AccentLineBrush" Color="#D9D1EF" />
-          <SolidColorBrush x:Key="BlueSoftBrush" Color="#EEF4F8" />
-          <SolidColorBrush x:Key="BlueInkBrush" Color="#496B82" />
-          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#F1EEF7" />
-          <SolidColorBrush x:Key="PurpleInkBrush" Color="#695C82" />
-          <SolidColorBrush x:Key="AmberSoftBrush" Color="#FBF3E3" />
-          <SolidColorBrush x:Key="AmberInkBrush" Color="#8D641D" />
-          <SolidColorBrush x:Key="RedSoftBrush" Color="#FAECEA" />
-          <SolidColorBrush x:Key="RedInkBrush" Color="#9A5148" />
+
+          <!-- MD3 Primary / PrimaryContainer / SecondaryContainer (Filled & Filled Tonal) -->
+          <SolidColorBrush x:Key="AccentBrush" Color="#6750A4" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#594394" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#4A3682" />
+          <SolidColorBrush x:Key="AccentFillBrush" Color="#6750A4" />
+          <SolidColorBrush x:Key="AccentFillHoverBrush" Color="#5A4496" />
+          <SolidColorBrush x:Key="AccentFillPressedBrush" Color="#4C3785" />
+          <SolidColorBrush x:Key="AccentOnFillBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#EADDFF" />
+          <SolidColorBrush x:Key="AccentLineBrush" Color="#CBB7F2" />
+
+          <SolidColorBrush x:Key="TonalFillBrush" Color="#E8DEF8" />
+          <SolidColorBrush x:Key="TonalFillHoverBrush" Color="#DDD0F3" />
+          <SolidColorBrush x:Key="TonalFillPressedBrush" Color="#D0C0EB" />
+          <SolidColorBrush x:Key="OnTonalFillBrush" Color="#1D192B" />
+
+          <!-- 学术可审计性语义容器对（MD3 Container / On-Container 风格） -->
+          <SolidColorBrush x:Key="BlueSoftBrush" Color="#E8F2FC" />
+          <SolidColorBrush x:Key="BlueInkBrush" Color="#1D5685" />
+          <SolidColorBrush x:Key="BlueLineBrush" Color="#C3DDF5" />
+
+          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#F0E9FC" />
+          <SolidColorBrush x:Key="PurpleInkBrush" Color="#533D8B" />
+          <SolidColorBrush x:Key="PurpleLineBrush" Color="#D6C8F0" />
+
+          <SolidColorBrush x:Key="EmeraldSoftBrush" Color="#E3F5EC" />
+          <SolidColorBrush x:Key="EmeraldInkBrush" Color="#166444" />
+          <SolidColorBrush x:Key="EmeraldLineBrush" Color="#B6E2CC" />
+
+          <SolidColorBrush x:Key="AmberSoftBrush" Color="#FDF2DC" />
+          <SolidColorBrush x:Key="AmberInkBrush" Color="#84540A" />
+          <SolidColorBrush x:Key="AmberLineBrush" Color="#EDD29D" />
+
+          <SolidColorBrush x:Key="RedSoftBrush" Color="#F9DEDC" />
+          <SolidColorBrush x:Key="RedHoverBrush" Color="#F2CDC9" />
+          <SolidColorBrush x:Key="RedInkBrush" Color="#8C1D18" />
+          <SolidColorBrush x:Key="RedLineBrush" Color="#E5B6B1" />
+
           <SolidColorBrush x:Key="CodeBrush" Color="#182125" />
+
+          <!-- MD3 极轻柔和 Elevation（主要靠 Tonal Surface 分层，阴影克制细腻） -->
+          <BoxShadows x:Key="CardShadow">0 1 2 0 #0D1D1B20, 0 2 6 1 #081D1B20</BoxShadows>
+          <BoxShadows x:Key="CardHoverShadow">0 2 6 0 #141D1B20, 0 6 14 1 #0D1D1B20</BoxShadows>
+          <BoxShadows x:Key="PrimaryButtonShadow">0 1 3 0 #246750A4</BoxShadows>
         </ResourceDictionary>
+
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="CanvasBrush" Color="#16141C" />
-          <SolidColorBrush x:Key="SurfaceBrush" Color="#1D1B25" />
-          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#22202B" />
-          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2C2936" />
-          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#302C3D" />
-          <SolidColorBrush x:Key="InkBrush" Color="#EDF2F3" />
-          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#ADB7BC" />
-          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#7F8B91" />
-          <SolidColorBrush x:Key="LineBrush" Color="#373342" />
-          <SolidColorBrush x:Key="LineStrongBrush" Color="#494357" />
+          <!-- Google Material Design 3 暗色五级 Tonal Surface 色阶 -->
+          <SolidColorBrush x:Key="SurfaceContainerLowestBrush" Color="#0F0D13" />
+          <SolidColorBrush x:Key="SurfaceContainerLowBrush" Color="#1D1B20" />
+          <SolidColorBrush x:Key="SurfaceContainerBrush" Color="#211F26" />
+          <SolidColorBrush x:Key="SurfaceContainerHighBrush" Color="#2B2930" />
+          <SolidColorBrush x:Key="SurfaceContainerHighestBrush" Color="#36343B" />
+
+          <SolidColorBrush x:Key="CanvasBrush" Color="#141218" />
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#1D1B20" />
+          <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#25232A" />
+          <SolidColorBrush x:Key="SurfaceSoftBrush" Color="#211F26" />
+          <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2B2930" />
+          <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#322F3A" />
+
+          <SolidColorBrush x:Key="InkBrush" Color="#E6E0E9" />
+          <SolidColorBrush x:Key="InkSecondaryBrush" Color="#CAC4D0" />
+          <SolidColorBrush x:Key="InkTertiaryBrush" Color="#938F99" />
+
+          <SolidColorBrush x:Key="OutlineSubtleBrush" Color="#33303B" />
+          <SolidColorBrush x:Key="LineBrush" Color="#403C49" />
+          <SolidColorBrush x:Key="LineStrongBrush" Color="#565161" />
+
           <SolidColorBrush x:Key="RailBrush" Color="#0E1113" />
           <SolidColorBrush x:Key="RailHoverBrush" Color="#202629" />
           <SolidColorBrush x:Key="RailInkBrush" Color="#E0ECE8" />
           <SolidColorBrush x:Key="RailMutedBrush" Color="#879794" />
-          <SolidColorBrush x:Key="AccentBrush" Color="#B8A5EC" />
-          <SolidColorBrush x:Key="AccentHoverBrush" Color="#C7B7F2" />
-          <SolidColorBrush x:Key="AccentPressedBrush" Color="#9D88DC" />
-          <SolidColorBrush x:Key="AccentSoftBrush" Color="#302A42" />
-          <SolidColorBrush x:Key="AccentLineBrush" Color="#514667" />
-          <SolidColorBrush x:Key="BlueSoftBrush" Color="#1B2932" />
-          <SolidColorBrush x:Key="BlueInkBrush" Color="#9CC6E0" />
-          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#292438" />
-          <SolidColorBrush x:Key="PurpleInkBrush" Color="#C2B7DD" />
-          <SolidColorBrush x:Key="AmberSoftBrush" Color="#332918" />
-          <SolidColorBrush x:Key="AmberInkBrush" Color="#E6C179" />
-          <SolidColorBrush x:Key="RedSoftBrush" Color="#351F1D" />
-          <SolidColorBrush x:Key="RedInkBrush" Color="#E5A29A" />
+
+          <!-- 正宗 MD3 暗色 Primary (#D0BCFF) + OnPrimary (#381E72) 达到 WCAG AAA 对比度 -->
+          <SolidColorBrush x:Key="AccentBrush" Color="#D0BCFF" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#DFD1FF" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#BFA7FA" />
+          <SolidColorBrush x:Key="AccentFillBrush" Color="#D0BCFF" />
+          <SolidColorBrush x:Key="AccentFillHoverBrush" Color="#DECFFF" />
+          <SolidColorBrush x:Key="AccentFillPressedBrush" Color="#BBA3F7" />
+          <SolidColorBrush x:Key="AccentOnFillBrush" Color="#381E72" />
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#4F378B" />
+          <SolidColorBrush x:Key="AccentLineBrush" Color="#6F57AC" />
+
+          <SolidColorBrush x:Key="TonalFillBrush" Color="#4A4458" />
+          <SolidColorBrush x:Key="TonalFillHoverBrush" Color="#575068" />
+          <SolidColorBrush x:Key="TonalFillPressedBrush" Color="#3F394C" />
+          <SolidColorBrush x:Key="OnTonalFillBrush" Color="#E8DEF8" />
+
+          <SolidColorBrush x:Key="BlueSoftBrush" Color="#182938" />
+          <SolidColorBrush x:Key="BlueInkBrush" Color="#9ACBF0" />
+          <SolidColorBrush x:Key="BlueLineBrush" Color="#2B4963" />
+
+          <SolidColorBrush x:Key="PurpleSoftBrush" Color="#2E2642" />
+          <SolidColorBrush x:Key="PurpleInkBrush" Color="#D3C4F7" />
+          <SolidColorBrush x:Key="PurpleLineBrush" Color="#4F4270" />
+
+          <SolidColorBrush x:Key="EmeraldSoftBrush" Color="#162E24" />
+          <SolidColorBrush x:Key="EmeraldInkBrush" Color="#7AE0B0" />
+          <SolidColorBrush x:Key="EmeraldLineBrush" Color="#265441" />
+
+          <SolidColorBrush x:Key="AmberSoftBrush" Color="#362914" />
+          <SolidColorBrush x:Key="AmberInkBrush" Color="#F2CA7B" />
+          <SolidColorBrush x:Key="AmberLineBrush" Color="#5F4821" />
+
+          <SolidColorBrush x:Key="RedSoftBrush" Color="#4A1D1F" />
+          <SolidColorBrush x:Key="RedHoverBrush" Color="#5C2528" />
+          <SolidColorBrush x:Key="RedInkBrush" Color="#F9DEDC" />
+          <SolidColorBrush x:Key="RedLineBrush" Color="#7B3538" />
+
           <SolidColorBrush x:Key="CodeBrush" Color="#0B0E10" />
+
+          <BoxShadows x:Key="CardShadow">0 1 3 0 #35000000</BoxShadows>
+          <BoxShadows x:Key="CardHoverShadow">0 4 12 0 #55000000</BoxShadows>
+          <BoxShadows x:Key="PrimaryButtonShadow">0 2 6 0 #45000000</BoxShadows>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

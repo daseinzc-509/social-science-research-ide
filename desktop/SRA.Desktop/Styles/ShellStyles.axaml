@@ -1,50 +1,52 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-  <!-- One unified, theme-aware application title bar. -->
+  <!-- MD3 Top App Bar：使用 SurfaceContainerLow 与画布柔顺衔接 -->
   <Style Selector="Border.unified-titlebar">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}"/>
     <Setter Property="BorderThickness" Value="0,0,0,1"/>
   </Style>
+  <!-- MD3 Navigation Active Pill -->
   <Style Selector="Button.chrome-nav">
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}"/>
     <Setter Property="BorderThickness" Value="0"/>
-    <Setter Property="CornerRadius" Value="9"/>
-    <Setter Property="Padding" Value="14,8"/>
+    <Setter Property="CornerRadius" Value="20"/>
+    <Setter Property="Padding" Value="15,7"/>
     <Setter Property="Height" Value="36"/>
     <Setter Property="MinHeight" Value="36"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="HorizontalContentAlignment" Value="Center"/>
-    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="FontSize" Value="12.5"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
   <Style Selector="Button.chrome-nav:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/>
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}"/>
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
   </Style>
   <Style Selector="Button.chrome-nav.selected">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
-    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}"/>
   </Style>
   <Style Selector="Button.chrome-nav.selected:pointerover">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+    <Setter Property="Background" Value="{DynamicResource TonalFillHoverBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}"/>
   </Style>
   <Style Selector="Button.focus-toggle">
-    <Setter Property="FontSize" Value="11"/>
-    <Setter Property="MinHeight" Value="32"/>
-    <Setter Property="Padding" Value="10,6"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="Padding" Value="13,6"/>
   </Style>
   <Style Selector="Button.chrome-import">
-    <Setter Property="MinHeight" Value="31"/>
-    <Setter Property="Padding" Value="12,5"/>
-    <Setter Property="FontSize" Value="10"/>
-    <Setter Property="CornerRadius" Value="8"/>
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="Padding" Value="16,6"/>
+    <Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="CornerRadius" Value="20"/>
   </Style>
   <Style Selector="Button.window-caption">
-    <Setter Property="Width" Value="43"/>
-    <Setter Property="MinWidth" Value="43"/>
+    <Setter Property="Width" Value="44"/>
+    <Setter Property="MinWidth" Value="44"/>
     <Setter Property="Height" Value="54"/>
     <Setter Property="MinHeight" Value="54"/>
     <Setter Property="Padding" Value="0"/>
@@ -57,7 +59,7 @@
     <Setter Property="FontWeight" Value="Normal"/>
   </Style>
   <Style Selector="Button.window-caption:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/>
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}"/>
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
   </Style>
   <Style Selector="Button.window-caption.close:pointerover">
@@ -79,14 +81,15 @@
   </Style>
 
   <Style Selector="Border.statusbar">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
 
+  <!-- MD3 Navigation Drawer / 文献库侧栏 -->
   <Style Selector="Border.sidebar-pane">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="0,0,1,0" />
   </Style>
 
@@ -95,53 +98,54 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="11,8" />
-    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="14,8" />
+    <Setter Property="MinHeight" Value="36" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontSize" Value="12.5" />
   </Style>
   <Style Selector="Button.sidebar-nav:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
   </Style>
   <Style Selector="Button.sidebar-nav.selected">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
   </Style>
   <Style Selector="Button.sidebar-nav.selected:pointerover">
-    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+    <Setter Property="Background" Value="{DynamicResource TonalFillHoverBrush}" />
   </Style>
 
   <Style Selector="Border.workspace-header">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
-    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Background" Value="{DynamicResource CanvasBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
+  <!-- MD3 NotebookLM 标志性的 20px 大圆角主阅读画布卡片 -->
   <Style Selector="Border.workspace-surface">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
   </Style>
   <Style Selector="Border.page-header">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style Selector="Border.settings-card">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
   </Style>
   <Style Selector="Border.metric-card">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="16" />
   </Style>
   <Style Selector="TabControl.paper-tabs">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 </Styles>

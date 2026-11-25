@@ -91,18 +91,25 @@ public sealed class StructuredTableView : UserControl
             {
                 Text = cell.Text,
                 TextWrapping = TextWrapping.Wrap,
-                FontSize = 11,
+                FontSize = 12,
+                LineHeight = 19,
                 FontWeight = cell.IsHeader ? FontWeight.SemiBold : FontWeight.Normal,
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            text.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("InkBrush"));
+
+            var bgKey = cell.IsHeader
+                ? "SurfaceMutedBrush"
+                : (cell.Row % 2 == 1 ? "SurfaceSoftBrush" : "SurfaceBrush");
             var border = new Border
             {
-                BorderThickness = new Thickness(0.5),
-                BorderBrush = Brushes.Gray,
-                Padding = new Thickness(9, 8),
-                MinHeight = 40,
+                BorderThickness = new Thickness(0, 0, 1, 1),
+                Padding = new Thickness(11, 9),
+                MinHeight = 38,
                 Child = text,
             };
+            border.Bind(Border.BorderBrushProperty, this.GetResourceObservable("LineBrush"));
+            border.Bind(Border.BackgroundProperty, this.GetResourceObservable(bgKey));
             Grid.SetRow(border, cell.Row);
             Grid.SetColumn(border, cell.Column);
             Grid.SetRowSpan(border, cell.RowSpan);
@@ -110,6 +117,14 @@ public sealed class StructuredTableView : UserControl
             grid.Children.Add(border);
         }
 
-        _scrollViewer.Content = grid;
+        var frame = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1, 1, 0, 0),
+            ClipToBounds = true,
+            Child = grid,
+        };
+        frame.Bind(Border.BorderBrushProperty, this.GetResourceObservable("LineBrush"));
+        _scrollViewer.Content = frame;
     }
 }
