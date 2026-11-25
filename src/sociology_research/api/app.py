@@ -11,6 +11,7 @@ from ..analyzer import PaperAnalysisError
 from ..llm_client import ModelRequestError
 from ..repository import ResearchRepository
 from ..services import ApplicationServices, create_application_services
+from ..services.project_synthesis import ProjectSynthesisServiceError
 from .routes import analysis, health, imports, jobs, paper_tools, papers, projects, settings, workspace
 from .routes import region_review
 from .routes import visual
@@ -72,5 +73,9 @@ def create_app(
     @app.exception_handler(ModelRequestError)
     async def handle_model_error(request: Request, exc: ModelRequestError):  # noqa: ARG001
         return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+    @app.exception_handler(ProjectSynthesisServiceError)
+    async def handle_project_synthesis_error(request: Request, exc: ProjectSynthesisServiceError):  # noqa: ARG001
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     return app

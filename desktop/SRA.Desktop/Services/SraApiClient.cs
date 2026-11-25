@@ -27,7 +27,7 @@ public sealed class SraApiClient : IDisposable
         _http = new HttpClient
         {
             BaseAddress = BaseUri,
-            Timeout = TimeSpan.FromMinutes(2),
+            Timeout = TimeSpan.FromMinutes(6),
         };
         if (!string.IsNullOrEmpty(desktopSessionToken))
             _http.DefaultRequestHeaders.Add("X-SRA-Desktop-Token", desktopSessionToken);
@@ -254,6 +254,86 @@ public sealed class SraApiClient : IDisposable
     {
         using var response = await _http.DeleteAsync(
             $"api/v1/projects/{Uri.EscapeDataString(projectId)}/notes/{Uri.EscapeDataString(noteId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> PreviewProjectSynthesisAsync(
+        string projectId,
+        bool includeUnreviewed = true,
+        bool includeProjectNotes = true,
+        string focusInstruction = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/synthesis/preview",
+            new
+            {
+                include_unreviewed = includeUnreviewed,
+                include_project_notes = includeProjectNotes,
+                focus_instruction = focusInstruction ?? "",
+            },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> RunProjectSynthesisAsync(
+        string projectId,
+        string expectedSnapshotDigest,
+        bool approveExternalSend,
+        bool acknowledgeApiCost,
+        bool includeUnreviewed = true,
+        bool includeProjectNotes = true,
+        string focusInstruction = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/synthesis/run",
+            new
+            {
+                expected_snapshot_digest = expectedSnapshotDigest,
+                approve_external_send = approveExternalSend,
+                acknowledge_api_cost = acknowledgeApiCost,
+                include_unreviewed = includeUnreviewed,
+                include_project_notes = includeProjectNotes,
+                focus_instruction = focusInstruction ?? "",
+            },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public Task<JsonElement> ListProjectSynthesesAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/syntheses",
+            cancellationToken);
+
+    public Task<JsonElement> GetProjectSynthesisAsync(
+        string projectId,
+        string synthesisId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/syntheses/{Uri.EscapeDataString(synthesisId)}",
+            cancellationToken);
+
+    public Task<string> GetProjectSynthesisMarkdownAsync(
+        string projectId,
+        string synthesisId,
+        CancellationToken cancellationToken = default) =>
+        GetTextAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/syntheses/{Uri.EscapeDataString(synthesisId)}/report.md",
+            cancellationToken);
+
+    public async Task<JsonElement> DeleteProjectSynthesisAsync(
+        string projectId,
+        string synthesisId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/syntheses/{Uri.EscapeDataString(synthesisId)}",
             cancellationToken);
         return await ReadJsonAsync<JsonElement>(response, cancellationToken);
     }

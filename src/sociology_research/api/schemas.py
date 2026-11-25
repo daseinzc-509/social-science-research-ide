@@ -411,6 +411,84 @@ class ProjectNoteDeleteResponse(BaseModel):
     deleted: bool = True
 
 
+class ProjectSynthesisPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    include_unreviewed: bool = True
+    include_project_notes: bool = True
+    focus_instruction: str = Field(default="", max_length=600)
+
+
+class ProjectSynthesisRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_snapshot_digest: str = Field(min_length=16, max_length=128)
+    approve_external_send: bool = False
+    acknowledge_api_cost: bool = False
+    include_unreviewed: bool = True
+    include_project_notes: bool = True
+    focus_instruction: str = Field(default="", max_length=600)
+
+
+class ProjectSynthesisPreviewResponse(BaseModel):
+    project_id: str
+    project_name: str
+    snapshot_digest: str
+    pro_model: str
+    provider: str
+    include_unreviewed: bool
+    include_project_notes: bool
+    focus_instruction: str = ""
+    included_paper_count: int = 0
+    included_claim_count: int = 0
+    confirmed_claim_count: int = 0
+    corrected_claim_count: int = 0
+    rejected_claim_count: int = 0
+    skipped_unreviewed_count: int = 0
+    project_note_count: int = 0
+    approximate_input_chars: int = 0
+    maximum_output_tokens: int = 4096
+    outbound_payload: str = ""
+    will_send_to_external_api: bool = True
+    requires_explicit_consent: bool = True
+    only_one_pro_request: bool = True
+    modifies_original_cards: bool = False
+    note: str = ""
+
+
+class ProjectSynthesisSummaryView(BaseModel):
+    id: str
+    project_id: str
+    snapshot_digest: str
+    model: str
+    prompt_version: str
+    include_unreviewed: bool = True
+    focus_instruction: str = ""
+    included_paper_count: int = 0
+    included_claim_count: int = 0
+    confirmed_claim_count: int = 0
+    corrected_claim_count: int = 0
+    rejected_claim_count: int = 0
+    created_at: str
+
+
+class ProjectSynthesisListResponse(BaseModel):
+    syntheses: list[ProjectSynthesisSummaryView] = Field(default_factory=list)
+
+
+class ProjectSynthesisDetailResponse(ProjectSynthesisSummaryView):
+    provenance: str = "AI_INFERRED_SYNTHESIS"
+    original_cards_unchanged: bool = True
+    synthesis: dict[str, Any] = Field(default_factory=dict)
+    markdown: str = ""
+
+
+class ProjectSynthesisDeleteResponse(BaseModel):
+    project_id: str
+    synthesis_id: str
+    deleted: bool = True
+
+
 class ProjectDetailResponse(BaseModel):
     project: ProjectSummaryView
     papers: list[ProjectPaperItemView] = Field(default_factory=list)

@@ -22,6 +22,12 @@ from ..schemas import (
     ProjectPaperUpsertRequest,
     ProjectPaperRemoveResponse,
     ProjectSummaryView,
+    ProjectSynthesisDeleteResponse,
+    ProjectSynthesisDetailResponse,
+    ProjectSynthesisListResponse,
+    ProjectSynthesisPreviewRequest,
+    ProjectSynthesisPreviewResponse,
+    ProjectSynthesisRunRequest,
     ProjectUpdateRequest,
 )
 
@@ -174,3 +180,71 @@ def delete_project_note(
     services: ApplicationServices = Depends(get_services),
 ):
     return services.projects.delete_project_note(project_id, note_id)
+
+
+@router.post("/{project_id}/synthesis/preview", response_model=ProjectSynthesisPreviewResponse)
+def preview_project_synthesis(
+    project_id: str,
+    payload: ProjectSynthesisPreviewRequest | None = None,
+    services: ApplicationServices = Depends(get_services),
+):
+    req = payload or ProjectSynthesisPreviewRequest()
+    return services.project_synthesis.preview_synthesis(
+        project_id,
+        include_unreviewed=req.include_unreviewed,
+        include_project_notes=req.include_project_notes,
+        focus_instruction=req.focus_instruction,
+    )
+
+
+@router.post("/{project_id}/synthesis/run", response_model=ProjectSynthesisDetailResponse, status_code=201)
+def run_project_synthesis(
+    project_id: str,
+    payload: ProjectSynthesisRunRequest,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.project_synthesis.run_synthesis(
+        project_id,
+        expected_snapshot_digest=payload.expected_snapshot_digest,
+        approve_external_send=payload.approve_external_send,
+        acknowledge_api_cost=payload.acknowledge_api_cost,
+        include_unreviewed=payload.include_unreviewed,
+        include_project_notes=payload.include_project_notes,
+        focus_instruction=payload.focus_instruction,
+    )
+
+
+@router.get("/{project_id}/syntheses", response_model=ProjectSynthesisListResponse)
+def list_project_syntheses(
+    project_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return {"syntheses": services.project_synthesis.list_syntheses(project_id)}
+
+
+@router.get("/{project_id}/syntheses/{synthesis_id}", response_model=ProjectSynthesisDetailResponse)
+def get_project_synthesis(
+    project_id: str,
+    synthesis_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.project_synthesis.get_synthesis(project_id, synthesis_id)
+
+
+@router.get("/{project_id}/syntheses/{synthesis_id}/report.md", response_class=PlainTextResponse)
+def export_project_synthesis_markdown(
+    project_id: str,
+    synthesis_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    detail = services.project_synthesis.get_synthesis(project_id, synthesis_id)
+    return PlainTextResponse(detail["markdown"], media_type="text/markdown; charset=utf-8")
+
+
+@router.delete("/{project_id}/syntheses/{synthesis_id}", response_model=ProjectSynthesisDeleteResponse)
+def delete_project_synthesis(
+    project_id: str,
+    synthesis_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.project_synthesis.delete_synthesis(project_id, synthesis_id)

@@ -154,6 +154,7 @@
                         <Button.ContextMenu>
                           <ContextMenu>
                             <MenuItem Header="打开专题证据矩阵" Tag="{Binding}" Click="ContextOpenProjectMatrix_Click" />
+                            <MenuItem Header="多文献综合（共识 / 冲突 / 缺口）" Tag="{Binding}" Click="ContextOpenProjectSynthesis_Click" />
                             <MenuItem Header="向此专题添加论文…" Tag="{Binding}" Click="ContextAddPapersToProject_Click" />
                             <MenuItem Header="编辑专题信息" Tag="{Binding}" Click="ContextEditProject_Click" />
                             <MenuItem Header="导出证据矩阵 (Markdown)" Tag="{Binding}" Click="ContextExportProjectMatrix_Click" />
@@ -405,6 +406,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="2">
                   <Button Content="单篇精读" Classes="mode-pill" Classes.active="{Binding ShowSinglePaperView}" Click="SwitchToSingleView_Click" />
                   <Button Content="专题证据矩阵" Classes="mode-pill" Classes.active="{Binding ShowProjectMatrixView}" Click="SwitchToMatrixView_Click" />
+                  <Button Content="多文献综合" Classes="mode-pill" Classes.active="{Binding ShowProjectSynthesisView}" Click="SwitchToSynthesisView_Click" />
                   <Button Content="全文检索" Classes="mode-pill" Classes.active="{Binding ShowSearchPanelView}" Click="OpenFullTextSearch_Click" />
                 </StackPanel>
               </Border>
@@ -1447,6 +1449,265 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+
+          <!-- D. 基于已审定证据矩阵的多文献综合工作区（Consensus / Conflict / Methodological Divergence / Gaps） -->
+          <Border Classes="workspace-surface" Margin="12,12,12,14" IsVisible="{Binding ShowProjectSynthesisView}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="28,24,28,52" Spacing="18" MaxWidth="1020" HorizontalAlignment="Center">
+                <!-- 顶部控制卡：参数选项、显式预览触发与历史快照切换 -->
+                <Border Classes="card" Padding="20,18">
+                  <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                      <StackPanel Spacing="4">
+                        <WrapPanel ItemSpacing="8" VerticalAlignment="Center">
+                          <Border Background="{DynamicResource PurpleSoftBrush}" BorderBrush="{DynamicResource PurpleLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                            <TextBlock Text="AI_INFERRED_SYNTHESIS" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" LetterSpacing="0.4" />
+                          </Border>
+                          <TextBlock Text="基于已审定证据矩阵的多文献综合" Classes="section-title" VerticalAlignment="Center" />
+                        </WrapPanel>
+                        <TextBlock Text="优先采纳你的「人工修正（HUMAN_REVIEWED）」表述，自动剔除已标为「存疑驳回」的主张；外发前必经透明预检与双重确认，所有结论强制溯源至原论文 PDF 页码，以不可变快照独立归档。"
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="19" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="预览并发起跨文献综合" Classes="primary"
+                              VerticalAlignment="Top" IsEnabled="{Binding !IsRunningSynthesis}"
+                              Click="PreviewAndRunSynthesis_Click" />
+                    </Grid>
+
+                    <!-- 可选参数：严格模式 / 附带专题笔记 / 聚焦指令 -->
+                    <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="16" VerticalAlignment="Center">
+                      <CheckBox Grid.Column="0" Content="仅纳入已人工确认 / 修正主张（严格模式）"
+                                IsChecked="{Binding SynthesisOnlyReviewed, Mode=TwoWay}" FontSize="12" />
+                      <CheckBox Grid.Column="1" Content="附带专题研究笔记"
+                                IsChecked="{Binding SynthesisIncludeProjectNotes, Mode=TwoWay}" FontSize="12" />
+                      <TextBox Grid.Column="2" Text="{Binding SynthesisFocusInstruction, Mode=TwoWay}"
+                               PlaceholderText="可选：聚焦比较维度（如「重点比较城乡样本与因果识别策略分歧」）" />
+                    </Grid>
+
+                    <!-- 执行中进度条与状态反馈 -->
+                    <StackPanel Spacing="6" IsVisible="{Binding IsRunningSynthesis}">
+                      <ProgressBar IsIndeterminate="True" Height="4" />
+                    </StackPanel>
+                    <Border IsVisible="{Binding HasSynthesisStatusMessage}" Classes="tonal-card" Padding="12,8">
+                      <TextBlock Text="{Binding SynthesisStatusMessage}" FontSize="12" TextWrapping="Wrap" />
+                    </Border>
+
+                    <!-- 历史不可变快照切换 + 导出 / 删除 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding HasSynthesisHistory}">
+                      <TextBlock Grid.Column="0" Text="历史综合快照" Classes="eyebrow" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="1" ItemsSource="{Binding ProjectSyntheses}"
+                                SelectedItem="{Binding SelectedSynthesisSummary, Mode=TwoWay}"
+                                HorizontalAlignment="Stretch" />
+                      <Button Grid.Column="2" Content="导出报告 (MD)" Classes="secondary compact"
+                              IsEnabled="{Binding HasActiveSynthesis}" Click="ExportActiveSynthesisMarkdown_Click" />
+                      <Button Grid.Column="3" Content="删除快照" Classes="ghost compact"
+                              IsEnabled="{Binding HasActiveSynthesis}" Click="DeleteActiveSynthesis_Click" />
+                    </Grid>
+                  </StackPanel>
+                </Border>
+
+                <!-- 空态引导 -->
+                <Border Classes="soft-card" Padding="36,28" IsVisible="{Binding HasNoActiveSynthesis}">
+                  <StackPanel Spacing="10" HorizontalAlignment="Center" MaxWidth="540">
+                    <TextBlock Text="当前专题尚未生成跨文献综合快照" Classes="h2" HorizontalAlignment="Center" />
+                    <TextBlock Text="确保本专题至少包含 2 篇已生成 Paper Card 的论文；建议先在精读页对关键发现完成「✓ 确认 / ✎ 修正 / ✕ 存疑驳回」，然后点击右上角「预览并发起跨文献综合」。"
+                               Classes="muted" FontSize="12.5" TextAlignment="Center" TextWrapping="Wrap" LineHeight="21" />
+                    <Button Content="预览并发起跨文献综合" Classes="primary" HorizontalAlignment="Center"
+                            Click="PreviewAndRunSynthesis_Click" />
+                  </StackPanel>
+                </Border>
+
+                <!-- 活跃综合快照：总体图景 + 四维可溯源卡片流 -->
+                <StackPanel Spacing="20" IsVisible="{Binding HasActiveSynthesis}">
+                  <Border Classes="reading-lead" Padding="22,18">
+                    <StackPanel Spacing="8">
+                      <WrapPanel ItemSpacing="8" VerticalAlignment="Center">
+                        <TextBlock Text="总体研究图景" Classes="section-title" VerticalAlignment="Center" />
+                        <Border Classes="badge" Padding="8,2">
+                          <TextBlock Text="{Binding ActiveSynthesisAuditStats}" Classes="muted" FontSize="10.5" FontWeight="Medium" />
+                        </Border>
+                      </WrapPanel>
+                      <TextBlock Text="{Binding ActiveSynthesisExecutiveSummary}" FontSize="14" LineHeight="24" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Border>
+
+                  <!-- 1. 研究共识 -->
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSynthesisConsensus}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="一、研究共识（Consensus）" Classes="section-title" />
+                      <Border Classes="badge-count"><TextBlock Text="{Binding SynthesisConsensusCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" /></Border>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding SynthesisConsensus}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SynthesisPointItem">
+                          <Border Classes="claim-card" Margin="0,0,0,10" ClipToBounds="True">
+                            <Grid ColumnDefinitions="4,*">
+                              <Border Grid.Column="0" Background="{DynamicResource EmeraldInkBrush}" />
+                              <StackPanel Grid.Column="1" Margin="18,14,18,15" Spacing="9">
+                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Summary}" FontSize="13.5" LineHeight="22" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding SupportingClaims}" IsVisible="{Binding HasSupportingClaims}">
+                                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:SynthesisClaimCitationItem">
+                                      <Button Content="{Binding ChipLabel}" Classes="tonal compact" MinHeight="24" Padding="9,2" FontSize="11"
+                                              Tag="{Binding}" Click="SynthesisCitationJump_Click" ToolTip.Tip="{Binding TooltipText}">
+                                        <Button.ContextMenu>
+                                          <ContextMenu>
+                                            <MenuItem Header="定位 PDF 原页高亮" IsVisible="{Binding HasPageNumber}" Tag="{Binding}" Click="SynthesisCitationJump_Click" />
+                                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SynthesisCitationOpenPaper_Click" />
+                                          </ContextMenu>
+                                        </Button.ContextMenu>
+                                      </Button>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- 2. 核心分歧、冲突与限定条件 -->
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSynthesisConflicts}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="二、核心分歧、冲突与限定条件（Conflicts &amp; Scope Conditions）" Classes="section-title" />
+                      <Border Classes="badge-count"><TextBlock Text="{Binding SynthesisConflictsCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" /></Border>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding SynthesisConflicts}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SynthesisPointItem">
+                          <Border Classes="claim-card" Margin="0,0,0,10" ClipToBounds="True">
+                            <Grid ColumnDefinitions="4,*">
+                              <Border Grid.Column="0" Background="{DynamicResource RedInkBrush}" />
+                              <StackPanel Grid.Column="1" Margin="18,14,18,15" Spacing="9">
+                                <WrapPanel ItemSpacing="8" LineSpacing="4" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                  <Border IsVisible="{Binding HasDivergenceAxis}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                    <TextBlock Text="{Binding DivergenceAxis, StringFormat='分歧维度：{0}'}" Foreground="{DynamicResource AmberInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+                                  </Border>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding Summary}" FontSize="13.5" LineHeight="22" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding SupportingClaims}" IsVisible="{Binding HasSupportingClaims}">
+                                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:SynthesisClaimCitationItem">
+                                      <Button Content="{Binding ChipLabel}" Classes="tonal compact" MinHeight="24" Padding="9,2" FontSize="11"
+                                              Tag="{Binding}" Click="SynthesisCitationJump_Click" ToolTip.Tip="{Binding TooltipText}">
+                                        <Button.ContextMenu>
+                                          <ContextMenu>
+                                            <MenuItem Header="定位 PDF 原页高亮" IsVisible="{Binding HasPageNumber}" Tag="{Binding}" Click="SynthesisCitationJump_Click" />
+                                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SynthesisCitationOpenPaper_Click" />
+                                          </ContextMenu>
+                                        </Button.ContextMenu>
+                                      </Button>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- 3. 方法论谱系与识别策略对比 -->
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSynthesisMethodDifferences}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="三、方法论谱系与识别策略对比（Methodological Divergence）" Classes="section-title" />
+                      <Border Classes="badge-count"><TextBlock Text="{Binding SynthesisMethodDifferencesCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" /></Border>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding SynthesisMethodDifferences}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SynthesisPointItem">
+                          <Border Classes="claim-card" Margin="0,0,0,10" ClipToBounds="True">
+                            <Grid ColumnDefinitions="4,*">
+                              <Border Grid.Column="0" Background="{DynamicResource BlueInkBrush}" />
+                              <StackPanel Grid.Column="1" Margin="18,14,18,15" Spacing="9">
+                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Summary}" FontSize="13.5" LineHeight="22" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding SupportingClaims}" IsVisible="{Binding HasSupportingClaims}">
+                                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:SynthesisClaimCitationItem">
+                                      <Button Content="{Binding ChipLabel}" Classes="tonal compact" MinHeight="24" Padding="9,2" FontSize="11"
+                                              Tag="{Binding}" Click="SynthesisCitationJump_Click" ToolTip.Tip="{Binding TooltipText}">
+                                        <Button.ContextMenu>
+                                          <ContextMenu>
+                                            <MenuItem Header="定位 PDF 原页高亮" IsVisible="{Binding HasPageNumber}" Tag="{Binding}" Click="SynthesisCitationJump_Click" />
+                                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SynthesisCitationOpenPaper_Click" />
+                                          </ContextMenu>
+                                        </Button.ContextMenu>
+                                      </Button>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- 4. 研究缺口与潜在 Puzzle -->
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSynthesisResearchGaps}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="四、研究缺口与潜在 Puzzle（Research Gaps）" Classes="section-title" />
+                      <Border Classes="badge-count"><TextBlock Text="{Binding SynthesisResearchGapsCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" /></Border>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding SynthesisResearchGaps}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SynthesisPointItem">
+                          <Border Classes="claim-card" Margin="0,0,0,10" ClipToBounds="True">
+                            <Grid ColumnDefinitions="4,*">
+                              <Border Grid.Column="0" Background="{DynamicResource PurpleInkBrush}" />
+                              <StackPanel Grid.Column="1" Margin="18,14,18,15" Spacing="9">
+                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Summary}" FontSize="13.5" LineHeight="22" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding SupportingClaims}" IsVisible="{Binding HasSupportingClaims}">
+                                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:SynthesisClaimCitationItem">
+                                      <Button Content="{Binding ChipLabel}" Classes="tonal compact" MinHeight="24" Padding="9,2" FontSize="11"
+                                              Tag="{Binding}" Click="SynthesisCitationJump_Click" ToolTip.Tip="{Binding TooltipText}">
+                                        <Button.ContextMenu>
+                                          <ContextMenu>
+                                            <MenuItem Header="定位 PDF 原页高亮" IsVisible="{Binding HasPageNumber}" Tag="{Binding}" Click="SynthesisCitationJump_Click" />
+                                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SynthesisCitationOpenPaper_Click" />
+                                          </ContextMenu>
+                                        </Button.ContextMenu>
+                                      </Button>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- 5. 局限与待核查边界 -->
+                  <Border Classes="soft-card" Padding="18,14" IsVisible="{Binding HasSynthesisLimitations}">
+                    <StackPanel Spacing="8">
+                      <TextBlock Text="五、本次综合局限与待核查边界" FontWeight="SemiBold" FontSize="14" />
+                      <ItemsControl ItemsSource="{Binding SynthesisLimitations}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:CompileBindings="False">
+                            <TextBlock Text="{Binding StringFormat='• {0}'}" Classes="muted" FontSize="12.5" LineHeight="20" TextWrapping="Wrap" Margin="0,0,0,4" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
               </StackPanel>
             </ScrollViewer>
           </Border>

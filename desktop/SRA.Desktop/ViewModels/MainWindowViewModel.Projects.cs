@@ -36,8 +36,8 @@ public partial class MainWindowViewModel
     public bool IsFilterAnalyzed => LibraryFilterMode == "analyzed";
     public bool IsFilterPending => LibraryFilterMode == "pending";
     public bool IsProjectScopeActive => ActiveProject is not null && LibraryFilterMode == "project";
-    public bool ShowSinglePaperView => !IsSearchPanelOpen && (!IsProjectScopeActive || !IsMatrixViewMode);
-    public bool ShowProjectMatrixView => !IsSearchPanelOpen && IsProjectScopeActive && IsMatrixViewMode;
+    public bool ShowSinglePaperView => !IsSearchPanelOpen && (!IsProjectScopeActive || (!IsMatrixViewMode && !IsSynthesisViewMode));
+    public bool ShowProjectMatrixView => !IsSearchPanelOpen && IsProjectScopeActive && IsMatrixViewMode && !IsSynthesisViewMode;
 
     public bool HasProjects => Projects.Count > 0;
     public bool HasNoProjects => Projects.Count == 0;
@@ -81,8 +81,10 @@ public partial class MainWindowViewModel
         if (value is null)
         {
             IsMatrixViewMode = false;
+            IsSynthesisViewMode = false;
             MatrixRows.Clear();
             ProjectNotes.Clear();
+            ClearSynthesisState();
             MatrixTotalPapers = 0;
             MatrixAnalyzedPapers = 0;
             _activeProjectEntries.Clear();
@@ -90,6 +92,7 @@ public partial class MainWindowViewModel
         }
         RaiseProjectScopeState();
         RaiseSearchPanelState();
+        RaiseSynthesisState();
     }
 
     partial void OnIsMatrixViewModeChanged(bool value)
@@ -110,6 +113,7 @@ public partial class MainWindowViewModel
         OnPropertyChanged(nameof(IsProjectScopeActive));
         OnPropertyChanged(nameof(ShowSinglePaperView));
         OnPropertyChanged(nameof(ShowProjectMatrixView));
+        OnPropertyChanged(nameof(ShowProjectSynthesisView));
         OnPropertyChanged(nameof(ActiveScopeHeading));
         OnPropertyChanged(nameof(ActiveProjectName));
         OnPropertyChanged(nameof(ActiveProjectQuestion));
@@ -193,6 +197,7 @@ public partial class MainWindowViewModel
     {
         ActiveProject = null;
         IsMatrixViewMode = false;
+        IsSynthesisViewMode = false;
         IsSearchPanelOpen = false;
         LibraryFilterMode = mode is "analyzed" or "pending" ? mode : "all";
         ApplyFilter(SearchText, SelectedPaper?.Id);
@@ -203,9 +208,11 @@ public partial class MainWindowViewModel
         ActiveProject = project;
         LibraryFilterMode = "project";
         IsMatrixViewMode = openMatrix;
+        IsSynthesisViewMode = false;
         IsSearchPanelOpen = false;
         ApplyFilter(SearchText, SelectedPaper?.Id);
         await LoadActiveProjectMatrixAsync(project.Id);
+        await LoadProjectSynthesesAsync(project.Id);
         // 矩阵返回最新成员后再次校准列表，防止其他客户端变更漏同步
         ApplyFilter(SearchText, SelectedPaper?.Id);
     }
@@ -213,6 +220,7 @@ public partial class MainWindowViewModel
     public void SetWorkspaceViewMode(bool matrixMode)
     {
         IsSearchPanelOpen = false;
+        IsSynthesisViewMode = false;
         if (!IsProjectScopeActive)
         {
             IsMatrixViewMode = false;
@@ -395,6 +403,7 @@ public partial class MainWindowViewModel
     {
         IsSearchPanelOpen = false;
         IsMatrixViewMode = false;
+        IsSynthesisViewMode = false;
         var match = Papers.FirstOrDefault(p => p.Id == paperId);
         if (match is null)
         {

@@ -15,6 +15,7 @@ from .jobs import JobService
 from .maintenance import MaintenanceService
 from .model_center import ModelCenterService
 from .papers import PaperService
+from .project_synthesis import ProjectSynthesisService
 from .projects import ProjectService
 from .region_review_service import RegionReviewService
 from .settings import SettingsService
@@ -28,6 +29,7 @@ class ApplicationServices:
     jobs: JobService
     papers: PaperService
     projects: ProjectService
+    project_synthesis: ProjectSynthesisService
     analysis: AnalysisService
     settings: SettingsService
     exports: ExportService
@@ -54,12 +56,14 @@ def create_application_services(
         import_pipeline_factory=import_pipeline_factory,
     )
     projects = ProjectService(repo, papers)
+    project_synthesis = ProjectSynthesisService(repo, projects)
     return ApplicationServices(
         data_dir=resolved_data_dir,
         repository=repo,
         jobs=jobs,
         papers=papers,
         projects=projects,
+        project_synthesis=project_synthesis,
         analysis=AnalysisService(
             repo,
             jobs,

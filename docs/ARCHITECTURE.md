@@ -81,7 +81,7 @@ flowchart TB
 - `PRAGMA busy_timeout = 15000`（15 秒锁等待缓冲）；
 - 关键并发写事务（如复评提交）使用 `BEGIN IMMEDIATE` 避免死锁升级。
 
-### 3.2 数据库表全景（共 16 张表）
+### 3.2 数据库表全景（共 17 张表）
 
 | 表名 | 所属模块 | 职责与核心关系 |
 | --- | --- | --- |
@@ -98,6 +98,7 @@ flowchart TB
 | `research_projects` | `repository.py` | 研究项目实体（名称大小写不敏感唯一、研究问题、说明）。 |
 | `project_papers` | `repository.py` | 项目与论文的多对多关联（阅读状态 `reading_status`、项目备注、排序位）。 |
 | `project_notes` | `repository.py` | 专题级跨文献综合研究笔记（`USER_NOTE`，随专题 Markdown 证据矩阵一并导出）。 |
+| `project_syntheses` | `services/project_synthesis.py` | 基于已审定 Evidence Matrix 的不可变跨文献综合快照（`AI_INFERRED_SYNTHESIS`，经白名单防幻觉校验与快照漂移保护，绝不修改原 `paper_cards`）。 |
 | `search_fts` | `search.py` | **SQLite FTS5 虚拟表**：中英双语混合分词（中文 2-gram + 英文词干/前缀）索引论文正文、PaperCard（含证据引文）、个人笔记（`USER_NOTE`）、人工局部复核与 Claim 人工审定（`HUMAN_REVIEWED`）；支持按专题 `project_id` 与 `source_kind` 过滤。 |
 | `region_reviews` | `services/region_review.py` | 局部 OCR / 人工校订多版本审计记录（含 `revision_no`、源块内容指纹与撤回时间）。 |
 | `review_reanalyses` | `services/region_review_reanalysis.py` | v5 独立 Pro 复评快照（与原 `paper_cards` 隔离对照，记录 `original_card_sha256`）。 |
@@ -112,7 +113,7 @@ flowchart TB
 | --- | --- | --- |
 | `health` | `GET /api/v1/health` | 后端就绪探针。 |
 | `papers` | `GET /papers`, `GET /papers/search`, `GET/DELETE /papers/{id}`, `GET /papers/{id}/pdf`, `GET /papers/{id}/reading-report`, `POST /papers/{id}/reparse` | 文献库管理、FTS5 双语检索、原文流与精读报告。 |
-| `projects` | `GET/POST /projects`, `GET/PUT/DELETE /projects/{id}`, `POST/DELETE /projects/{id}/papers/{paper_id}`, `GET/POST/PUT/DELETE /projects/{id}/notes`, `GET /projects/{id}/evidence-matrix{,.csv,.md}` | 专题聚合、专题研究笔记、零 LLM 确定性 Evidence Matrix 及 Excel CSV / Markdown 导出。 |
+| `projects` | `GET/POST /projects`, `GET/PUT/DELETE /projects/{id}`, `POST/DELETE /projects/{id}/papers/{paper_id}`, `GET/POST/PUT/DELETE /projects/{id}/notes`, `GET /projects/{id}/evidence-matrix{,.csv,.md}`, `POST /projects/{id}/synthesis/{preview,run}`, `GET/DELETE /projects/{id}/syntheses[/{sid}]` | 专题聚合、专题笔记、零 LLM Evidence Matrix（含 CSV/MD 导出）与显式授权跨文献综合。 |
 | `imports` | `POST /import`, `POST /import-batch` | 异步 PDF 导入（返回 `202 JobAccepted`）。 |
 | `analysis` | `POST /{paper_id}/analysis/preview`, `POST /{paper_id}/analyze` | 费用/截断预检与异步 Lite/Pro 分析。 |
 | `jobs` | `GET /jobs`, `GET /jobs/{id}`, **`GET /jobs/{id}/events`（SSE）**, `POST /jobs/{id}/cancel` | 任务状态查询、Server-Sent Events 实时进度流与安全取消。 |
