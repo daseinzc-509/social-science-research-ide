@@ -69,6 +69,7 @@
 
 ### 4.2 样式与主题约束
 - 新增或修改任何桌面控件/弹窗，必须复用 [App.axaml](desktop/SRA.Desktop/App.axaml) 中的 MD3 动态资源令牌（`SurfaceContainer*Brush`、`TonalFillBrush`、`OnTonalFillBrush`、`Ink*Brush`、`OutlineSubtleBrush` 等）及 [ControlStyles.axaml](desktop/SRA.Desktop/Styles/ControlStyles.axaml) 按钮分级（`primary` / `tonal` / `secondary` / `ghost` / `danger`），确保 Light / Dark 主题实时切换无硬编码色块。
+- 桌面端布局、右键菜单与操作归位必须同时遵守 [desktop/SRA.Desktop/AGENTS.md](desktop/SRA.Desktop/AGENTS.md) 中的反“杂物抽屉”、就地操作与专题目录树联动规范。
 
 ### 4.3 Windows PowerShell 注意事项
 - Windows PowerShell 5.1 传 `-c "..."` 给 `python.exe` 会剥离内嵌双引号；执行多行或带引号的 Python 校验脚本时，使用 here-string 管道 `@' ... '@ | & ".\.conda-env\python.exe" -`。

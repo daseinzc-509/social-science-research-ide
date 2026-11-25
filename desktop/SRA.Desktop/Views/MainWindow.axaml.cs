@@ -47,7 +47,7 @@ public partial class MainWindow : Window
 
         bool showLibrary = page == "papers";
         SidebarPane.IsVisible = showLibrary;
-        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 304 : 0);
+        WorkspaceBody.ColumnDefinitions[0].Width = new GridLength(showLibrary ? 312 : 0);
     }
 
     /// <summary>

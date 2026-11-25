@@ -123,6 +123,64 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<ProjectSummaryView>(response, cancellationToken);
     }
 
+    public Task<JsonElement> GetProjectDetailAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}",
+            cancellationToken);
+
+    public async Task<ProjectSummaryView> UpdateProjectAsync(
+        string projectId,
+        string? name = null,
+        string? description = null,
+        string? researchQuestion = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}",
+            new { name, description, research_question = researchQuestion },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<ProjectSummaryView>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeleteProjectAsync(
+        string projectId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> UpsertProjectPaperAsync(
+        string projectId,
+        string paperId,
+        string readingStatus = "queued",
+        string projectNote = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/papers/{Uri.EscapeDataString(paperId)}",
+            new { reading_status = readingStatus, project_note = projectNote },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> RemoveProjectPaperAsync(
+        string projectId,
+        string paperId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/papers/{Uri.EscapeDataString(paperId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
     public Task<JsonElement> GetProjectEvidenceMatrixAsync(
         string projectId,
         CancellationToken cancellationToken = default) =>

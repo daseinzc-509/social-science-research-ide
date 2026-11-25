@@ -27,6 +27,8 @@ public partial class MainWindowViewModel
             var papers = await _api.GetPapersAsync();
             _allPapers.Clear();
             _allPapers.AddRange(papers);
+            RaiseScopeCountLabels();
+            await RefreshProjectsAsync();
             ApplyFilter(SearchText, selectedId);
             ApiStatusText = "API 已连接 · v1";
             StatusText = _allPapers.Count == 0 ? "论文库为空" : $"论文库已刷新：{_allPapers.Count} 篇";
@@ -53,17 +55,35 @@ public partial class MainWindowViewModel
         var papers = await _api.GetPapersAsync();
         _allPapers.Clear();
         _allPapers.AddRange(papers);
+        RaiseScopeCountLabels();
+        await RefreshProjectsAsync();
         ApplyFilter(SearchText, preferredId);
+    }
+
+    private IEnumerable<PaperSummary> FilterByCurrentScope(IEnumerable<PaperSummary> source)
+    {
+        if (IsProjectScopeActive && ActiveProject is { } proj)
+        {
+            var memberIds = GetProjectPaperIds(proj.Id);
+            return source.Where(p => memberIds.Contains(p.Id));
+        }
+        return LibraryFilterMode switch
+        {
+            "analyzed" => source.Where(p => p.HasCard),
+            "pending" => source.Where(p => !p.HasCard),
+            _ => source,
+        };
     }
 
     private void ApplyFilter(string query, string? preferredId = null)
     {
         preferredId ??= SelectedPaper?.Id;
         var term = (query ?? "").Trim();
-        IEnumerable<PaperSummary> filtered = _allPapers;
+        var scoped = FilterByCurrentScope(_allPapers);
+        IEnumerable<PaperSummary> filtered = scoped;
         if (!string.IsNullOrWhiteSpace(term))
         {
-            filtered = _allPapers.Where(paper =>
+            filtered = scoped.Where(paper =>
                 paper.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                 paper.OriginalName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                 paper.Authors.Any(author => author.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
@@ -98,7 +118,8 @@ public partial class MainWindowViewModel
         try
         {
             await Task.Delay(180, cts.Token);
-            var response = await _api.SearchLibraryAsync(term, limit: 120, cancellationToken: cts.Token);
+            var projectId = IsProjectScopeActive ? ActiveProject?.Id : null;
+            var response = await _api.SearchLibraryAsync(term, projectId: projectId, limit: 120, cancellationToken: cts.Token);
             cts.Token.ThrowIfCancellationRequested();
             if (!string.Equals((SearchText ?? "").Trim(), term, StringComparison.Ordinal))
             {
@@ -119,11 +140,11 @@ public partial class MainWindowViewModel
                 return;
             }
 
-            var byId = _allPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
+            var scopedById = FilterByCurrentScope(_allPapers).ToDictionary(p => p.Id, StringComparer.Ordinal);
             var merged = new List<PaperSummary>();
             foreach (var id in orderedIds)
             {
-                if (byId.TryGetValue(id, out var matchedPaper))
+                if (scopedById.TryGetValue(id, out var matchedPaper))
                 {
                     merged.Add(matchedPaper);
                 }
@@ -207,6 +228,8 @@ public partial class MainWindowViewModel
         var papers = await _api.GetPapersAsync();
         _allPapers.Clear();
         _allPapers.AddRange(papers);
+        RaiseScopeCountLabels();
+        await RefreshProjectsAsync();
         ApplyFilter(SearchText, preferredPaperId ?? SelectedPaper?.Id);
         if (SelectedPaper is not null)
         {
@@ -216,11 +239,12 @@ public partial class MainWindowViewModel
 
     private void UpdateLibrarySummary(bool ftsMatched = false)
     {
+        var scopeTotal = FilterByCurrentScope(_allPapers).Count();
         LibrarySummary = string.IsNullOrWhiteSpace(SearchText)
-            ? (_allPapers.Count == 1 ? "1 paper" : $"{_allPapers.Count} papers")
+            ? (scopeTotal == 1 ? "1 篇" : $"{scopeTotal} 篇")
             : (ftsMatched
-                ? $"{Papers.Count} / {_allPapers.Count} papers · 全文"
-                : $"{Papers.Count} / {_allPapers.Count} papers");
+                ? $"{Papers.Count} / {scopeTotal} 篇 · 全文"
+                : $"{Papers.Count} / {scopeTotal} 篇");
         IsLibraryEmpty = Papers.Count == 0;
     }
 

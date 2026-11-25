@@ -181,6 +181,7 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnSelectedPaperChanged(PaperSummary? value)
     {
         RaiseSelectionState();
+        UpdateSelectedPaperProjects();
         _selectionCts?.Cancel();
         _selectionCts?.Dispose();
         _selectionCts = new CancellationTokenSource();

@@ -73,4 +73,83 @@
   <Style Selector="ListBox.library-list ListBoxItem:selected Border.paper-selection-marker">
     <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
   </Style>
+
+  <!-- 左侧目录筛选药丸（全部 / 已分析 / 待分析） -->
+  <Style Selector="Button.scope-chip">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.scope-chip:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighestBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="Button.scope-chip.active">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- 左侧研究专题文件夹节点（NoteExpress 目录树直觉 × MD3 药丸行） -->
+  <Style Selector="Button.topic-node">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.topic-node:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+  </Style>
+  <Style Selector="Button.topic-node.active">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- 专题视图分段切换按钮（单篇精读 | 专题证据矩阵） -->
+  <Style Selector="Button.mode-pill">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="14,5" />
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.mode-pill:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="Button.mode-pill.active">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- 右侧研究画像「所属专题」芯片 -->
+  <Style Selector="Button.topic-chip">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.topic-chip:pointerover">
+    <Setter Property="Background" Value="{DynamicResource TonalFillHoverBrush}" />
+  </Style>
 </Styles>
