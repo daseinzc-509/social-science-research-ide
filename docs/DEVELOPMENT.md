@@ -1,8 +1,8 @@
 # Development Guide / 源码开发指南
 
-> SRA Alpha · Windows x64 / macOS Apple Silicon · 最后更新：2026-10
+> SRA `v0.2.2+` · Windows x64 / macOS Apple Silicon · 最后更新：2026-11
 >
-> 本文说明如何**从源码反复开发和调试**。不需要安装 GitHub Release 的 EXE/DMG，也不需要每次修改后都运行 PyInstaller。
+> 本文说明如何**从源码反复开发和调试**。不需要安装 GitHub Release 的 EXE/DMG，也不需要每次修改后都运行 PyInstaller。开发前请同时阅读根目录 [AGENTS.md](../AGENTS.md) 与 [技术架构文档](ARCHITECTURE.md)。
 
 ## 1. 开发模式与发布模式
 
@@ -41,13 +41,12 @@ git --version
 ```powershell
 cd 'D:\Social Science Research IDE'
 
-# 首次创建 Python 环境
-conda create -p .conda-env --override-channels -c conda-forge python=3.12 pip 'pydantic>=2.7,<3' 'pymupdf>=1.24,<2'
-conda run -p .conda-env python -m pip install --no-build-isolation -e .
-conda run -p .conda-env python -m pip install 'fastapi>=0.115,<1' 'uvicorn>=0.30,<1' 'python-multipart>=0.0.9,<1' 'httpx>=0.27,<1' 'docling>=2.131,<3'
+# 首次创建 Python 环境（纯 Docling 架构，不再安装 PyMuPDF）
+conda create -p .conda-env --override-channels -c conda-forge python=3.12 pip
+conda run -p .conda-env python -m pip install -e ".[api,dev]"
 
 # 首次恢复 C# 依赖
- dotnet restore .\desktop\SRA.Desktop\SRA.Desktop.csproj
+dotnet restore .\desktop\SRA.Desktop\SRA.Desktop.csproj
 ```
 
 如果 `.conda-env` 已经存在，**跳过** `conda create`，不要覆盖当前可用环境。首次需要配置模型时，复制 `.env.example` 为被 Git 忽略的 `.env`，或使用程序设置页；不要提交真实 API Key。
@@ -124,14 +123,17 @@ dotnet run --project desktop/SRA.Desktop/SRA.Desktop.csproj
 ## 6. 运行测试
 
 ```powershell
-# 回归测试（不应调用真实 Lite/Pro 模型）
-conda run -p .conda-env python -m pytest -q tests
+# 全量回归测试（不应调用真实 Lite/Pro 模型，当前 400+ 用例）
+& ".\.conda-env\python.exe" -m pytest -q tests
 
-# 只测 API / 研究引擎相关子集
-conda run -p .conda-env python -m pytest -q tests\test_api_phase1.py tests\test_api_phase2.py tests\test_api_ui_parity.py
+# 只测 API / 架构与桌面契约子集
+& ".\.conda-env\python.exe" -m pytest -q tests\test_api_phase1.py tests\test_api_phase2.py tests\test_desktop_md3_and_ux_contract.py
 
-# 检查桌面编译
-dotnet build .\desktop\SRA.Desktop\SRA.Desktop.csproj
+# Release 编译桌面端（要求 0 警告 0 错误）
+dotnet build .\desktop\SRA.Desktop\SRA.Desktop.csproj -c Release
+
+# 源码隐私安全门禁
+& ".\.conda-env\python.exe" scripts\check_release_safety.py source .
 
 # Git 提交前检查
 git diff --check
@@ -163,4 +165,4 @@ git status --short
 
 **个人 PDF / API Key 是否会提交：** `.env`、`data/` 与个人 PDF 必须保持在 Git 之外。发布前仍应执行隐私扫描；绝不把开发目录整体压缩给其他用户。
 
-相关文档：[架构](ARCHITECTURE.md) · [安全分发](SECURE_DISTRIBUTION.md) · [Windows/macOS 发布](CROSS_PLATFORM_DISTRIBUTION.md)。
+相关文档：[开发与 Agent 规范](../AGENTS.md) · [技术架构](ARCHITECTURE.md) · [存储安全与卸载](STORAGE_AND_UNINSTALL.md) · [Windows/macOS 发布](CROSS_PLATFORM_DISTRIBUTION.md)。

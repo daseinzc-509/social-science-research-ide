@@ -198,7 +198,7 @@ PDF
 - 更新检测仅请求公开 GitHub Releases 信息并提示用户手动安装，绝不静默下载执行。
 - 卸载默认保留个人研究数据；交互式卸载支持显式二次确认后清除 SRA 专属目录。
 
-详细说明：[跨平台分发](docs/CROSS_PLATFORM_DISTRIBUTION.md) · [安全与私人数据](docs/SECURE_DISTRIBUTION.md) · [安装、更新与卸载](docs/INSTALL_UPDATE_UNINSTALL.md)
+详细说明：[跨平台分发](docs/CROSS_PLATFORM_DISTRIBUTION.md) · [存储安全与数据清理](docs/STORAGE_AND_UNINSTALL.md) · [安装、更新与卸载](docs/INSTALL_UPDATE_UNINSTALL.md)
 
 ## 🧪 开发与测试
 
@@ -235,11 +235,13 @@ conda run -p .conda-env python scripts\check_release_safety.py source .
 
 ## 📚 项目文档
 
+- [`AGENTS.md`](AGENTS.md) — AI Coding Agent 与人类贡献者的工程红线、契约与验证门禁。
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 系统分层架构、SQLite WAL/FTS5 表结构、`/api/v1` 契约与 MD3 桌面端设计。
 - [`CHANGELOG.md`](CHANGELOG.md) — 版本发布与变更记录。
 - [`PROJECT_DESIGN.md`](PROJECT_DESIGN.md) — 产品定位、原则与长期路线图。
 - [`docs/CROSS_PLATFORM_DISTRIBUTION.md`](docs/CROSS_PLATFORM_DISTRIBUTION.md) — Windows / macOS 打包架构、签名边界与发布流程。
-- [`docs/SECURE_DISTRIBUTION.md`](docs/SECURE_DISTRIBUTION.md) — API Key、PDF、数据隔离和安全门禁。
-- [`docs/INSTALL_UPDATE_UNINSTALL.md`](docs/INSTALL_UPDATE_UNINSTALL.md) — 安装、更新、卸载与个人数据保护。
+- [`docs/STORAGE_AND_UNINSTALL.md`](docs/STORAGE_AND_UNINSTALL.md) — 个人数据存储目录、路径透明度与安全清理机制。
+- [`docs/INSTALL_UPDATE_UNINSTALL.md`](docs/INSTALL_UPDATE_UNINSTALL.md) — 安装、更新、卸载与隐私保护说明。
 - [`docs/CI_AND_RELEASE.md`](docs/CI_AND_RELEASE.md) — 双端 CI 与 Release 自动化说明。
 - [`docs/REPOSITORY_HYGIENE.md`](docs/REPOSITORY_HYGIENE.md) — 仓库卫生与目录清理说明。
 
