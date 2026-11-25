@@ -18,6 +18,7 @@ public partial class MainWindowViewModel
     public ObservableCollection<ProjectSummaryView> Projects { get; } = [];
     public ObservableCollection<ProjectSummaryView> SelectedPaperProjects { get; } = [];
     public ObservableCollection<ProjectMatrixRowItem> MatrixRows { get; } = [];
+    public ObservableCollection<ProjectNoteItem> ProjectNotes { get; } = [];
 
     /// <summary>
     /// 左侧目录树筛选模式：all / analyzed / pending / project。
@@ -28,13 +29,15 @@ public partial class MainWindowViewModel
     [ObservableProperty] private bool isLoadingMatrix;
     [ObservableProperty] private int matrixTotalPapers;
     [ObservableProperty] private int matrixAnalyzedPapers;
+    [ObservableProperty] private string draftProjectNoteTitle = "";
+    [ObservableProperty] private string draftProjectNoteBody = "";
 
     public bool IsFilterAll => LibraryFilterMode == "all";
     public bool IsFilterAnalyzed => LibraryFilterMode == "analyzed";
     public bool IsFilterPending => LibraryFilterMode == "pending";
     public bool IsProjectScopeActive => ActiveProject is not null && LibraryFilterMode == "project";
-    public bool ShowSinglePaperView => !IsProjectScopeActive || !IsMatrixViewMode;
-    public bool ShowProjectMatrixView => IsProjectScopeActive && IsMatrixViewMode;
+    public bool ShowSinglePaperView => !IsSearchPanelOpen && (!IsProjectScopeActive || !IsMatrixViewMode);
+    public bool ShowProjectMatrixView => !IsSearchPanelOpen && IsProjectScopeActive && IsMatrixViewMode;
 
     public bool HasProjects => Projects.Count > 0;
     public bool HasNoProjects => Projects.Count == 0;
@@ -42,6 +45,9 @@ public partial class MainWindowViewModel
     public bool HasNoSelectedPaperProjects => SelectedPaperProjects.Count == 0;
     public bool HasMatrixRows => MatrixRows.Count > 0;
     public bool IsMatrixEmpty => MatrixRows.Count == 0 && !IsLoadingMatrix;
+    public bool HasProjectNotes => ProjectNotes.Count > 0;
+    public bool HasNoProjectNotes => ProjectNotes.Count == 0;
+    public string ProjectNotesCount => ProjectNotes.Count.ToString();
 
     public string AllPapersCountLabel => _allPapers.Count.ToString();
     public string AnalyzedPapersCountLabel => _allPapers.Count(p => p.HasCard).ToString();
@@ -76,11 +82,14 @@ public partial class MainWindowViewModel
         {
             IsMatrixViewMode = false;
             MatrixRows.Clear();
+            ProjectNotes.Clear();
             MatrixTotalPapers = 0;
             MatrixAnalyzedPapers = 0;
             _activeProjectEntries.Clear();
+            RaiseProjectNotesState();
         }
         RaiseProjectScopeState();
+        RaiseSearchPanelState();
     }
 
     partial void OnIsMatrixViewModeChanged(bool value)
@@ -184,6 +193,7 @@ public partial class MainWindowViewModel
     {
         ActiveProject = null;
         IsMatrixViewMode = false;
+        IsSearchPanelOpen = false;
         LibraryFilterMode = mode is "analyzed" or "pending" ? mode : "all";
         ApplyFilter(SearchText, SelectedPaper?.Id);
     }
@@ -193,6 +203,7 @@ public partial class MainWindowViewModel
         ActiveProject = project;
         LibraryFilterMode = "project";
         IsMatrixViewMode = openMatrix;
+        IsSearchPanelOpen = false;
         ApplyFilter(SearchText, SelectedPaper?.Id);
         await LoadActiveProjectMatrixAsync(project.Id);
         // 矩阵返回最新成员后再次校准列表，防止其他客户端变更漏同步
@@ -201,6 +212,7 @@ public partial class MainWindowViewModel
 
     public void SetWorkspaceViewMode(bool matrixMode)
     {
+        IsSearchPanelOpen = false;
         if (!IsProjectScopeActive)
         {
             IsMatrixViewMode = false;
@@ -253,6 +265,7 @@ public partial class MainWindowViewModel
                 ? analyzed : rows.Count(r => r.HasCard);
 
             UpdateSelectedPaperProjects();
+            await LoadActiveProjectNotesAsync(projectId, cts.Token);
             RaiseProjectScopeState();
         }
         catch (OperationCanceledException)
@@ -380,6 +393,7 @@ public partial class MainWindowViewModel
 
     public void FocusPaperInSingleView(string paperId)
     {
+        IsSearchPanelOpen = false;
         IsMatrixViewMode = false;
         var match = Papers.FirstOrDefault(p => p.Id == paperId);
         if (match is null)
@@ -390,6 +404,96 @@ public partial class MainWindowViewModel
         if (match is not null)
         {
             SelectedPaper = match;
+        }
+    }
+
+    private void RaiseProjectNotesState()
+    {
+        OnPropertyChanged(nameof(HasProjectNotes));
+        OnPropertyChanged(nameof(HasNoProjectNotes));
+        OnPropertyChanged(nameof(ProjectNotesCount));
+    }
+
+    public async Task LoadActiveProjectNotesAsync(string projectId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var data = await _api.GetProjectNotesAsync(projectId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (ActiveProject?.Id != projectId) return;
+            ProjectNotes.Clear();
+            if (data.TryGetProperty("notes", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arr.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        ProjectNotes.Add(ProjectNoteItem.FromJson(item));
+                    }
+                }
+            }
+            RaiseProjectNotesState();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+        }
+    }
+
+    public async Task<bool> CreateDraftProjectNoteAsync()
+    {
+        if (ActiveProject is not { } proj) return false;
+        var body = (DraftProjectNoteBody ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            StatusText = "请先输入专题笔记内容再保存。";
+            return false;
+        }
+        try
+        {
+            await _api.CreateProjectNoteAsync(proj.Id, body, (DraftProjectNoteTitle ?? "").Trim());
+            DraftProjectNoteTitle = "";
+            DraftProjectNoteBody = "";
+            await LoadActiveProjectNotesAsync(proj.Id);
+            StatusText = $"专题研究笔记已保存至「{proj.Name}」。";
+            return true;
+        }
+        catch (Exception exc)
+        {
+            StatusText = "保存专题笔记失败：" + exc.Message;
+            return false;
+        }
+    }
+
+    public async Task UpdateProjectNoteAsync(string noteId, NoteEditorResult edited)
+    {
+        if (ActiveProject is not { } proj) return;
+        try
+        {
+            await _api.UpdateProjectNoteAsync(proj.Id, noteId, edited.Title, edited.Note);
+            await LoadActiveProjectNotesAsync(proj.Id);
+            StatusText = "专题笔记修改已保存。";
+        }
+        catch (Exception exc)
+        {
+            StatusText = "更新专题笔记失败：" + exc.Message;
+        }
+    }
+
+    public async Task DeleteProjectNoteAsync(ProjectNoteItem note)
+    {
+        if (ActiveProject is not { } proj) return;
+        try
+        {
+            await _api.DeleteProjectNoteAsync(proj.Id, note.Id);
+            await LoadActiveProjectNotesAsync(proj.Id);
+            StatusText = "专题研究笔记已删除。";
+        }
+        catch (Exception exc)
+        {
+            StatusText = "删除专题笔记失败：" + exc.Message;
         }
     }
 
@@ -439,10 +543,19 @@ public partial class MainWindowViewModel
                 foreach (var c in items)
                 {
                     var badge = c.HasAuditBadge ? $" [{c.AuditBadgeLabel}]" : "";
+                    var humanBadge = c.HasHumanReview ? $" [人工审定：{c.HumanReviewBadgeLabel}]" : "";
                     var pages = c.HasCitations
                         ? " (" + string.Join(", ", c.Citations.Where(x => x.PageNumber > 0).Select(x => $"p.{x.PageNumber}").Distinct()) + ")"
                         : "";
-                    sb.AppendLine($"  - `[{c.SourceTag}]`{badge} {c.Statement}{pages}");
+                    sb.AppendLine($"  - `[{c.SourceTag}]`{badge}{humanBadge} {c.Statement}{pages}");
+                    if (c.HasHumanCorrectedStatement)
+                    {
+                        sb.AppendLine($"    - **人工修正（HUMAN_REVIEWED）**：{c.HumanCorrectedStatement}");
+                    }
+                    if (!string.IsNullOrWhiteSpace(c.HumanReviewNote))
+                    {
+                        sb.AppendLine($"    - **审定备注**：{c.HumanReviewNote}");
+                    }
                 }
             }
             AppendGroup("研究问题", row.ResearchQuestions);

@@ -313,17 +313,34 @@ def sync_paper_fts(connection: sqlite3.Connection, paper_id: str) -> int:
             )
 
     # 4. 用户个人笔记（USER_NOTE）
+    note_cols = {
+        str(r["name"])
+        for r in connection.execute("PRAGMA table_info(user_notes)").fetchall()
+    }
+    has_rich_note = {"title", "page_number"}.issubset(note_cols)
     note_rows = connection.execute(
-        "SELECT id, note FROM user_notes WHERE paper_id = ? ORDER BY rowid",
+        (
+            "SELECT id, title, note, page_number FROM user_notes WHERE paper_id = ? ORDER BY rowid"
+            if has_rich_note
+            else "SELECT id, note FROM user_notes WHERE paper_id = ? ORDER BY rowid"
+        ),
         (paper_id,),
     ).fetchall()
     for note in note_rows:
+        note_title = str(note["title"] or "").strip() if has_rich_note else ""
+        note_body = str(note["note"] or "").strip()
+        note_page = (
+            int(note["page_number"])
+            if has_rich_note and note["page_number"] is not None
+            else None
+        )
+        combined_note = f"{note_title} — {note_body}" if note_title else note_body
         add_entry(
             f"note:{note['id']}",
             "USER_NOTE",
             "USER_NOTE",
-            None,
-            str(note["note"]),
+            note_page,
+            combined_note,
         )
 
     # 5. 当前有效的人工局部复核记录（HUMAN_REVIEWED，仅限未归档且未撤销版本）
@@ -356,6 +373,35 @@ def sync_paper_fts(connection: sqlite3.Connection, paper_id: str) -> int:
                 int(rev["page_number"]),
                 combined,
             )
+
+    # 6. Claim 单条人工审定与修正记录（HUMAN_REVIEWED）
+    if _table_exists(connection, "claim_reviews"):
+        crev_rows = connection.execute(
+            """
+            SELECT id, claim_id, user_status, corrected_statement, note
+            FROM claim_reviews
+            WHERE paper_id = ?
+            ORDER BY updated_at DESC, rowid DESC
+            """,
+            (paper_id,),
+        ).fetchall()
+        for crev in crev_rows:
+            combined_crev = " — ".join(
+                part
+                for part in (
+                    str(crev["corrected_statement"] or "").strip(),
+                    str(crev["note"] or "").strip(),
+                )
+                if part
+            )
+            if combined_crev:
+                add_entry(
+                    f"claim_review:{crev['id']}",
+                    "HUMAN_REVIEWED",
+                    "HUMAN_REVIEWED",
+                    None,
+                    combined_crev,
+                )
 
     if entries:
         connection.executemany(

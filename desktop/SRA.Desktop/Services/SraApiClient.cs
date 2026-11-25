@@ -94,12 +94,21 @@ public sealed class SraApiClient : IDisposable
     public Task<SearchResponse> SearchLibraryAsync(
         string query,
         string? projectId = null,
+        IEnumerable<string>? sourceKinds = null,
         int limit = 50,
         CancellationToken cancellationToken = default)
     {
         var url = $"api/v1/papers/search?q={Uri.EscapeDataString(query ?? "")}&limit={Math.Clamp(limit, 1, 200)}";
         if (!string.IsNullOrWhiteSpace(projectId))
             url += $"&project_id={Uri.EscapeDataString(projectId.Trim())}";
+        if (sourceKinds is not null)
+        {
+            foreach (var kind in sourceKinds)
+            {
+                if (!string.IsNullOrWhiteSpace(kind))
+                    url += $"&source_kind={Uri.EscapeDataString(kind.Trim())}";
+            }
+        }
         return GetJsonAsync<SearchResponse>(url, cancellationToken);
     }
 
@@ -187,6 +196,67 @@ public sealed class SraApiClient : IDisposable
         GetJsonAsync<JsonElement>(
             $"api/v1/projects/{Uri.EscapeDataString(projectId)}/evidence-matrix",
             cancellationToken);
+
+    public Task<string> GetProjectEvidenceMatrixCsvAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetTextAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/evidence-matrix.csv",
+            cancellationToken);
+
+    public Task<string> GetProjectEvidenceMatrixMarkdownAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetTextAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/evidence-matrix.md",
+            cancellationToken);
+
+    public Task<JsonElement> GetProjectNotesAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/notes",
+            cancellationToken);
+
+    public async Task<JsonElement> CreateProjectNoteAsync(
+        string projectId,
+        string note,
+        string title = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/notes",
+            new { title = title ?? "", note },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> UpdateProjectNoteAsync(
+        string projectId,
+        string noteId,
+        string title,
+        string note,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/notes/{Uri.EscapeDataString(noteId)}",
+            new { title = title ?? "", note },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeleteProjectNoteAsync(
+        string projectId,
+        string noteId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/projects/{Uri.EscapeDataString(projectId)}/notes/{Uri.EscapeDataString(noteId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
 
     public Task<PaperDetailResponse> GetPaperAsync(string paperId, CancellationToken cancellationToken = default) =>
         GetJsonAsync<PaperDetailResponse>($"api/v1/papers/{Uri.EscapeDataString(paperId)}", cancellationToken);
@@ -291,6 +361,84 @@ public sealed class SraApiClient : IDisposable
     {
         using var response = await _http.DeleteAsync($"api/v1/papers/{Uri.EscapeDataString(paperId)}/metadata", cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> CreatePaperNoteAsync(
+        string paperId,
+        string note,
+        string title = "",
+        int? pageNumber = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/notes",
+            new { title, note, page_number = pageNumber },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> UpdatePaperNoteAsync(
+        string paperId,
+        string noteId,
+        string title,
+        string note,
+        int? pageNumber,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/notes/{Uri.EscapeDataString(noteId)}",
+            new { title, note, page_number = pageNumber },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeletePaperNoteAsync(
+        string paperId,
+        string noteId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/notes/{Uri.EscapeDataString(noteId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> UpsertClaimReviewAsync(
+        string paperId,
+        string claimId,
+        string userStatus,
+        string fieldName = "",
+        string originalStatement = "",
+        string correctedStatement = "",
+        string note = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PutAsJsonAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/claim-reviews/{Uri.EscapeDataString(claimId)}",
+            new
+            {
+                user_status = userStatus,
+                field_name = fieldName,
+                original_statement = originalStatement,
+                corrected_statement = correctedStatement,
+                note,
+            },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeleteClaimReviewAsync(
+        string paperId,
+        string claimId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            $"api/v1/papers/{Uri.EscapeDataString(paperId)}/claim-reviews/{Uri.EscapeDataString(claimId)}",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
     }
 
     public async Task<DeletePaperResult> DeletePaperAsync(string paperId, bool deleteFile = true, CancellationToken cancellationToken = default)

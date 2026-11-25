@@ -35,6 +35,7 @@ public sealed class EvidenceItem
 
 public sealed class ClaimItem
 {
+    public string ClaimId { get; init; } = "";
     public string FieldName { get; init; } = "";
     public string FieldLabel { get; init; } = "";
     public string Statement { get; init; } = "";
@@ -45,6 +46,21 @@ public sealed class ClaimItem
     public string Rationale { get; init; } = "";
     public string Scope { get; init; } = "";
     public List<EvidenceItem> Evidence { get; init; } = [];
+
+    // 独立人工审定叠加视图（绝不覆盖原始 Statement）
+    public string HumanReviewStatus { get; init; } = "";
+    public string HumanCorrectedStatement { get; init; } = "";
+    public string HumanReviewNote { get; init; } = "";
+
+    public bool HasHumanReview => !string.IsNullOrWhiteSpace(HumanReviewStatus);
+    public string HumanReviewBadgeLabel => ClaimReviewItem.StatusToLabel(HumanReviewStatus);
+    public bool IsReviewConfirmed => string.Equals(HumanReviewStatus, "confirmed", StringComparison.OrdinalIgnoreCase);
+    public bool IsReviewCorrected => string.Equals(HumanReviewStatus, "corrected", StringComparison.OrdinalIgnoreCase);
+    public bool IsReviewRejected => string.Equals(HumanReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase);
+    public bool IsReviewUnresolved => string.Equals(HumanReviewStatus, "unresolved", StringComparison.OrdinalIgnoreCase);
+    public bool HasHumanCorrectedStatement => !string.IsNullOrWhiteSpace(HumanCorrectedStatement);
+    public bool HasHumanReviewNote => !string.IsNullOrWhiteSpace(HumanReviewNote);
+    public bool HasHumanReviewDetails => HasHumanCorrectedStatement || HasHumanReviewNote;
 
     public bool HasEvidence => Evidence.Count > 0;
     public string EvidenceSummary => $"查看原文证据（{Evidence.Count} 段）";
@@ -147,11 +163,14 @@ public sealed class ClaimItem
             }
         }
 
+        var statement = JsonRead.Text(node, "statement");
+        var rawId = JsonRead.Text(node, "claim_id");
         return new ClaimItem
         {
+            ClaimId = string.IsNullOrWhiteSpace(rawId) ? ClaimIdHelper.Compute(field, statement) : rawId,
             FieldName = field,
             FieldLabel = FieldLabels.Get(field),
-            Statement = JsonRead.Text(node, "statement"),
+            Statement = statement,
             Provenance = JsonRead.Text(node, "provenance"),
             Verification = JsonRead.Text(node, "verification"),
             ClaimType = JsonRead.Text(node, "claim_type", "OTHER"),
@@ -161,6 +180,24 @@ public sealed class ClaimItem
             Evidence = evidence,
         };
     }
+
+    public ClaimItem WithHumanReview(ClaimReviewItem? review) => new()
+    {
+        ClaimId = ClaimId,
+        FieldName = FieldName,
+        FieldLabel = FieldLabel,
+        Statement = Statement,
+        Provenance = Provenance,
+        Verification = Verification,
+        ClaimType = ClaimType,
+        SemanticSupport = SemanticSupport,
+        Rationale = Rationale,
+        Scope = Scope,
+        Evidence = Evidence,
+        HumanReviewStatus = review?.UserStatus ?? "",
+        HumanCorrectedStatement = review?.CorrectedStatement ?? "",
+        HumanReviewNote = review?.Note ?? "",
+    };
 
     private static string FormatScope(JsonElement node)
     {

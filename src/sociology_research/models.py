@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import hashlib
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -616,3 +617,65 @@ class ProjectPaperEntry(BaseModel):
     project_note: str = Field(default="", max_length=2000)
     position: int = Field(default=0, ge=0)
     added_at: str
+
+
+def compute_claim_id(field_name: str, statement: str) -> str:
+    """为任意单条 Claim 生成跨模块一致的确定性内容标识。"""
+    digest = hashlib.sha1(f"{field_name}\0{statement}".encode("utf-8")).hexdigest()[:16]
+    return f"claim-{digest}"
+
+
+class ClaimReviewStatus(StrEnum):
+    """研究者对单条 Claim 的人工审定状态（绝不覆盖原始 PaperCard）。"""
+
+    CONFIRMED = "confirmed"
+    CORRECTED = "corrected"
+    REJECTED = "rejected"
+    UNRESOLVED = "unresolved"
+
+
+class UserNote(BaseModel):
+    """研究者针对单篇论文撰写的个人阅读笔记（MY NOTE / USER_NOTE）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    paper_id: str
+    title: str = Field(default="", max_length=200)
+    note: str = Field(min_length=1, max_length=20000)
+    page_number: int | None = Field(default=None, ge=1)
+    provenance: Provenance = Provenance.USER_NOTE
+    created_at: str
+    updated_at: str
+
+
+class ClaimReviewDecision(BaseModel):
+    """研究者对单条 Claim 的独立人工审定与修正记录（HUMAN_REVIEWED）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    paper_id: str
+    claim_id: str = Field(min_length=1, max_length=120)
+    field_name: str = Field(default="", max_length=120)
+    original_statement: str = Field(default="", max_length=8000)
+    user_status: ClaimReviewStatus
+    corrected_statement: str = Field(default="", max_length=8000)
+    note: str = Field(default="", max_length=4000)
+    provenance: str = "HUMAN_REVIEWED"
+    created_at: str
+    updated_at: str
+
+
+class ProjectNote(BaseModel):
+    """研究者针对整个研究专题撰写的跨文献综合笔记（MY NOTE / USER_NOTE）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    project_id: str
+    title: str = Field(default="", max_length=200)
+    note: str = Field(min_length=1, max_length=20000)
+    provenance: Provenance = Provenance.USER_NOTE
+    created_at: str
+    updated_at: str

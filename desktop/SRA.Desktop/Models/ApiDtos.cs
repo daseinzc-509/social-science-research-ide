@@ -149,6 +149,12 @@ public sealed class PaperDetailResponse
 
     [JsonPropertyName("citation_mentions")]
     public List<JsonElement> CitationMentions { get; init; } = [];
+
+    [JsonPropertyName("user_notes")]
+    public List<JsonElement> UserNotes { get; init; } = [];
+
+    [JsonPropertyName("claim_reviews")]
+    public List<JsonElement> ClaimReviews { get; init; } = [];
 }
 
 public sealed class AnalysisRequest

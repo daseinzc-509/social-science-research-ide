@@ -24,7 +24,13 @@ class ExportService:
         card = self.repository.get_card(paper_id)
         if card is None:
             raise KeyError(f"no Paper Card has been saved for paper: {paper_id}")
-        return render_deep_reading_markdown(card)
+        user_notes = self.repository.list_user_notes(paper_id)
+        claim_reviews = self.repository.list_claim_reviews(paper_id)
+        return render_deep_reading_markdown(
+            card,
+            user_notes=user_notes,
+            claim_reviews=claim_reviews,
+        )
 
     def parsed_text(self, paper_id: str) -> str:
         if self.repository.get_paper(paper_id) is None:

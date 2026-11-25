@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
 
 from ...services.application import ApplicationServices
 from ..dependencies import get_services
@@ -12,6 +13,11 @@ from ..schemas import (
     ProjectDetailResponse,
     ProjectEvidenceMatrixResponse,
     ProjectListResponse,
+    ProjectNoteCreateRequest,
+    ProjectNoteDeleteResponse,
+    ProjectNoteListResponse,
+    ProjectNoteUpdateRequest,
+    ProjectNoteView,
     ProjectPaperEntryView,
     ProjectPaperUpsertRequest,
     ProjectPaperRemoveResponse,
@@ -101,3 +107,70 @@ def get_project_evidence_matrix(
     services: ApplicationServices = Depends(get_services),
 ):
     return services.projects.build_evidence_matrix(project_id)
+
+
+@router.get("/{project_id}/evidence-matrix.csv", response_class=PlainTextResponse)
+def export_project_evidence_matrix_csv(
+    project_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return PlainTextResponse(
+        services.projects.render_evidence_matrix_csv(project_id),
+        media_type="text/csv; charset=utf-8",
+    )
+
+
+@router.get("/{project_id}/evidence-matrix.md", response_class=PlainTextResponse)
+def export_project_evidence_matrix_markdown(
+    project_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return PlainTextResponse(
+        services.projects.render_evidence_matrix_markdown(project_id),
+        media_type="text/markdown; charset=utf-8",
+    )
+
+
+@router.get("/{project_id}/notes", response_model=ProjectNoteListResponse)
+def list_project_notes(
+    project_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return {"notes": services.projects.list_project_notes(project_id)}
+
+
+@router.post("/{project_id}/notes", response_model=ProjectNoteView, status_code=201)
+def create_project_note(
+    project_id: str,
+    payload: ProjectNoteCreateRequest,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.projects.create_project_note(
+        project_id,
+        title=payload.title,
+        note=payload.note,
+    )
+
+
+@router.put("/{project_id}/notes/{note_id}", response_model=ProjectNoteView)
+def update_project_note(
+    project_id: str,
+    note_id: str,
+    payload: ProjectNoteUpdateRequest,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.projects.update_project_note(
+        project_id,
+        note_id,
+        title=payload.title,
+        note=payload.note,
+    )
+
+
+@router.delete("/{project_id}/notes/{note_id}", response_model=ProjectNoteDeleteResponse)
+def delete_project_note(
+    project_id: str,
+    note_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return services.projects.delete_project_note(project_id, note_id)

@@ -10,8 +10,8 @@
       <Border Grid.Column="0" IsVisible="{Binding IsAiProvenance}" Background="{DynamicResource PurpleInkBrush}" Opacity="0.78" />
       <Border Grid.Column="0" IsVisible="{Binding IsUserNoteProvenance}" Background="{DynamicResource InkTertiaryBrush}" Opacity="0.65" />
 
-      <StackPanel Grid.Column="1" Margin="20,17,20,17" Spacing="12">
-        <!-- 顶行：语义来源胶囊 + 字段/主张类型 + 彩色审计状态徽章 -->
+      <StackPanel Grid.Column="1" Margin="20,17,20,14" Spacing="12">
+        <!-- 顶行：语义来源胶囊 + 字段/主张类型 + AI 审计徽章 & 人工审定徽章 -->
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
           <WrapPanel ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
             <Border IsVisible="{Binding IsAuthorProvenance}"
@@ -47,51 +47,101 @@
             </Border>
           </WrapPanel>
 
-          <!-- 右上角语义审计状态徽章（悬浮可见完整原始 AuditLine） -->
-          <Panel Grid.Column="1" VerticalAlignment="Center" IsVisible="{Binding HasAuditBadge}"
-                 ToolTip.Tip="{Binding AuditLine}">
-            <Border IsVisible="{Binding IsAuditPositive}"
-                    Background="{DynamicResource EmeraldSoftBrush}"
-                    BorderBrush="{DynamicResource EmeraldLineBrush}"
-                    BorderThickness="1" CornerRadius="999" Padding="9,3">
-              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                <Ellipse Width="6" Height="6" Fill="{DynamicResource EmeraldInkBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}"
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <!-- 人工审定状态徽章（独立于 AI 审计，清晰凸显研究者最终结论） -->
+            <Panel IsVisible="{Binding HasHumanReview}" VerticalAlignment="Center" ToolTip.Tip="研究者人工审定结论（独立保存，重跑不覆盖）">
+              <Border IsVisible="{Binding IsReviewConfirmed}"
+                      Background="{DynamicResource EmeraldSoftBrush}"
+                      BorderBrush="{DynamicResource EmeraldInkBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}"
                            FontSize="10.5" FontWeight="SemiBold" />
-              </StackPanel>
-            </Border>
-            <Border IsVisible="{Binding IsAuditWarning}"
-                    Background="{DynamicResource AmberSoftBrush}"
-                    BorderBrush="{DynamicResource AmberLineBrush}"
-                    BorderThickness="1" CornerRadius="999" Padding="9,3">
-              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                <Ellipse Width="6" Height="6" Fill="{DynamicResource AmberInkBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}"
+              </Border>
+              <Border IsVisible="{Binding IsReviewCorrected}"
+                      Background="{DynamicResource TonalFillBrush}"
+                      BorderBrush="{DynamicResource AccentBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource OnTonalFillBrush}"
                            FontSize="10.5" FontWeight="SemiBold" />
-              </StackPanel>
-            </Border>
-            <Border IsVisible="{Binding IsAuditNegative}"
-                    Background="{DynamicResource RedSoftBrush}"
-                    BorderBrush="{DynamicResource RedLineBrush}"
-                    BorderThickness="1" CornerRadius="999" Padding="9,3">
-              <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                <Ellipse Width="6" Height="6" Fill="{DynamicResource RedInkBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource RedInkBrush}"
+              </Border>
+              <Border IsVisible="{Binding IsReviewRejected}"
+                      Background="{DynamicResource RedSoftBrush}"
+                      BorderBrush="{DynamicResource RedInkBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource RedInkBrush}"
                            FontSize="10.5" FontWeight="SemiBold" />
-              </StackPanel>
-            </Border>
-            <Border IsVisible="{Binding IsAuditNeutral}"
-                    Background="{DynamicResource SurfaceMutedBrush}"
-                    BorderBrush="{DynamicResource LineBrush}"
-                    BorderThickness="1" CornerRadius="999" Padding="9,3">
-              <TextBlock Text="{Binding AuditBadgeLabel}" Classes="tertiary"
-                         FontSize="10.5" FontWeight="SemiBold" />
-            </Border>
-          </Panel>
+              </Border>
+              <Border IsVisible="{Binding IsReviewUnresolved}"
+                      Background="{DynamicResource AmberSoftBrush}"
+                      BorderBrush="{DynamicResource AmberInkBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}"
+                           FontSize="10.5" FontWeight="SemiBold" />
+              </Border>
+            </Panel>
+
+            <!-- 右上角 AI 语义审计状态徽章 -->
+            <Panel VerticalAlignment="Center" IsVisible="{Binding HasAuditBadge}"
+                   ToolTip.Tip="{Binding AuditLine}">
+              <Border IsVisible="{Binding IsAuditPositive}"
+                      Background="{DynamicResource EmeraldSoftBrush}"
+                      BorderBrush="{DynamicResource EmeraldLineBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                  <Ellipse Width="6" Height="6" Fill="{DynamicResource EmeraldInkBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}"
+                             FontSize="10.5" FontWeight="SemiBold" />
+                </StackPanel>
+              </Border>
+              <Border IsVisible="{Binding IsAuditWarning}"
+                      Background="{DynamicResource AmberSoftBrush}"
+                      BorderBrush="{DynamicResource AmberLineBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                  <Ellipse Width="6" Height="6" Fill="{DynamicResource AmberInkBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}"
+                             FontSize="10.5" FontWeight="SemiBold" />
+                </StackPanel>
+              </Border>
+              <Border IsVisible="{Binding IsAuditNegative}"
+                      Background="{DynamicResource RedSoftBrush}"
+                      BorderBrush="{DynamicResource RedLineBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                  <Ellipse Width="6" Height="6" Fill="{DynamicResource RedInkBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource RedInkBrush}"
+                             FontSize="10.5" FontWeight="SemiBold" />
+                </StackPanel>
+              </Border>
+              <Border IsVisible="{Binding IsAuditNeutral}"
+                      Background="{DynamicResource SurfaceMutedBrush}"
+                      BorderBrush="{DynamicResource LineBrush}"
+                      BorderThickness="1" CornerRadius="999" Padding="9,3">
+                <TextBlock Text="{Binding AuditBadgeLabel}" Classes="tertiary"
+                           FontSize="10.5" FontWeight="SemiBold" />
+              </Border>
+            </Panel>
+          </StackPanel>
         </Grid>
 
-        <!-- 核心陈述正文（精装书级阅读行距） -->
+        <!-- 核心陈述正文（原始基准，绝不被人工修正静默抹除） -->
         <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontSize="14.5" LineHeight="25" />
+
+        <!-- 研究者人工修正与审定备注（独立并列展示，严格标示 HUMAN_REVIEWED） -->
+        <Border IsVisible="{Binding HasHumanReviewDetails}" Classes="human-correction-block" Padding="14,11">
+          <StackPanel Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="HUMAN REVIEWED · 研究者审定" Classes="eyebrow" Foreground="{DynamicResource EmeraldInkBrush}" />
+              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+            </StackPanel>
+            <TextBlock IsVisible="{Binding HasHumanCorrectedStatement}"
+                       Text="{Binding HumanCorrectedStatement}"
+                       Foreground="{DynamicResource InkBrush}" FontSize="13.5" LineHeight="22" TextWrapping="Wrap" />
+            <TextBlock IsVisible="{Binding HasHumanReviewNote}"
+                       Text="{Binding HumanReviewNote, StringFormat='审定备注：{0}'}"
+                       Classes="muted" FontSize="12" LineHeight="19" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
 
         <!-- 适用范围与限定条件 -->
         <Border IsVisible="{Binding HasScope}" Classes="claim-scope" Padding="14,10">
@@ -132,6 +182,33 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
         </Expander>
+
+        <!-- 底部轻量就地人工审定条（一键确认/存疑/待定，点击修正弹窗改写） -->
+        <Border BorderBrush="{DynamicResource OutlineSubtleBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <WrapPanel Grid.Column="0" ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+              <Button Content="✓ 确认" Tag="confirmed" Click="ReviewAction_Click"
+                      Classes="review-action-chip" Classes.active="{Binding IsReviewConfirmed}"
+                      ToolTip.Tip="一键标记为「已确认」（核对原文无误）" />
+              <Button Content="✎ 修正" Tag="corrected" Click="ReviewAction_Click"
+                      Classes="review-action-chip" Classes.active="{Binding IsReviewCorrected}"
+                      ToolTip.Tip="撰写研究者修正陈述与备注（原文保留对照）" />
+              <Button Content="✕ 存疑" Tag="rejected" Click="ReviewAction_Click"
+                      Classes="review-action-chip" Classes.active="{Binding IsReviewRejected}"
+                      ToolTip.Tip="一键标记为「存疑驳回」" />
+              <Button Content="? 待定" Tag="unresolved" Click="ReviewAction_Click"
+                      Classes="review-action-chip" Classes.active="{Binding IsReviewUnresolved}"
+                      ToolTip.Tip="一键标记为「待定」，稍后复核" />
+            </WrapPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+              <Button Content="备注 / 编辑" Tag="edit" Click="ReviewAction_Click"
+                      Classes="ghost compact" MinHeight="24" Padding="8,2" FontSize="11" />
+              <Button Content="清除" Tag="clear" Click="ReviewAction_Click"
+                      IsVisible="{Binding HasHumanReview}"
+                      Classes="ghost compact" MinHeight="24" Padding="7,2" FontSize="11" />
+            </StackPanel>
+          </Grid>
+        </Border>
       </StackPanel>
     </Grid>
   </Border>

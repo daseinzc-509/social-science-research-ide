@@ -156,7 +156,8 @@
                             <MenuItem Header="打开专题证据矩阵" Tag="{Binding}" Click="ContextOpenProjectMatrix_Click" />
                             <MenuItem Header="向此专题添加论文…" Tag="{Binding}" Click="ContextAddPapersToProject_Click" />
                             <MenuItem Header="编辑专题信息" Tag="{Binding}" Click="ContextEditProject_Click" />
-                            <MenuItem Header="导出 Markdown 证据矩阵" Tag="{Binding}" Click="ContextExportProjectMatrix_Click" />
+                            <MenuItem Header="导出证据矩阵 (Markdown)" Tag="{Binding}" Click="ContextExportProjectMatrix_Click" />
+                            <MenuItem Header="导出证据矩阵 (Excel / CSV)" Tag="{Binding}" Click="ContextExportProjectMatrixCsv_Click" />
                             <Separator />
                             <MenuItem Header="删除此专题" Tag="{Binding}" Click="ContextDeleteProject_Click" />
                           </ContextMenu>
@@ -180,22 +181,32 @@
           </Border>
 
           <!-- 搜索栏与当前作用域计数 -->
-          <StackPanel Grid.Row="2" Margin="14,0,14,8" Spacing="8">
-            <Border Classes="search-shell" Padding="12,0,8,0">
-              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+          <StackPanel Grid.Row="2" Margin="14,0,14,8" Spacing="7">
+            <Border Classes="search-shell" Padding="12,0,6,0">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto" VerticalAlignment="Center">
                 <PathIcon Grid.Column="0" Width="13" Height="13" Margin="0,0,5,0"
                           Foreground="{DynamicResource InkTertiaryBrush}"
                           Data="M10.5 3.5C6.63 3.5 3.5 6.63 3.5 10.5C3.5 14.37 6.63 17.5 10.5 17.5C12.16 17.5 13.69 16.92 14.89 15.95L19.22 20.28L20.28 19.22L15.95 14.89C16.92 13.69 17.5 12.16 17.5 10.5C17.5 6.63 14.37 3.5 10.5 3.5ZM10.5 5C13.54 5 16 7.46 16 10.5C16 13.54 13.54 16 10.5 16C7.46 16 5 13.54 5 10.5C5 7.46 7.46 5 10.5 5Z" />
                 <TextBox x:Name="LibrarySearchBox" Grid.Column="1" Classes="search-input"
                          Text="{Binding SearchText, Mode=TwoWay}"
-                         PlaceholderText="搜索标题、作者、全文或笔记… (Ctrl+F)"/>
+                         KeyDown="LibrarySearchBox_KeyDown"
+                         PlaceholderText="搜索全文/笔记… Enter 展开"/>
                 <Button Grid.Column="2" Content="×" Classes="ghost"
                         IsVisible="{Binding HasSearchText}"
                         Command="{Binding ClearSearchCommand}"
-                        Width="24" Height="24" MinHeight="24" Padding="0" FontSize="13"
+                        Width="22" Height="22" MinHeight="22" Padding="0" FontSize="13"
                         ToolTip.Tip="清空搜索 (Esc)" />
+                <Button Grid.Column="3" Content="全文" Classes="tonal compact"
+                        MinHeight="24" Padding="8,1" FontSize="10.5" Margin="3,0,0,0"
+                        Click="OpenFullTextSearch_Click"
+                        ToolTip.Tip="打开跨论文 / 专题全文检索面板 (Ctrl+Shift+F)" />
               </Grid>
             </Border>
+            <Button IsVisible="{Binding ShowQuickSearchBanner}"
+                    Content="{Binding QuickSearchBannerText}"
+                    Classes="tonal compact" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left" Padding="10,4" FontSize="11"
+                    Click="OpenFullTextSearch_Click" />
             <Grid ColumnDefinitions="*,Auto" Margin="6,1,5,0">
               <TextBlock Text="{Binding ActiveScopeHeading}" FontWeight="SemiBold" FontSize="11" Classes="muted" TextTrimming="CharacterEllipsis"/>
               <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="tertiary" FontSize="10.5"/>
@@ -300,6 +311,20 @@
               </StackPanel>
             </Border>
 
+            <!-- 个人阅读笔记与单条主张人工审定摘要卡 -->
+            <Border Classes="inspector-section" Padding="14" IsVisible="{Binding HasSelection}">
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="我的笔记与审定" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" />
+                  <Button Grid.Column="1" Content="我的笔记 →" Classes="tonal compact"
+                          MinHeight="25" Padding="9,2" FontSize="11"
+                          Click="OpenNotesTab_Click" />
+                </Grid>
+                <TextBlock Text="{Binding HumanProgressSummary}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding ClaimReviewBreakdown}" Classes="muted" FontSize="11.5" LineHeight="18" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
             <Border Classes="inspector-section" Padding="14">
               <StackPanel Spacing="10">
                 <StackPanel Spacing="3"><TextBlock Text="STUDY TYPE" Classes="eyebrow"/><TextBlock Text="{Binding SelectedStudyType}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="13.5"/></StackPanel>
@@ -344,6 +369,9 @@
                 <Border Background="{DynamicResource PurpleSoftBrush}" BorderBrush="{DynamicResource PurpleLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,3">
                   <TextBlock Text="AI REVIEW" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" LetterSpacing="0.4"/>
                 </Border>
+                <Border Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,3">
+                  <TextBlock Text="HUMAN REVIEWED" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10" FontWeight="SemiBold" LetterSpacing="0.4"/>
+                </Border>
                 <Border Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,3">
                   <TextBlock Text="MY NOTE" Classes="muted" FontSize="10" FontWeight="SemiBold" LetterSpacing="0.4"/>
                 </Border>
@@ -377,10 +405,18 @@
                 <StackPanel Orientation="Horizontal" Spacing="2">
                   <Button Content="单篇精读" Classes="mode-pill" Classes.active="{Binding ShowSinglePaperView}" Click="SwitchToSingleView_Click" />
                   <Button Content="专题证据矩阵" Classes="mode-pill" Classes.active="{Binding ShowProjectMatrixView}" Click="SwitchToMatrixView_Click" />
+                  <Button Content="全文检索" Classes="mode-pill" Classes.active="{Binding ShowSearchPanelView}" Click="OpenFullTextSearch_Click" />
                 </StackPanel>
               </Border>
               <Button Content="＋ 添加文献" Classes="tonal compact" Click="AddPapersToActiveProject_Click" />
-              <Button Content="导出矩阵" Classes="secondary compact" Click="ExportActiveMatrixMarkdown_Click" IsEnabled="{Binding HasMatrixRows}" />
+              <Button Content="导出矩阵 ▾" Classes="secondary compact" IsEnabled="{Binding HasMatrixRows}" ToolTip.Tip="导出当前专题证据矩阵为 Excel CSV 或 Markdown">
+                <Button.Flyout>
+                  <MenuFlyout>
+                    <MenuItem Header="导出为 Excel / CSV（UTF-8 BOM）" Click="ExportActiveMatrixCsv_Click" />
+                    <MenuItem Header="导出为 Markdown（含专题笔记与审定）" Click="ExportActiveMatrixMarkdown_Click" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
               <Button Content="编辑专题" Classes="ghost compact" Click="EditActiveProject_Click" />
               <Button Content="退出专题" Classes="ghost compact" Click="ExitProjectScope_Click" ToolTip.Tip="返回全部论文视图" />
             </StackPanel>
@@ -427,7 +463,7 @@
             </Border>
 
             <Border Grid.Row="1" Classes="workspace-surface" Margin="12,12,12,14">
-              <TabControl Classes="paper-tabs">
+              <TabControl x:Name="PaperTabs" Classes="paper-tabs">
             <!-- Product focus: deep reading first -->
             <TabItem Header="精读">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -580,6 +616,169 @@
                       </StackPanel>
                     </Grid>
                   </Border>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="我的笔记">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="32,26,32,52" Spacing="24" MaxWidth="900" HorizontalAlignment="Center">
+                  <!-- 顶部：就地快速记录个人笔记（MY NOTE） -->
+                  <Border Classes="card" Padding="20,18">
+                    <StackPanel Spacing="12">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="3">
+                          <WrapPanel ItemSpacing="8" VerticalAlignment="Center">
+                            <Border Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                              <TextBlock Text="MY NOTE" Classes="muted" FontSize="10" FontWeight="SemiBold" LetterSpacing="0.4" />
+                            </Border>
+                            <TextBlock Text="新增个人阅读笔记" Classes="section-title" VerticalAlignment="Center" />
+                          </WrapPanel>
+                          <TextBlock Text="笔记独立存储于本地 SQLite，重新分析或重建解析绝不覆盖，并实时纳入全文检索（Ctrl+Enter 快速保存）。"
+                                     Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Grid>
+
+                      <Grid ColumnDefinitions="*,140" ColumnSpacing="10">
+                        <TextBox Grid.Column="0" Text="{Binding DraftNoteTitle, Mode=TwoWay}"
+                                 PlaceholderText="笔记标题（可选，如「与田野经验的张力」）" />
+                        <TextBox Grid.Column="1" Text="{Binding DraftNotePage, Mode=TwoWay}"
+                                 PlaceholderText="关联 PDF 页码" />
+                      </Grid>
+
+                      <TextBox Text="{Binding DraftNoteBody, Mode=TwoWay}"
+                               PlaceholderText="记录你的阅读反思、方法质疑、理论联系或后续引用思路…"
+                               AcceptsReturn="True" TextWrapping="Wrap" MinHeight="96"
+                               KeyDown="DraftNoteBody_KeyDown" />
+
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="提示：填写关联页码后，笔记卡片上可直接一键跳回 PDF 对应页。"
+                                   Classes="tertiary" FontSize="11.5" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="＋ 保存笔记" Classes="primary"
+                                IsEnabled="{Binding HasSelection}" Click="SaveDraftNote_Click" />
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+
+                  <!-- 中部：已保存个人笔记列表 -->
+                  <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="个人笔记列表" Classes="section-title" />
+                      <Border Classes="badge-count">
+                        <TextBlock Text="{Binding UserNotesCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" />
+                      </Border>
+                    </StackPanel>
+
+                    <Border Classes="soft-card" Padding="24,20" IsVisible="{Binding HasNoUserNotes}">
+                      <TextBlock Text="还没有为这篇论文记录个人笔记。在上方输入框记下你的思考，即可自动建立与本文的长期关联。"
+                                 Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding UserNotes}" IsVisible="{Binding HasUserNotes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:UserNoteItem">
+                          <Border Classes="note-card" Margin="0,0,0,12" ClipToBounds="True">
+                            <Border.ContextMenu>
+                              <ContextMenu>
+                                <MenuItem Header="编辑笔记" Tag="{Binding}" Click="EditNote_Click" />
+                                <MenuItem Header="跳转到关联 PDF 页" IsVisible="{Binding HasPageNumber}" Tag="{Binding}" Click="NoteJumpPage_Click" />
+                                <MenuItem Header="复制笔记正文" Tag="{Binding}" Click="CopyNote_Click" />
+                                <Separator />
+                                <MenuItem Header="删除笔记" Tag="{Binding}" Click="DeleteNote_Click" />
+                              </ContextMenu>
+                            </Border.ContextMenu>
+                            <Grid ColumnDefinitions="4,*">
+                              <Border Grid.Column="0" Background="{DynamicResource InkTertiaryBrush}" />
+                              <StackPanel Grid.Column="1" Margin="18,15,18,16" Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                  <WrapPanel Grid.Column="0" ItemSpacing="8" LineSpacing="4" VerticalAlignment="Center">
+                                    <Border Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                      <TextBlock Text="MY NOTE" Classes="muted" FontSize="10" FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock Text="{Binding DisplayTitle}" FontSize="14.5" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding TimeLabel}" Classes="tertiary" FontSize="11" VerticalAlignment="Center" />
+                                    <Button IsVisible="{Binding HasPageNumber}" Content="{Binding PageBadgeLabel}"
+                                            Classes="tonal compact" MinHeight="22" Padding="8,1" FontSize="10.5"
+                                            Tag="{Binding}" Click="NoteJumpPage_Click"
+                                            ToolTip.Tip="在局部复核窗口中定位到该 PDF 页面" />
+                                  </WrapPanel>
+                                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Button Content="编辑" Classes="secondary compact" MinHeight="26" Padding="10,2" FontSize="11.5"
+                                            Tag="{Binding}" Click="EditNote_Click" />
+                                    <Button Content="删除" Classes="ghost compact" MinHeight="26" Padding="9,2" FontSize="11.5"
+                                            Tag="{Binding}" Click="DeleteNote_Click" />
+                                  </StackPanel>
+                                </Grid>
+                                <TextBlock Text="{Binding Note}" FontSize="13.5" LineHeight="23" TextWrapping="Wrap" />
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- 底部：本篇论文单条主张人工审定记录总览 -->
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock Text="单条主张人工审定记录" Classes="section-title" />
+                        <Border Classes="badge-count">
+                          <TextBlock Text="{Binding ReviewedClaimsCount}" Classes="muted" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding ClaimReviewBreakdown}" Classes="muted" FontSize="11.5" VerticalAlignment="Center" />
+                    </Grid>
+
+                    <Border Classes="soft-card" Padding="18,14" IsVisible="{Binding !HasClaimReviews}">
+                      <TextBlock Text="在「精读」「事实证据」或「AI 审读」标签页中，点击任意主张卡片底部的「✓ 确认 / ✎ 修正 / ✕ 存疑 / ? 待定」，所有审定结果都将汇总于此并同步至专题证据矩阵。"
+                                 Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="20" />
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding ClaimReviews}" IsVisible="{Binding HasClaimReviews}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:ClaimReviewItem">
+                          <Border Classes="card" Padding="16,14" Margin="0,0,0,10">
+                            <StackPanel Spacing="8">
+                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                <WrapPanel Grid.Column="0" ItemSpacing="7" LineSpacing="4" VerticalAlignment="Center">
+                                  <Border IsVisible="{Binding IsConfirmed}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+                                  </Border>
+                                  <Border IsVisible="{Binding IsCorrected}" Background="{DynamicResource BlueSoftBrush}" BorderBrush="{DynamicResource BlueLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+                                  </Border>
+                                  <Border IsVisible="{Binding IsRejected}" Background="{DynamicResource RedSoftBrush}" BorderBrush="{DynamicResource RedLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{DynamicResource RedInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+                                  </Border>
+                                  <Border IsVisible="{Binding IsUnresolved}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{DynamicResource AmberInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
+                                  </Border>
+                                  <Border Classes="badge" Padding="7,2">
+                                    <TextBlock Text="{Binding FieldLabel}" Classes="muted" FontSize="10.5" FontWeight="Medium" />
+                                  </Border>
+                                  <Border IsVisible="{Binding IsOrphan}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                    <TextBlock Text="历史重跑保留" Foreground="{DynamicResource AmberInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                  </Border>
+                                  <TextBlock Text="{Binding TimeLabel}" Classes="tertiary" FontSize="11" VerticalAlignment="Center" />
+                                </WrapPanel>
+                                <Button Grid.Column="1" Content="清除" Classes="ghost compact" MinHeight="24" Padding="8,1" FontSize="11"
+                                        Tag="{Binding}" Click="DeleteReviewRecord_Click" />
+                              </Grid>
+                              <TextBlock IsVisible="{Binding HasOriginalStatement}" Text="{Binding OriginalStatement, StringFormat='原陈述：{0}'}"
+                                         Classes="muted" FontSize="12.5" LineHeight="20" TextWrapping="Wrap" />
+                              <Border IsVisible="{Binding HasCorrectedStatement}" Classes="human-correction-block" Padding="12,9">
+                                <TextBlock Text="{Binding CorrectedStatement, StringFormat='人工修正：{0}'}"
+                                           FontSize="13" FontWeight="Medium" LineHeight="21" TextWrapping="Wrap" />
+                              </Border>
+                              <TextBlock IsVisible="{Binding HasNote}" Text="{Binding Note, StringFormat='审定备注：{0}'}"
+                                         Classes="muted" FontSize="12" LineHeight="19" TextWrapping="Wrap" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
@@ -828,12 +1027,75 @@
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                     <StackPanel Spacing="4">
                       <TextBlock Text="EVIDENCE MATRIX · 跨文献证据对比矩阵" Classes="eyebrow" Foreground="{DynamicResource AccentBrush}" />
-                      <TextBlock Text="基于已保存 Paper Card 做确定性结构对齐，严格区分 AUTHOR 陈述与 AI REVIEW 审读，不发起任何外部模型调用。点击引文页码可直接跳回该论文 PDF 原文高亮。"
+                      <TextBlock Text="基于已保存 Paper Card 做确定性结构对齐，严格区分 AUTHOR 陈述、AI REVIEW 审读与 HUMAN REVIEWED 人工修正，不发起任何外部模型调用。点击引文页码可直接跳回该论文 PDF 原文高亮。"
                                  Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="19" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="删除专题" Classes="danger compact" VerticalAlignment="Center"
                             Click="DeleteActiveProject_Click" />
                   </Grid>
+                </Border>
+
+                <!-- 专题级跨文献研究笔记（MY NOTE，随专题 Markdown 矩阵一并导出） -->
+                <Border Classes="card" Padding="18,14">
+                  <Expander IsExpanded="{Binding HasProjectNotes}">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                          <TextBlock Text="MY NOTE" Classes="muted" FontSize="10" FontWeight="SemiBold" />
+                        </Border>
+                        <TextBlock Text="专题研究笔记" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
+                        <Border Classes="badge-count">
+                          <TextBlock Text="{Binding ProjectNotesCount}" Classes="muted" FontSize="10.5" FontWeight="SemiBold" />
+                        </Border>
+                        <TextBlock Text="记录跨文献机制对比、理论张力与综述框架（导出 Markdown 矩阵时自动包含）" Classes="tertiary" FontSize="11.5" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Margin="0,12,0,2" Spacing="12">
+                      <Grid ColumnDefinitions="260,*,Auto" ColumnSpacing="8">
+                        <TextBox Grid.Column="0" Text="{Binding DraftProjectNoteTitle, Mode=TwoWay}"
+                                 PlaceholderText="笔记标题（可选，如「综述核心论点」）" />
+                        <TextBox Grid.Column="1" Text="{Binding DraftProjectNoteBody, Mode=TwoWay}"
+                                 PlaceholderText="写下跨文献观察或综述思路（Ctrl+Enter 快速保存）…"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="110"
+                                 KeyDown="DraftProjectNoteBody_KeyDown" />
+                        <Button Grid.Column="2" Content="＋ 保存专题笔记" Classes="primary compact"
+                                VerticalAlignment="Top" Click="SaveDraftProjectNote_Click" />
+                      </Grid>
+
+                      <ItemsControl ItemsSource="{Binding ProjectNotes}" IsVisible="{Binding HasProjectNotes}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="models:ProjectNoteItem">
+                            <Border Classes="note-card" Margin="0,0,0,8" ClipToBounds="True">
+                              <Border.ContextMenu>
+                                <ContextMenu>
+                                  <MenuItem Header="编辑专题笔记" Tag="{Binding}" Click="EditProjectNote_Click" />
+                                  <MenuItem Header="复制正文" Tag="{Binding}" Click="CopyProjectNote_Click" />
+                                  <Separator />
+                                  <MenuItem Header="删除专题笔记" Tag="{Binding}" Click="DeleteProjectNote_Click" />
+                                </ContextMenu>
+                              </Border.ContextMenu>
+                              <Grid ColumnDefinitions="4,*">
+                                <Border Grid.Column="0" Background="{DynamicResource InkTertiaryBrush}" />
+                                <StackPanel Grid.Column="1" Margin="14,11,14,12" Spacing="6">
+                                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <WrapPanel Grid.Column="0" ItemSpacing="8" VerticalAlignment="Center">
+                                      <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" />
+                                      <TextBlock Text="{Binding TimeLabel}" Classes="tertiary" FontSize="11" VerticalAlignment="Center" />
+                                    </WrapPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                      <Button Content="编辑" Classes="secondary compact" MinHeight="24" Padding="9,1" FontSize="11" Tag="{Binding}" Click="EditProjectNote_Click" />
+                                      <Button Content="删除" Classes="ghost compact" MinHeight="24" Padding="8,1" FontSize="11" Tag="{Binding}" Click="DeleteProjectNote_Click" />
+                                    </StackPanel>
+                                  </Grid>
+                                  <TextBlock Text="{Binding Note}" FontSize="13" LineHeight="21" TextWrapping="Wrap" />
+                                </StackPanel>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Expander>
                 </Border>
 
                 <!-- 空专题友好引导 -->
@@ -932,7 +1194,23 @@
                                       <DataTemplate x:DataType="models:MatrixClaimItem">
                                         <StackPanel Spacing="5" Margin="0,0,0,9">
                                           <TextBlock Text="{Binding Statement}" FontSize="13" LineHeight="21" TextWrapping="Wrap" />
+                                          <Border IsVisible="{Binding HasHumanCorrectedStatement}" Classes="human-correction-block" Padding="10,7">
+                                            <TextBlock Text="{Binding HumanCorrectedStatement, StringFormat='✎ 人工修正：{0}'}"
+                                                       FontSize="12.5" FontWeight="Medium" LineHeight="19" TextWrapping="Wrap" />
+                                          </Border>
                                           <WrapPanel ItemSpacing="6" LineSpacing="5">
+                                            <Border IsVisible="{Binding IsHumanConfirmed}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanCorrected}" Background="{DynamicResource BlueSoftBrush}" BorderBrush="{DynamicResource BlueLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanRejected}" Background="{DynamicResource RedSoftBrush}" BorderBrush="{DynamicResource RedLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource RedInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanUnresolved}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
                                             <Border IsVisible="{Binding IsAuditPositive}" Background="{DynamicResource EmeraldSoftBrush}" CornerRadius="999" Padding="7,2">
                                               <TextBlock Text="{Binding AuditBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10" FontWeight="SemiBold" />
                                             </Border>
@@ -984,7 +1262,27 @@
                                   <ItemsControl ItemsSource="{Binding AiLimitations}" IsVisible="{Binding HasAiLimitations}">
                                     <ItemsControl.ItemTemplate>
                                       <DataTemplate x:DataType="models:MatrixClaimItem">
-                                        <TextBlock Text="{Binding Statement, StringFormat='• {0}'}" FontSize="12.5" LineHeight="20" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                        <StackPanel Spacing="4" Margin="0,0,0,8">
+                                          <TextBlock Text="{Binding Statement, StringFormat='• {0}'}" FontSize="12.5" LineHeight="20" TextWrapping="Wrap" />
+                                          <Border IsVisible="{Binding HasHumanCorrectedStatement}" Classes="human-correction-block" Padding="9,6">
+                                            <TextBlock Text="{Binding HumanCorrectedStatement, StringFormat='✎ 人工修正：{0}'}"
+                                                       FontSize="12" FontWeight="Medium" LineHeight="18" TextWrapping="Wrap" />
+                                          </Border>
+                                          <WrapPanel IsVisible="{Binding HasHumanReview}" ItemSpacing="5" LineSpacing="4">
+                                            <Border IsVisible="{Binding IsHumanConfirmed}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanCorrected}" Background="{DynamicResource BlueSoftBrush}" BorderBrush="{DynamicResource BlueLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanRejected}" Background="{DynamicResource RedSoftBrush}" BorderBrush="{DynamicResource RedLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource RedInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <Border IsVisible="{Binding IsHumanUnresolved}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="7,2">
+                                              <TextBlock Text="{Binding HumanReviewBadgeLabel}" Foreground="{DynamicResource AmberInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                          </WrapPanel>
+                                        </StackPanel>
                                       </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
@@ -1001,6 +1299,150 @@
                             </Grid>
                           </StackPanel>
                         </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+
+          <!-- C. 跨论文 / 专题级 SQLite FTS5 全文检索面板（点击命中直跳论文、PDF 原页或我的笔记） -->
+          <Border Classes="workspace-surface" Margin="12,12,12,14" IsVisible="{Binding ShowSearchPanelView}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="28,24,28,48" Spacing="18" MaxWidth="980" HorizontalAlignment="Center">
+                <Border Classes="card" Padding="20,18">
+                  <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="FULL-TEXT SEARCH · SQLite FTS5 跨文献双语检索" Classes="eyebrow" Foreground="{DynamicResource AccentBrush}" />
+                        <TextBlock Text="一次穿透 PDF 原文、Paper Card 主张、个人笔记（MY NOTE）与人工审定记录（HUMAN REVIEWED），点击任意命中直跳对应位置。"
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="← 返回阅读" Classes="ghost compact" VerticalAlignment="Top"
+                              Click="CloseFullTextSearch_Click" />
+                    </Grid>
+
+                    <!-- 大号检索输入框 -->
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                      <TextBox x:Name="FullTextSearchInput" Grid.Column="0"
+                               Text="{Binding FullTextQuery, Mode=TwoWay}"
+                               KeyDown="FullTextSearchInput_KeyDown"
+                               PlaceholderText="输入中文术语、英文词干、作者或笔记关键词，回车执行检索…" />
+                      <Button Grid.Column="1" Content="清空" Classes="ghost"
+                              Click="ClearFullTextSearch_Click" />
+                      <Button Grid.Column="2" Content="检索" Classes="primary"
+                              Click="RunFullTextSearch_Click" />
+                    </Grid>
+
+                    <!-- 作用范围 + 来源类型筛选芯片 -->
+                    <StackPanel Spacing="8">
+                      <WrapPanel IsVisible="{Binding CanToggleProjectSearchScope}" ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="检索范围" Classes="eyebrow" VerticalAlignment="Center" Margin="0,0,4,0" />
+                        <Button Content="{Binding ActiveProjectName, StringFormat='仅当前专题：{0}'}"
+                                Classes="scope-chip" Classes.active="{Binding IsSearchingProjectScope}"
+                                Click="SearchScopeProject_Click" />
+                        <Button Content="全部文献库"
+                                Classes="scope-chip" Classes.active="{Binding IsSearchingAllLibrary}"
+                                Click="SearchScopeAll_Click" />
+                      </WrapPanel>
+
+                      <WrapPanel ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="来源筛选" Classes="eyebrow" VerticalAlignment="Center" Margin="0,0,4,0" />
+                        <Button Content="全部来源" Tag="ALL" Classes="scope-chip" Classes.active="{Binding IsSourceFilterAll}" Click="SearchSourceFilter_Click" />
+                        <Button Content="PDF 原文" Tag="SOURCE_BLOCK" Classes="scope-chip" Classes.active="{Binding IsSourceFilterSourceBlock}" Click="SearchSourceFilter_Click" />
+                        <Button Content="Paper Card" Tag="PAPER_CARD" Classes="scope-chip" Classes.active="{Binding IsSourceFilterPaperCard}" Click="SearchSourceFilter_Click" />
+                        <Button Content="我的笔记 (MY NOTE)" Tag="USER_NOTE" Classes="scope-chip" Classes.active="{Binding IsSourceFilterUserNote}" Click="SearchSourceFilter_Click" />
+                        <Button Content="人工审定 / 复核" Tag="HUMAN_REVIEWED" Classes="scope-chip" Classes.active="{Binding IsSourceFilterHumanReviewed}" Click="SearchSourceFilter_Click" />
+                        <Button Content="书目元数据" Tag="METADATA" Classes="scope-chip" Classes.active="{Binding IsSourceFilterMetadata}" Click="SearchSourceFilter_Click" />
+                      </WrapPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding FullTextStatusLine}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <!-- 初始引导 -->
+                <Border Classes="soft-card" Padding="32,26" IsVisible="{Binding IsFullTextPromptVisible}">
+                  <StackPanel Spacing="8" HorizontalAlignment="Center" MaxWidth="520">
+                    <TextBlock Text="输入关键词开始跨文献溯源检索" Classes="h2" HorizontalAlignment="Center" />
+                    <TextBlock Text="支持中文短语（如“双重差分”“算法控制”）、英文前缀（如 identif 匹配 identification）以及你写下的个人笔记和人工修正表述。"
+                               Classes="muted" FontSize="12.5" TextAlignment="Center" TextWrapping="Wrap" LineHeight="20" />
+                  </StackPanel>
+                </Border>
+
+                <!-- 无结果提示 -->
+                <Border Classes="soft-card" Padding="28,22" IsVisible="{Binding HasNoFullTextHits}">
+                  <StackPanel Spacing="6" HorizontalAlignment="Center">
+                    <TextBlock Text="未找到匹配的原文、主张或笔记片段" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Center" />
+                    <TextBlock Text="可以尝试切换来源筛选为「全部来源」，或将范围切换至「全部文献库」。" Classes="muted" FontSize="12" HorizontalAlignment="Center" />
+                  </StackPanel>
+                </Border>
+
+                <!-- 可溯源命中片段列表 -->
+                <ItemsControl ItemsSource="{Binding FullTextHits}" IsVisible="{Binding HasFullTextHits}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:SearchHitItem">
+                      <Border Classes="claim-card" Margin="0,0,0,12" ClipToBounds="True">
+                        <Border.ContextMenu>
+                          <ContextMenu>
+                            <MenuItem Header="直达对应位置" Tag="{Binding}" Click="SearchHitPrimaryJump_Click" />
+                            <MenuItem Header="定位 PDF 原页" IsVisible="{Binding CanJumpPdf}" Tag="{Binding}" Click="SearchHitJumpPdf_Click" />
+                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SearchHitOpenPaper_Click" />
+                            <MenuItem Header="打开论文「我的笔记」" Tag="{Binding}" Click="SearchHitOpenNotes_Click" />
+                            <Separator />
+                            <MenuItem Header="复制命中片段与来源" Tag="{Binding}" Click="SearchHitCopySnippet_Click" />
+                          </ContextMenu>
+                        </Border.ContextMenu>
+                        <Grid ColumnDefinitions="4,*">
+                          <Border Grid.Column="0" IsVisible="{Binding IsSourceBlock}" Background="{DynamicResource BlueInkBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsCardAuthor}" Background="{DynamicResource BlueInkBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsCardAi}" Background="{DynamicResource PurpleInkBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsUserNote}" Background="{DynamicResource InkTertiaryBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsHumanReviewed}" Background="{DynamicResource EmeraldInkBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsMetadata}" Background="{DynamicResource AmberInkBrush}" />
+
+                          <StackPanel Grid.Column="1" Margin="18,14,18,15" Spacing="9">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                              <WrapPanel Grid.Column="0" ItemSpacing="7" LineSpacing="4" VerticalAlignment="Center">
+                                <Border IsVisible="{Binding IsSourceBlock}" Background="{DynamicResource BlueSoftBrush}" BorderBrush="{DynamicResource BlueLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <Border IsVisible="{Binding IsCardAuthor}" Background="{DynamicResource BlueSoftBrush}" BorderBrush="{DynamicResource BlueLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <Border IsVisible="{Binding IsCardAi}" Background="{DynamicResource PurpleSoftBrush}" BorderBrush="{DynamicResource PurpleLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <Border IsVisible="{Binding IsUserNote}" Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Classes="muted" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <Border IsVisible="{Binding IsHumanReviewed}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <Border IsVisible="{Binding IsMetadata}" Background="{DynamicResource AmberSoftBrush}" BorderBrush="{DynamicResource AmberLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource AmberInkBrush}" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                                <TextBlock Text="{Binding PaperTitle}" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                <Border IsVisible="{Binding HasPageNumber}" Classes="badge" Padding="7,2">
+                                  <TextBlock Text="{Binding PageBadgeLabel}" Classes="muted" FontSize="10" FontWeight="SemiBold" />
+                                </Border>
+                              </WrapPanel>
+
+                              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                                <Button IsVisible="{Binding ShowSecondaryPdfButton}"
+                                        Content="{Binding SecondaryPdfJumpLabel}"
+                                        Classes="secondary compact" MinHeight="26" Padding="9,2" FontSize="11"
+                                        Tag="{Binding}" Click="SearchHitJumpPdf_Click" />
+                                <Button Content="{Binding PrimaryJumpLabel}"
+                                        Classes="tonal compact" MinHeight="26" Padding="10,2" FontSize="11"
+                                        Tag="{Binding}" Click="SearchHitPrimaryJump_Click" />
+                              </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="{Binding Snippet}" FontSize="13" LineHeight="22" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </Grid>
                       </Border>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>

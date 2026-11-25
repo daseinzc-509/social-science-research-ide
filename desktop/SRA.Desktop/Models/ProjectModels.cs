@@ -32,6 +32,44 @@ public sealed record ProjectReadingStatusOption(string Value, string Label)
 public sealed record ProjectEditorResult(string Name, string ResearchQuestion, string Description);
 
 /// <summary>
+/// 专题级跨文献研究笔记（MY NOTE / USER_NOTE）。
+/// </summary>
+public sealed class ProjectNoteItem
+{
+    public string Id { get; init; } = "";
+    public string ProjectId { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string Note { get; init; } = "";
+    public string CreatedAt { get; init; } = "";
+    public string UpdatedAt { get; init; } = "";
+
+    public bool HasTitle => !string.IsNullOrWhiteSpace(Title);
+    public string DisplayTitle => HasTitle ? Title : "专题研究笔记";
+    public string TimeLabel
+    {
+        get
+        {
+            var iso = string.IsNullOrWhiteSpace(UpdatedAt) ? CreatedAt : UpdatedAt;
+            if (DateTimeOffset.TryParse(iso, out var dto))
+            {
+                return dto.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            }
+            return string.IsNullOrWhiteSpace(iso) ? "" : iso[..Math.Min(16, iso.Length)];
+        }
+    }
+
+    public static ProjectNoteItem FromJson(JsonElement node) => new()
+    {
+        Id = JsonRead.Text(node, "id"),
+        ProjectId = JsonRead.Text(node, "project_id"),
+        Title = JsonRead.Text(node, "title"),
+        Note = JsonRead.Text(node, "note"),
+        CreatedAt = JsonRead.Text(node, "created_at"),
+        UpdatedAt = JsonRead.Text(node, "updated_at"),
+    };
+}
+
+/// <summary>
 /// 证据矩阵单条主张附带的可点击原文页码引用。
 /// </summary>
 public sealed class MatrixCitationItem
@@ -71,17 +109,28 @@ public sealed class MatrixCitationItem
 /// </summary>
 public sealed class MatrixClaimItem
 {
+    public string ClaimId { get; init; } = "";
     public string FieldName { get; init; } = "";
     public string Statement { get; init; } = "";
     public string Provenance { get; init; } = "";
     public string Verification { get; init; } = "";
     public string SemanticSupport { get; init; } = "";
+    public string HumanReviewStatus { get; init; } = "";
+    public string HumanCorrectedStatement { get; init; } = "";
+    public string HumanReviewNote { get; init; } = "";
     public List<MatrixCitationItem> Citations { get; init; } = [];
 
     public bool IsAuthor => string.Equals(Provenance, "AUTHOR_STATED", StringComparison.OrdinalIgnoreCase);
     public bool IsAi => string.Equals(Provenance, "AI_INFERRED", StringComparison.OrdinalIgnoreCase);
     public string SourceTag => IsAuthor ? "AUTHOR" : (IsAi ? "AI REVIEW" : Provenance);
     public bool HasCitations => Citations.Count > 0;
+    public bool HasHumanReview => !string.IsNullOrWhiteSpace(HumanReviewStatus);
+    public string HumanReviewBadgeLabel => ClaimReviewItem.StatusToLabel(HumanReviewStatus);
+    public bool IsHumanConfirmed => string.Equals(HumanReviewStatus, "confirmed", StringComparison.OrdinalIgnoreCase);
+    public bool IsHumanCorrected => string.Equals(HumanReviewStatus, "corrected", StringComparison.OrdinalIgnoreCase);
+    public bool IsHumanRejected => string.Equals(HumanReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase);
+    public bool IsHumanUnresolved => string.Equals(HumanReviewStatus, "unresolved", StringComparison.OrdinalIgnoreCase);
+    public bool HasHumanCorrectedStatement => !string.IsNullOrWhiteSpace(HumanCorrectedStatement);
 
     public string AuditBadgeLabel
     {
@@ -130,13 +179,26 @@ public sealed class MatrixClaimItem
                 }
             }
         }
+        var humanStatus = "";
+        var humanCorrected = "";
+        var humanNote = "";
+        if (node.TryGetProperty("human_review", out var hr) && hr.ValueKind == JsonValueKind.Object)
+        {
+            humanStatus = JsonRead.Text(hr, "user_status");
+            humanCorrected = JsonRead.Text(hr, "corrected_statement");
+            humanNote = JsonRead.Text(hr, "note");
+        }
         return new MatrixClaimItem
         {
+            ClaimId = JsonRead.Text(node, "claim_id"),
             FieldName = JsonRead.Text(node, "field_name"),
             Statement = JsonRead.Text(node, "statement"),
             Provenance = JsonRead.Text(node, "provenance"),
             Verification = JsonRead.Text(node, "verification"),
             SemanticSupport = JsonRead.Text(node, "semantic_support"),
+            HumanReviewStatus = humanStatus,
+            HumanCorrectedStatement = humanCorrected,
+            HumanReviewNote = humanNote,
             Citations = citations,
         };
     }

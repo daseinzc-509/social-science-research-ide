@@ -36,6 +36,7 @@ public partial class MainWindowViewModel
 
         if (detail.Card is not { ValueKind: JsonValueKind.Object } card)
         {
+            ProjectNotesAndReviews(detail, []);
             SelectedStudyType = "未分析";
             SelectedAnalysisState = "等待分析";
             AbstractText = "这篇 PDF 已导入并解析，但还没有 Paper Card。";
@@ -47,10 +48,30 @@ public partial class MainWindowViewModel
         SelectedAnalysisState = "可审计分析已完成";
         ProjectMetadata(card);
         ProjectStudyProfile(card);
+        var activeIds = CollectCardClaimIds(card);
+        ProjectNotesAndReviews(detail, activeIds);
         ProjectClaims(card);
         ProjectTables(card);
         ProjectVisuals(card);
         ProjectWarnings(card);
+    }
+
+    private static HashSet<string> CollectCardClaimIds(JsonElement card)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in new[] { "metadata_claims", "basic_facts", "analysis", "limitations" })
+        {
+            foreach (var item in ParseClaims(card, group))
+            {
+                if (!string.IsNullOrWhiteSpace(item.ClaimId)) ids.Add(item.ClaimId);
+            }
+        }
+        var rec = ParseSingleClaim(card, "reading_recommendation");
+        if (rec is not null && !string.IsNullOrWhiteSpace(rec.ClaimId))
+        {
+            ids.Add(rec.ClaimId);
+        }
+        return ids;
     }
 
     private void ProjectMetadata(JsonElement card)
@@ -99,11 +120,13 @@ public partial class MainWindowViewModel
 
     private void ProjectClaims(JsonElement card)
     {
-        var metadataClaims = ParseClaims(card, "metadata_claims");
-        var basicFacts = ParseClaims(card, "basic_facts");
-        var analysis = ParseClaims(card, "analysis");
-        var limitations = ParseClaims(card, "limitations");
-        var recommendation = ParseSingleClaim(card, "reading_recommendation");
+        var metadataClaims = ParseClaims(card, "metadata_claims").Select(AttachHumanReview).ToList();
+        var basicFacts = ParseClaims(card, "basic_facts").Select(AttachHumanReview).ToList();
+        var analysis = ParseClaims(card, "analysis").Select(AttachHumanReview).ToList();
+        var limitations = ParseClaims(card, "limitations").Select(AttachHumanReview).ToList();
+        var recommendation = ParseSingleClaim(card, "reading_recommendation") is { } rec
+            ? AttachHumanReview(rec)
+            : null;
 
         Replace(MetadataClaims, metadataClaims);
         Replace(BasicFacts, basicFacts);
@@ -134,15 +157,11 @@ public partial class MainWindowViewModel
                     continue;
                 }
                 var baseItem = ClaimItem.FromJson(raw);
-                var claimId = JsonRead.Text(raw, "claim_id");
-                if (!string.IsNullOrWhiteSpace(claimId) && auditById.TryGetValue(claimId, out var audit))
-                {
-                    findings.Add(MergeAudit(baseItem, audit));
-                }
-                else
-                {
-                    findings.Add(baseItem);
-                }
+                var claimId = baseItem.ClaimId;
+                var merged = !string.IsNullOrWhiteSpace(claimId) && auditById.TryGetValue(claimId, out var audit)
+                    ? MergeAudit(baseItem, audit)
+                    : baseItem;
+                findings.Add(AttachHumanReview(merged));
             }
         }
 
@@ -168,6 +187,7 @@ public partial class MainWindowViewModel
         }
         return new ClaimItem
         {
+            ClaimId = source.ClaimId,
             FieldName = source.FieldName,
             FieldLabel = source.FieldLabel,
             Statement = source.Statement,
@@ -178,6 +198,9 @@ public partial class MainWindowViewModel
             SemanticSupport = JsonRead.Text(audit, "semantic_support", source.SemanticSupport),
             Rationale = JsonRead.Text(audit, "rationale", source.Rationale),
             Evidence = evidence,
+            HumanReviewStatus = source.HumanReviewStatus,
+            HumanCorrectedStatement = source.HumanCorrectedStatement,
+            HumanReviewNote = source.HumanReviewNote,
         };
     }
 
@@ -240,6 +263,7 @@ public partial class MainWindowViewModel
         ManualMetadataNote = "";
         ReviewPlanText = "—";
         ReferenceStatusText = "尚未提取参考文献。";
+        ClearNotesAndReviews();
         RaiseProjectionSectionState();
     }
 

@@ -81,7 +81,7 @@ flowchart TB
 - `PRAGMA busy_timeout = 15000`（15 秒锁等待缓冲）；
 - 关键并发写事务（如复评提交）使用 `BEGIN IMMEDIATE` 避免死锁升级。
 
-### 3.2 数据库表全景（共 13 张表）
+### 3.2 数据库表全景（共 16 张表）
 
 | 表名 | 所属模块 | 职责与核心关系 |
 | --- | --- | --- |
@@ -90,13 +90,15 @@ flowchart TB
 | `figure_regions` | `repository.py` | Docling 定位的图片/统计图区域坐标与题注。 |
 | `paper_cards` | `repository.py` | 当前论文的结构化 `PaperCard` JSON（含 `basic_facts`、`analysis`、`study_profile`、`claim_audits`）。 |
 | `paper_metadata_overrides` | `repository.py` | 研究者手动修订的书目元数据（重跑解析或分析时绝不被覆盖）。 |
-| `user_notes` | `repository.py` | 研究者个人阅读笔记（`USER_NOTE`，独立于 AI 产物）。 |
+| `user_notes` | `repository.py` | 研究者个人阅读笔记（`USER_NOTE`，含可选标题与关联 PDF 页码，重跑分析绝不覆盖）。 |
+| `claim_reviews` | `repository.py` | 单条 Claim 四态人工审定与修正记录（`HUMAN_REVIEWED`，`UNIQUE(paper_id, claim_id)`，物理隔离于 `paper_cards`，重跑分析绝不覆盖）。 |
 | `model_runs` | `repository.py` | 按 `(paper_id, stage, model, prompt_version, input_sha256)` 索引的模型响应缓存。 |
 | `reference_entries` | `repository.py` | 结构化参考文献条目。 |
 | `citation_mentions` | `repository.py` | 正文引文提及记录。 |
 | `research_projects` | `repository.py` | 研究项目实体（名称大小写不敏感唯一、研究问题、说明）。 |
 | `project_papers` | `repository.py` | 项目与论文的多对多关联（阅读状态 `reading_status`、项目备注、排序位）。 |
-| `search_fts` | `search.py` | **SQLite FTS5 虚拟表**：中英双语混合分词（中文 2-gram + 英文词干/前缀）索引论文正文、PaperCard（含证据引文）、个人笔记与有效人工校订，保留 `source_kind` 与 `provenance` 字段；老库升级首次打开自动全量回填。 |
+| `project_notes` | `repository.py` | 专题级跨文献综合研究笔记（`USER_NOTE`，随专题 Markdown 证据矩阵一并导出）。 |
+| `search_fts` | `search.py` | **SQLite FTS5 虚拟表**：中英双语混合分词（中文 2-gram + 英文词干/前缀）索引论文正文、PaperCard（含证据引文）、个人笔记（`USER_NOTE`）、人工局部复核与 Claim 人工审定（`HUMAN_REVIEWED`）；支持按专题 `project_id` 与 `source_kind` 过滤。 |
 | `region_reviews` | `services/region_review.py` | 局部 OCR / 人工校订多版本审计记录（含 `revision_no`、源块内容指纹与撤回时间）。 |
 | `review_reanalyses` | `services/region_review_reanalysis.py` | v5 独立 Pro 复评快照（与原 `paper_cards` 隔离对照，记录 `original_card_sha256`）。 |
 
@@ -110,11 +112,11 @@ flowchart TB
 | --- | --- | --- |
 | `health` | `GET /api/v1/health` | 后端就绪探针。 |
 | `papers` | `GET /papers`, `GET /papers/search`, `GET/DELETE /papers/{id}`, `GET /papers/{id}/pdf`, `GET /papers/{id}/reading-report`, `POST /papers/{id}/reparse` | 文献库管理、FTS5 双语检索、原文流与精读报告。 |
-| `projects` | `GET/POST /projects`, `GET/PUT/DELETE /projects/{id}`, `POST/DELETE /projects/{id}/papers/{paper_id}`, `GET /projects/{id}/evidence-matrix` | 项目聚合、项目范围检索与零 LLM 确定性 Evidence Matrix。 |
+| `projects` | `GET/POST /projects`, `GET/PUT/DELETE /projects/{id}`, `POST/DELETE /projects/{id}/papers/{paper_id}`, `GET/POST/PUT/DELETE /projects/{id}/notes`, `GET /projects/{id}/evidence-matrix{,.csv,.md}` | 专题聚合、专题研究笔记、零 LLM 确定性 Evidence Matrix 及 Excel CSV / Markdown 导出。 |
 | `imports` | `POST /import`, `POST /import-batch` | 异步 PDF 导入（返回 `202 JobAccepted`）。 |
 | `analysis` | `POST /{paper_id}/analysis/preview`, `POST /{paper_id}/analyze` | 费用/截断预检与异步 Lite/Pro 分析。 |
 | `jobs` | `GET /jobs`, `GET /jobs/{id}`, **`GET /jobs/{id}/events`（SSE）**, `POST /jobs/{id}/cancel` | 任务状态查询、Server-Sent Events 实时进度流与安全取消。 |
-| `paper_tools` | `POST/DELETE /{id}/metadata`, `POST /{id}/references/extract`, `GET /{id}/{card.json,text.txt,references.json,references.bib}` | 元数据修订、参考文献提取与多格式导出。 |
+| `paper_tools` | `POST/DELETE /{id}/metadata`, `GET/POST/PUT/DELETE /{id}/notes`, `GET/PUT/DELETE /{id}/claim-reviews`, `POST /{id}/references/extract`, `GET /{id}/{card.json,text.txt,references.json,references.bib}` | 元数据修订、个人笔记、Claim 单条人工审定、参考文献提取与多格式导出。 |
 | `region_review` | `/pages/{n}.png`, `/pages/{n}/blocks`, `/pages/{n}/preview`, `/confirm`, `/reviews`, `/reviews/{id}/{revise,revoke}`, `/packet`, `/reanalysis/{preview,run,reports}` | 原文对照、局部 OCR、版本修订与 v5 独立 Pro 复评。 |
 | `visual` | `/settings/visual`, `/figures/{id}/preview`, `/figures/{id}/analyze` | 裁剪图本地预览与显式授权后的 Vision 图片分析。 |
 | `model_center` | `/model-center`, `/profiles`, `/activate`, `/network`, `/enhancements`, `/models/{mode,download,verify}` | 统一模型配置、代理与 Docling 权重管理。 |

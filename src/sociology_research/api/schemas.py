@@ -64,6 +64,8 @@ class PaperDetailResponse(BaseModel):
     metadata_overrides: dict[str, Any] = Field(default_factory=dict)
     references: list[dict[str, Any]] = Field(default_factory=list)
     citation_mentions: list[dict[str, Any]] = Field(default_factory=list)
+    user_notes: list[dict[str, Any]] = Field(default_factory=list)
+    claim_reviews: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AnalysisRequest(BaseModel):
@@ -375,9 +377,44 @@ class ProjectPaperItemView(ProjectPaperEntryView):
     paper: PaperSummary
 
 
+class ProjectNoteCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default="", max_length=200)
+    note: str = Field(min_length=1, max_length=20000)
+
+
+class ProjectNoteUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, min_length=1, max_length=20000)
+
+
+class ProjectNoteView(BaseModel):
+    id: str
+    project_id: str
+    title: str = ""
+    note: str
+    provenance: str = "USER_NOTE"
+    created_at: str
+    updated_at: str
+
+
+class ProjectNoteListResponse(BaseModel):
+    notes: list[ProjectNoteView] = Field(default_factory=list)
+
+
+class ProjectNoteDeleteResponse(BaseModel):
+    project_id: str
+    note_id: str
+    deleted: bool = True
+
+
 class ProjectDetailResponse(BaseModel):
     project: ProjectSummaryView
     papers: list[ProjectPaperItemView] = Field(default_factory=list)
+    notes: list[ProjectNoteView] = Field(default_factory=list)
 
 
 class ProjectDeleteResponse(BaseModel):
@@ -399,6 +436,13 @@ class MatrixCitationView(BaseModel):
     quote: str
 
 
+class ClaimHumanReviewSummaryView(BaseModel):
+    user_status: str
+    corrected_statement: str = ""
+    note: str = ""
+    updated_at: str = ""
+
+
 class MatrixClaimCellView(BaseModel):
     claim_id: str | None = None
     field_name: str
@@ -406,6 +450,7 @@ class MatrixClaimCellView(BaseModel):
     provenance: str
     verification: str
     semantic_support: str | None = None
+    human_review: ClaimHumanReviewSummaryView | None = None
     citations: list[MatrixCitationView] = Field(default_factory=list)
 
 
@@ -439,3 +484,74 @@ class ProjectEvidenceMatrixResponse(BaseModel):
     makes_llm_calls: bool = False
     provenance_policy: str = "STRICT_SOURCE_SEPARATION"
     rows: list[EvidenceMatrixRowView] = Field(default_factory=list)
+
+
+class UserNoteCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default="", max_length=200)
+    note: str = Field(min_length=1, max_length=20000)
+    page_number: int | None = Field(default=None, ge=1)
+
+
+class UserNoteUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, min_length=1, max_length=20000)
+    page_number: int | None = Field(default=None, ge=1)
+
+
+class UserNoteView(BaseModel):
+    id: str
+    paper_id: str
+    title: str = ""
+    note: str
+    page_number: int | None = None
+    provenance: str = "USER_NOTE"
+    created_at: str
+    updated_at: str
+
+
+class UserNoteListResponse(BaseModel):
+    notes: list[UserNoteView] = Field(default_factory=list)
+
+
+class UserNoteDeleteResponse(BaseModel):
+    paper_id: str
+    note_id: str
+    deleted: bool = True
+
+
+class ClaimReviewUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_status: str
+    field_name: str = Field(default="", max_length=120)
+    original_statement: str = Field(default="", max_length=8000)
+    corrected_statement: str = Field(default="", max_length=8000)
+    note: str = Field(default="", max_length=4000)
+
+
+class ClaimReviewView(BaseModel):
+    id: str
+    paper_id: str
+    claim_id: str
+    field_name: str = ""
+    original_statement: str = ""
+    user_status: str
+    corrected_statement: str = ""
+    note: str = ""
+    provenance: str = "HUMAN_REVIEWED"
+    created_at: str
+    updated_at: str
+
+
+class ClaimReviewListResponse(BaseModel):
+    reviews: list[ClaimReviewView] = Field(default_factory=list)
+
+
+class ClaimReviewDeleteResponse(BaseModel):
+    paper_id: str
+    claim_id: str
+    deleted: bool = True

@@ -19,6 +19,7 @@ public partial class MainWindow : Window
         // failures (AVLN3000) for the model-center launcher.
         ModelCenterLaunchButton.Click += OpenModelCenter_Click;
         AttachEvidenceNavigation();
+        AttachClaimReviewNavigation();
         AttachDragAndDrop();
         KeyDown += MainWindow_KeyDown;
         NavigateTo("papers");
@@ -51,12 +52,21 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 绑定全局高频快捷键：Ctrl+F 搜索、Ctrl+/ 专注阅读开关、Ctrl+O 导入 PDF、Esc 清空检索。
+    /// 绑定全局高频快捷键：Ctrl+F 搜索、Ctrl+Shift+F 跨论文全文检索面板、Ctrl+/ 专注阅读开关、Ctrl+O 导入 PDF、Esc 清空检索。
     /// </summary>
-    private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
+    private async void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (ViewModel is null) return;
         var modifiers = e.KeyModifiers;
+        if (modifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.F)
+        {
+            NavigateTo("papers");
+            await ViewModel.OpenFullTextSearchPanelAsync();
+            FullTextSearchInput.Focus();
+            FullTextSearchInput.SelectAll();
+            e.Handled = true;
+            return;
+        }
         if (modifiers == KeyModifiers.Control)
         {
             if (e.Key == Key.F)

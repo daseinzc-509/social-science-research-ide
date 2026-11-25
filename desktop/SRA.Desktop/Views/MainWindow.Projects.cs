@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using SRA.Desktop.Models;
 
@@ -73,8 +75,82 @@ public partial class MainWindow
     private async void ExportActiveMatrixMarkdown_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel?.ActiveProject is not { } proj) return;
-        var md = ViewModel.BuildActiveMatrixMarkdown();
+        string md;
+        try
+        {
+            md = await ViewModel.Api.GetProjectEvidenceMatrixMarkdownAsync(proj.Id);
+        }
+        catch
+        {
+            md = ViewModel.BuildActiveMatrixMarkdown();
+        }
         await SaveTextAsync(SafeName(proj.Name) + "-evidence-matrix.md", md);
+    }
+
+    private async void ExportActiveMatrixCsv_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.ActiveProject is not { } proj) return;
+        try
+        {
+            var csv = await ViewModel.Api.GetProjectEvidenceMatrixCsvAsync(proj.Id);
+            await SaveTextAsync(SafeName(proj.Name) + "-evidence-matrix.csv", csv);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "导出专题 CSV 失败：" + exc.Message;
+        }
+    }
+
+    // ─── 专题级研究笔记（MY NOTE）就地交互 ───
+
+    private async void SaveDraftProjectNote_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        await ViewModel.CreateDraftProjectNoteAsync();
+    }
+
+    private async void DraftProjectNoteBody_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            if (ViewModel is not null)
+            {
+                await ViewModel.CreateDraftProjectNoteAsync();
+            }
+        }
+    }
+
+    private async void EditProjectNote_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || (sender as Control)?.Tag is not ProjectNoteItem note) return;
+        var dialog = new NoteEditorWindow(note);
+        var edited = await dialog.ShowDialog<NoteEditorResult?>(this);
+        if (edited is null) return;
+        await ViewModel.UpdateProjectNoteAsync(note.Id, edited);
+    }
+
+    private async void DeleteProjectNote_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || (sender as Control)?.Tag is not ProjectNoteItem note) return;
+        var confirm = new ConfirmWindow(
+            "删除专题研究笔记",
+            $"确定删除专题笔记“{note.DisplayTitle}”？此操作不可撤销。",
+            "删除笔记");
+        if (!await confirm.ShowDialog<bool>(this)) return;
+        await ViewModel.DeleteProjectNoteAsync(note);
+    }
+
+    private async void CopyProjectNote_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.Tag is not ProjectNoteItem note) return;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+        await clipboard.SetTextAsync(note.Note);
+        if (ViewModel is not null)
+        {
+            ViewModel.StatusText = "已复制专题笔记到剪贴板。";
+        }
     }
 
     // ─── 左侧专题文件夹右键菜单事件 ───
@@ -101,8 +177,30 @@ public partial class MainWindow
     {
         if (ViewModel is null || sender is not Control { Tag: ProjectSummaryView proj }) return;
         await ViewModel.SelectProjectScopeAsync(proj, openMatrix: true);
-        var md = ViewModel.BuildActiveMatrixMarkdown();
+        string md;
+        try
+        {
+            md = await ViewModel.Api.GetProjectEvidenceMatrixMarkdownAsync(proj.Id);
+        }
+        catch
+        {
+            md = ViewModel.BuildActiveMatrixMarkdown();
+        }
         await SaveTextAsync(SafeName(proj.Name) + "-evidence-matrix.md", md);
+    }
+
+    private async void ContextExportProjectMatrixCsv_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || sender is not Control { Tag: ProjectSummaryView proj }) return;
+        try
+        {
+            var csv = await ViewModel.Api.GetProjectEvidenceMatrixCsvAsync(proj.Id);
+            await SaveTextAsync(SafeName(proj.Name) + "-evidence-matrix.csv", csv);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "导出专题 CSV 失败：" + exc.Message;
+        }
     }
 
     private async void ContextDeleteProject_Click(object? sender, RoutedEventArgs e)

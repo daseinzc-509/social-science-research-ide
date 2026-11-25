@@ -85,9 +85,27 @@ class ResearchRepository:
                 CREATE TABLE IF NOT EXISTS user_notes (
                     id TEXT PRIMARY KEY,
                     paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT '',
                     note TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    page_number INTEGER,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS claim_reviews (
+                    id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    claim_id TEXT NOT NULL,
+                    field_name TEXT NOT NULL DEFAULT '',
+                    original_statement TEXT NOT NULL DEFAULT '',
+                    user_status TEXT NOT NULL CHECK (user_status IN ('confirmed', 'corrected', 'rejected', 'unresolved')),
+                    corrected_statement TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (paper_id, claim_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_claim_reviews_paper
+                    ON claim_reviews(paper_id, updated_at);
                 CREATE TABLE IF NOT EXISTS model_runs (
                     paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
                     stage TEXT NOT NULL,
@@ -144,6 +162,16 @@ class ResearchRepository:
                     ON project_papers(project_id, position, added_at);
                 CREATE INDEX IF NOT EXISTS idx_project_papers_paper
                     ON project_papers(paper_id);
+                CREATE TABLE IF NOT EXISTS project_notes (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES research_projects(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_project_notes_project
+                    ON project_notes(project_id, updated_at);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(source_blocks)")}
@@ -158,6 +186,13 @@ class ResearchRepository:
             paper_columns = {row["name"] for row in connection.execute("PRAGMA table_info(papers)")}
             if "parser_version" not in paper_columns:
                 connection.execute("ALTER TABLE papers ADD COLUMN parser_version TEXT NOT NULL DEFAULT 'legacy'")
+            note_columns = {row["name"] for row in connection.execute("PRAGMA table_info(user_notes)")}
+            if "title" not in note_columns:
+                connection.execute("ALTER TABLE user_notes ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            if "page_number" not in note_columns:
+                connection.execute("ALTER TABLE user_notes ADD COLUMN page_number INTEGER")
+            if "updated_at" not in note_columns:
+                connection.execute("ALTER TABLE user_notes ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
             if ensure_fts_schema(connection):
                 has_papers = connection.execute("SELECT 1 FROM papers LIMIT 1").fetchone() is not None
                 has_fts = connection.execute("SELECT 1 FROM search_fts LIMIT 1").fetchone() is not None
@@ -689,6 +724,9 @@ class ResearchRepository:
                 "user_notes": connection.execute(
                     "SELECT COUNT(*) FROM user_notes WHERE paper_id = ?", (paper_id,)
                 ).fetchone()[0],
+                "claim_reviews": connection.execute(
+                    "SELECT COUNT(*) FROM claim_reviews WHERE paper_id = ?", (paper_id,)
+                ).fetchone()[0],
                 "metadata_overrides": connection.execute(
                     "SELECT COUNT(*) FROM paper_metadata_overrides WHERE paper_id = ?", (paper_id,)
                 ).fetchone()[0],
@@ -704,17 +742,240 @@ class ResearchRepository:
             **{key: int(value) for key, value in counts.items()},
         }
 
-    def add_user_note(self, paper_id: str, note_id: str, note: str) -> None:
-        if not note.strip():
+    @staticmethod
+    def _note_from_row(row: sqlite3.Row):
+        from .models import UserNote
+
+        created = str(row["created_at"] or "")
+        updated = str(row["updated_at"] or "") or created
+        raw_page = row["page_number"]
+        return UserNote(
+            id=str(row["id"]),
+            paper_id=str(row["paper_id"]),
+            title=str(row["title"] or ""),
+            note=str(row["note"]),
+            page_number=int(raw_page) if raw_page is not None else None,
+            created_at=created,
+            updated_at=updated,
+        )
+
+    def list_user_notes(self, paper_id: str) -> list:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, paper_id, title, note, page_number, created_at, updated_at
+                FROM user_notes
+                WHERE paper_id = ?
+                ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC, rowid DESC
+                """,
+                (paper_id,),
+            ).fetchall()
+        return [self._note_from_row(row) for row in rows]
+
+    def add_user_note(
+        self,
+        paper_id: str,
+        note_id: str,
+        note: str,
+        *,
+        title: str = "",
+        page_number: int | None = None,
+    ):
+        clean_note = (note or "").strip()
+        if not clean_note:
             raise ValueError("user note cannot be blank")
+        clean_title = (title or "").strip()
+        if page_number is not None and page_number < 1:
+            raise ValueError("page_number must be >= 1")
+        now = datetime.now(timezone.utc).isoformat()
         with self._connection() as connection:
             exists = connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone()
             if not exists:
                 raise KeyError(f"unknown paper id: {paper_id}")
             connection.execute(
-                "INSERT INTO user_notes (id, paper_id, note) VALUES (?, ?, ?)", (note_id, paper_id, note.strip())
+                """
+                INSERT INTO user_notes (id, paper_id, title, note, page_number, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (note_id, paper_id, clean_title, clean_note, page_number, now, now),
             )
             sync_paper_fts(connection, paper_id)
+            row = connection.execute(
+                "SELECT id, paper_id, title, note, page_number, created_at, updated_at FROM user_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        return self._note_from_row(row)
+
+    def update_user_note(
+        self,
+        paper_id: str,
+        note_id: str,
+        *,
+        title: str | None = None,
+        note: str | None = None,
+        page_number: int | None = None,
+        update_page_number: bool = False,
+    ):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id, paper_id, title, note, page_number, created_at, updated_at
+                FROM user_notes
+                WHERE id = ? AND paper_id = ?
+                """,
+                (note_id, paper_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown user note id: {note_id}")
+            next_title = str(row["title"] or "") if title is None else title.strip()
+            next_note = str(row["note"]) if note is None else note.strip()
+            if not next_note:
+                raise ValueError("user note cannot be blank")
+            next_page = row["page_number"] if not update_page_number else page_number
+            if next_page is not None and int(next_page) < 1:
+                raise ValueError("page_number must be >= 1")
+            now = datetime.now(timezone.utc).isoformat()
+            connection.execute(
+                """
+                UPDATE user_notes
+                SET title = ?, note = ?, page_number = ?, updated_at = ?
+                WHERE id = ? AND paper_id = ?
+                """,
+                (next_title, next_note, next_page, now, note_id, paper_id),
+            )
+            sync_paper_fts(connection, paper_id)
+            updated = connection.execute(
+                "SELECT id, paper_id, title, note, page_number, created_at, updated_at FROM user_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        return self._note_from_row(updated)
+
+    def delete_user_note(self, paper_id: str, note_id: str) -> bool:
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "DELETE FROM user_notes WHERE id = ? AND paper_id = ?",
+                (note_id, paper_id),
+            )
+            if cursor.rowcount > 0:
+                sync_paper_fts(connection, paper_id)
+                return True
+            return False
+
+    @staticmethod
+    def _claim_review_from_row(row: sqlite3.Row):
+        from .models import ClaimReviewDecision, ClaimReviewStatus
+
+        return ClaimReviewDecision(
+            id=str(row["id"]),
+            paper_id=str(row["paper_id"]),
+            claim_id=str(row["claim_id"]),
+            field_name=str(row["field_name"] or ""),
+            original_statement=str(row["original_statement"] or ""),
+            user_status=ClaimReviewStatus(str(row["user_status"])),
+            corrected_statement=str(row["corrected_statement"] or ""),
+            note=str(row["note"] or ""),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    def list_claim_reviews(self, paper_id: str) -> list:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, paper_id, claim_id, field_name, original_statement,
+                       user_status, corrected_statement, note, created_at, updated_at
+                FROM claim_reviews
+                WHERE paper_id = ?
+                ORDER BY updated_at DESC, rowid DESC
+                """,
+                (paper_id,),
+            ).fetchall()
+        return [self._claim_review_from_row(row) for row in rows]
+
+    def upsert_claim_review(
+        self,
+        paper_id: str,
+        claim_id: str,
+        *,
+        user_status: str,
+        field_name: str = "",
+        original_statement: str = "",
+        corrected_statement: str = "",
+        note: str = "",
+    ):
+        from .models import ClaimReviewStatus
+
+        clean_claim_id = (claim_id or "").strip()
+        if not clean_claim_id:
+            raise ValueError("claim_id cannot be blank")
+        try:
+            status_enum = ClaimReviewStatus(str(user_status).strip().lower())
+        except ValueError as exc:
+            raise ValueError(f"unsupported claim review status: {user_status!r}") from exc
+
+        clean_corrected = (corrected_statement or "").strip()
+        if status_enum == ClaimReviewStatus.CORRECTED and not clean_corrected:
+            raise ValueError("corrected status requires a non-empty corrected_statement")
+        clean_note = (note or "").strip()
+        clean_field = (field_name or "").strip()
+        clean_original = (original_statement or "").strip()
+        now = datetime.now(timezone.utc).isoformat()
+        review_id = f"crev-{uuid4().hex[:12]}"
+
+        with self._connection() as connection:
+            exists = connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not exists:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            connection.execute(
+                """
+                INSERT INTO claim_reviews (
+                    id, paper_id, claim_id, field_name, original_statement,
+                    user_status, corrected_statement, note, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id, claim_id) DO UPDATE SET
+                    field_name = CASE WHEN excluded.field_name != '' THEN excluded.field_name ELSE claim_reviews.field_name END,
+                    original_statement = CASE WHEN excluded.original_statement != '' THEN excluded.original_statement ELSE claim_reviews.original_statement END,
+                    user_status = excluded.user_status,
+                    corrected_statement = excluded.corrected_statement,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    review_id,
+                    paper_id,
+                    clean_claim_id,
+                    clean_field,
+                    clean_original,
+                    status_enum.value,
+                    clean_corrected,
+                    clean_note,
+                    now,
+                    now,
+                ),
+            )
+            sync_paper_fts(connection, paper_id)
+            row = connection.execute(
+                """
+                SELECT id, paper_id, claim_id, field_name, original_statement,
+                       user_status, corrected_statement, note, created_at, updated_at
+                FROM claim_reviews
+                WHERE paper_id = ? AND claim_id = ?
+                """,
+                (paper_id, clean_claim_id),
+            ).fetchone()
+        return self._claim_review_from_row(row)
+
+    def delete_claim_review(self, paper_id: str, claim_id: str) -> bool:
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "DELETE FROM claim_reviews WHERE paper_id = ? AND claim_id = ?",
+                (paper_id, claim_id),
+            )
+            if cursor.rowcount > 0:
+                sync_paper_fts(connection, paper_id)
+                return True
+            return False
 
     def save_references(self, paper_id: str, entries: list, mentions: list) -> None:
         """Replace extracted references for one paper; raw source text remains in source_blocks."""
@@ -1018,6 +1279,126 @@ class ResearchRepository:
 
     def get_project_paper_ids(self, project_id: str) -> set[str]:
         return {entry.paper_id for entry in self.list_project_papers(project_id)}
+
+    @staticmethod
+    def _project_note_from_row(row: sqlite3.Row):
+        from .models import ProjectNote
+
+        created = str(row["created_at"] or "")
+        updated = str(row["updated_at"] or "") or created
+        return ProjectNote(
+            id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            title=str(row["title"] or ""),
+            note=str(row["note"]),
+            created_at=created,
+            updated_at=updated,
+        )
+
+    def list_project_notes(self, project_id: str) -> list:
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            rows = connection.execute(
+                """
+                SELECT id, project_id, title, note, created_at, updated_at
+                FROM project_notes
+                WHERE project_id = ?
+                ORDER BY COALESCE(NULLIF(updated_at, ''), created_at) DESC, rowid DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [self._project_note_from_row(row) for row in rows]
+
+    def add_project_note(
+        self,
+        project_id: str,
+        note_id: str,
+        note: str,
+        *,
+        title: str = "",
+    ):
+        clean_note = (note or "").strip()
+        if not clean_note:
+            raise ValueError("project note cannot be blank")
+        clean_title = (title or "").strip()
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            connection.execute(
+                """
+                INSERT INTO project_notes (id, project_id, title, note, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (note_id, project_id, clean_title, clean_note, now, now),
+            )
+            connection.execute(
+                "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                (now, project_id),
+            )
+            row = connection.execute(
+                "SELECT id, project_id, title, note, created_at, updated_at FROM project_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        return self._project_note_from_row(row)
+
+    def update_project_note(
+        self,
+        project_id: str,
+        note_id: str,
+        *,
+        title: str | None = None,
+        note: str | None = None,
+    ):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id, title, note, created_at, updated_at
+                FROM project_notes
+                WHERE id = ? AND project_id = ?
+                """,
+                (note_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown project note id: {note_id}")
+            next_title = str(row["title"] or "") if title is None else title.strip()
+            next_note = str(row["note"]) if note is None else note.strip()
+            if not next_note:
+                raise ValueError("project note cannot be blank")
+            now = datetime.now(timezone.utc).isoformat()
+            connection.execute(
+                """
+                UPDATE project_notes
+                SET title = ?, note = ?, updated_at = ?
+                WHERE id = ? AND project_id = ?
+                """,
+                (next_title, next_note, now, note_id, project_id),
+            )
+            connection.execute(
+                "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                (now, project_id),
+            )
+            updated = connection.execute(
+                "SELECT id, project_id, title, note, created_at, updated_at FROM project_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        return self._project_note_from_row(updated)
+
+    def delete_project_note(self, project_id: str, note_id: str) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "DELETE FROM project_notes WHERE id = ? AND project_id = ?",
+                (note_id, project_id),
+            )
+            deleted = cursor.rowcount > 0
+            if deleted:
+                connection.execute(
+                    "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                    (now, project_id),
+                )
+        return deleted
 
     @staticmethod
     def _sha256_file(path: Path) -> str:

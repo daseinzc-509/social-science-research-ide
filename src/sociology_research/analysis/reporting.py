@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
-from ..models import DeepReadingReport, ExtractedClaim, PaperCard
+from collections.abc import Sequence
+
+from ..models import (
+    ClaimReviewDecision,
+    DeepReadingReport,
+    ExtractedClaim,
+    PaperCard,
+    UserNote,
+    compute_claim_id,
+)
+
+_HUMAN_STATUS_LABELS: dict[str, str] = {
+    "confirmed": "✓ 已确认",
+    "corrected": "✎ 人工修正",
+    "rejected": "✕ 存疑驳回",
+    "unresolved": "? 待定",
+}
 
 
 def build_deep_reading_report(card: PaperCard) -> DeepReadingReport:
@@ -47,8 +63,18 @@ def build_deep_reading_report(card: PaperCard) -> DeepReadingReport:
     )
 
 
-def render_deep_reading_markdown(card: PaperCard) -> str:
+def render_deep_reading_markdown(
+    card: PaperCard,
+    *,
+    user_notes: Sequence[UserNote] | None = None,
+    claim_reviews: Sequence[ClaimReviewDecision] | None = None,
+) -> str:
     report = build_deep_reading_report(card)
+    review_by_cid: dict[str, ClaimReviewDecision] = {
+        rev.claim_id: rev for rev in (claim_reviews or []) if rev.claim_id
+    }
+    matched_review_ids: set[str] = set()
+
     lines = [f"# {report.title}", ""]
     if report.citation_line:
         lines += [report.citation_line, ""]
@@ -71,8 +97,11 @@ def render_deep_reading_markdown(card: PaperCard) -> str:
             return
         lines.extend([f"## {title}", ""])
         for claim in claims:
+            cid = claim.claim_id or compute_claim_id(claim.field_name, claim.statement)
             support = f" · semantic={claim.semantic_support.value}" if claim.semantic_support else ""
-            lines.append(f"- **{claim.field_name}**：{claim.statement}  _[{claim.verification.value}{support}]_")
+            lines.append(
+                f"- `[{claim.provenance.value}]` **{claim.field_name}**：{claim.statement}  _[{claim.verification.value}{support}]_"
+            )
             if claim.rationale:
                 lines.append(f"  - 理由：{claim.rationale}")
             scope_items = claim.scope.compact_items()
@@ -80,6 +109,15 @@ def render_deep_reading_markdown(card: PaperCard) -> str:
                 lines.append("  - 范围：" + "；".join(scope_items))
             for ref in claim.evidence:
                 lines.append(f"  - PDF p.{ref.page_number} ({ref.role.value})：{ref.quote}")
+            review = review_by_cid.get(cid)
+            if review is not None:
+                matched_review_ids.add(cid)
+                status_label = _HUMAN_STATUS_LABELS.get(str(review.user_status.value), str(review.user_status.value))
+                lines.append(f"  - **人工审定（HUMAN_REVIEWED）**：{status_label}")
+                if review.corrected_statement:
+                    lines.append(f"  - **研究者修正表述（HUMAN_REVIEWED）**：{review.corrected_statement}")
+                if review.note:
+                    lines.append(f"  - **审定备注**：{review.note}")
         lines.append("")
 
     add_claims("研究问题", report.research_questions)
@@ -107,5 +145,35 @@ def render_deep_reading_markdown(card: PaperCard) -> str:
                 lines.append(f"  - PDF p.{ref.page_number} ({ref.role.value})：{ref.quote}")
         lines.append("")
 
-    lines += ["---", "", "本报告由已保存的 Paper Card 确定性生成；不会为排版再次调用模型。"]
+    orphan_reviews = [
+        rev for rev in (claim_reviews or []) if rev.claim_id and rev.claim_id not in matched_review_ids
+    ]
+    if orphan_reviews:
+        lines += ["## 历史版本人工审定记录（HUMAN_REVIEWED）", ""]
+        for rev in orphan_reviews:
+            status_label = _HUMAN_STATUS_LABELS.get(str(rev.user_status.value), str(rev.user_status.value))
+            field_tag = f" `{rev.field_name}`" if rev.field_name else ""
+            lines.append(f"- **{status_label}**{field_tag}（`{rev.claim_id}`）")
+            if rev.original_statement:
+                lines.append(f"  - 原陈述：{rev.original_statement}")
+            if rev.corrected_statement:
+                lines.append(f"  - 研究者修正表述：{rev.corrected_statement}")
+            if rev.note:
+                lines.append(f"  - 审定备注：{rev.note}")
+        lines.append("")
+
+    if user_notes:
+        lines += ["## 我的阅读笔记（MY NOTE）", ""]
+        for note in user_notes:
+            heading = note.title.strip() if note.title else "阅读笔记"
+            page_tag = f" · PDF p.{note.page_number}" if note.page_number else ""
+            time_tag = (note.updated_at or note.created_at)[:16].replace("T", " ")
+            lines.append(f"### {heading}{page_tag}")
+            if time_tag:
+                lines.append(f"_记录时间：{time_tag} · 来源：MY NOTE_")
+                lines.append("")
+            lines.append(note.note.strip())
+            lines.append("")
+
+    lines += ["---", "", "本报告由已保存的 Paper Card、个人笔记与人工审定记录确定性生成；严格区分 AUTHOR / AI REVIEW / HUMAN_REVIEWED / MY NOTE，不会为排版再次调用模型。"]
     return "\n".join(lines).rstrip() + "\n"

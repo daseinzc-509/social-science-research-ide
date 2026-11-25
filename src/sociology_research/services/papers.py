@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from ..models import compute_claim_id
 from ..pipeline import ImportPipeline
 from ..repository import ResearchRepository
 from ..parser import create_default_parser
@@ -144,19 +146,125 @@ class PaperService:
             "items": papers,
         }
 
+    @staticmethod
+    def _ensure_card_claim_ids(card_dict: dict[str, Any] | None) -> dict[str, Any] | None:
+        if card_dict is None:
+            return None
+        for group_key in ("metadata_claims", "basic_facts", "analysis", "limitations"):
+            items = card_dict.get(group_key)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and not str(item.get("claim_id") or "").strip():
+                        item["claim_id"] = compute_claim_id(
+                            str(item.get("field_name") or ""),
+                            str(item.get("statement") or ""),
+                        )
+        rec = card_dict.get("reading_recommendation")
+        if isinstance(rec, dict) and not str(rec.get("claim_id") or "").strip():
+            rec["claim_id"] = compute_claim_id(
+                str(rec.get("field_name") or "reading_recommendation"),
+                str(rec.get("statement") or ""),
+            )
+        return card_dict
+
     def get_paper(self, paper_id: str) -> dict[str, Any]:
         paper = self.repository.get_paper(paper_id)
         if paper is None:
             raise KeyError(f"unknown paper id: {paper_id}")
         card = self.repository.get_card(paper_id)
         references, mentions = self.repository.get_references(paper_id)
+        notes = self.repository.list_user_notes(paper_id)
+        claim_reviews = self.repository.list_claim_reviews(paper_id)
+        card_payload = self._ensure_card_claim_ids(card.model_dump(mode="json")) if card is not None else None
         return {
             "paper": paper.model_dump(mode="json"),
-            "card": card.model_dump(mode="json") if card is not None else None,
+            "card": card_payload,
             "metadata_overrides": self.repository.get_metadata_overrides(paper_id),
             "references": [entry.model_dump(mode="json") for entry in references],
             "citation_mentions": [mention.model_dump(mode="json") for mention in mentions],
+            "user_notes": [note.model_dump(mode="json") for note in notes],
+            "claim_reviews": [rev.model_dump(mode="json") for rev in claim_reviews],
         }
+
+    def list_user_notes(self, paper_id: str) -> list[dict[str, Any]]:
+        if self.repository.get_paper(paper_id) is None:
+            raise KeyError(f"unknown paper id: {paper_id}")
+        return [note.model_dump(mode="json") for note in self.repository.list_user_notes(paper_id)]
+
+    def create_user_note(
+        self,
+        paper_id: str,
+        *,
+        note: str,
+        title: str = "",
+        page_number: int | None = None,
+    ) -> dict[str, Any]:
+        note_id = f"note-{uuid.uuid4().hex[:12]}"
+        created = self.repository.add_user_note(
+            paper_id,
+            note_id,
+            note,
+            title=title,
+            page_number=page_number,
+        )
+        return created.model_dump(mode="json")
+
+    def update_user_note(
+        self,
+        paper_id: str,
+        note_id: str,
+        *,
+        title: str | None = None,
+        note: str | None = None,
+        page_number: int | None = None,
+        update_page_number: bool = False,
+    ) -> dict[str, Any]:
+        updated = self.repository.update_user_note(
+            paper_id,
+            note_id,
+            title=title,
+            note=note,
+            page_number=page_number,
+            update_page_number=update_page_number,
+        )
+        return updated.model_dump(mode="json")
+
+    def delete_user_note(self, paper_id: str, note_id: str) -> dict[str, Any]:
+        if not self.repository.delete_user_note(paper_id, note_id):
+            raise KeyError(f"unknown user note id: {note_id}")
+        return {"paper_id": paper_id, "note_id": note_id, "deleted": True}
+
+    def list_claim_reviews(self, paper_id: str) -> list[dict[str, Any]]:
+        if self.repository.get_paper(paper_id) is None:
+            raise KeyError(f"unknown paper id: {paper_id}")
+        return [rev.model_dump(mode="json") for rev in self.repository.list_claim_reviews(paper_id)]
+
+    def upsert_claim_review(
+        self,
+        paper_id: str,
+        claim_id: str,
+        *,
+        user_status: str,
+        field_name: str = "",
+        original_statement: str = "",
+        corrected_statement: str = "",
+        note: str = "",
+    ) -> dict[str, Any]:
+        saved = self.repository.upsert_claim_review(
+            paper_id,
+            claim_id,
+            user_status=user_status,
+            field_name=field_name,
+            original_statement=original_statement,
+            corrected_statement=corrected_statement,
+            note=note,
+        )
+        return saved.model_dump(mode="json")
+
+    def delete_claim_review(self, paper_id: str, claim_id: str) -> dict[str, Any]:
+        if not self.repository.delete_claim_review(paper_id, claim_id):
+            raise KeyError(f"unknown claim review: {claim_id}")
+        return {"paper_id": paper_id, "claim_id": claim_id, "deleted": True}
 
     def pdf_path(self, paper_id: str) -> Path:
         paper = self.repository.get_paper(paper_id)

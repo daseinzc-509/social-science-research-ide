@@ -110,6 +110,7 @@ public partial class MainWindowViewModel
         var term = (query ?? "").Trim();
         if (string.IsNullOrWhiteSpace(term) || _allPapers.Count == 0)
         {
+            QuickSearchHitCount = 0;
             return;
         }
 
@@ -125,6 +126,7 @@ public partial class MainWindowViewModel
             {
                 return;
             }
+            QuickSearchHitCount = response.Total;
 
             var orderedIds = new List<string>();
             var seen = new HashSet<string>(StringComparer.Ordinal);

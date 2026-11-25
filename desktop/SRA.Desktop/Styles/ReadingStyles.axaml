@@ -83,4 +83,44 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="LetterSpacing" Value="0.15" />
   </Style>
+
+  <!-- Claim 人工修正与审定独立区块（与原陈述并列展示） -->
+  <Style Selector="Border.human-correction-block">
+    <Setter Property="Background" Value="{DynamicResource EmeraldSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EmeraldInkBrush}" />
+    <Setter Property="BorderThickness" Value="3.5,0,0,0" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+
+  <!-- ClaimCard 底部轻量人工审定快选药丸 -->
+  <Style Selector="Button.review-action-chip">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerLowBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.review-action-chip:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="Button.review-action-chip.active">
+    <Setter Property="Background" Value="{DynamicResource TonalFillBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnTonalFillBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- 个人阅读笔记卡片（MY NOTE 中性灰左侧语义色条） -->
+  <Style Selector="Border.note-card">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource OutlineSubtleBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
+  </Style>
 </Styles>
