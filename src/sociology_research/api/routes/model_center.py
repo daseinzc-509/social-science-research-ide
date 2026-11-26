@@ -62,6 +62,13 @@ class ModelOperation(BaseModel):
     formula: bool = False
 
 
+class EngineInstallRequest(BaseModel):
+    """按需安装 CPU-only 独立托管 Docling 解析引擎参数。"""
+    model_config = ConfigDict(extra="forbid")
+    mirror_preset: str = "default"
+    custom_pypi_index: str = ""
+
+
 class EnhancementUpdate(BaseModel):
     """Only feature switches; never overwrite the Vision provider's credentials."""
     model_config = ConfigDict(extra="forbid")
@@ -79,6 +86,7 @@ class ModelCenterOverviewResponse(BaseModel):
     network: dict[str, Any]
     profiles: dict[str, Any]
     models: dict[str, Any]
+    engine: dict[str, Any] = Field(default_factory=dict)
     effective: dict[str, Any]
     enhancements: EnhancementPreferencesResponse
 
@@ -187,3 +195,33 @@ def start_verification(
     return _model_center_service(services).start_model_operation(
         formula=body.formula, download=False, jobs=services.jobs
     )  # type: ignore[return-value]
+
+
+@router.get("/engine")
+def get_docling_engine() -> dict[str, Any]:
+    return _DEFAULT_SERVICE.engine_status()
+
+
+@router.post("/engine/install", status_code=202)
+def start_engine_install(
+    body: EngineInstallRequest, services: ApplicationServices = Depends(get_services)
+) -> ModelOperationAccepted:
+    return _model_center_service(services).start_engine_install(
+        mirror_preset=body.mirror_preset,
+        custom_pypi_index=body.custom_pypi_index,
+        jobs=services.jobs,
+    )  # type: ignore[return-value]
+
+
+@router.post("/engine/verify", status_code=202)
+def start_engine_verify(
+    services: ApplicationServices = Depends(get_services),
+) -> ModelOperationAccepted:
+    return _model_center_service(services).start_engine_verify(
+        jobs=services.jobs
+    )  # type: ignore[return-value]
+
+
+@router.delete("/engine")
+def delete_docling_engine() -> dict[str, Any]:
+    return _DEFAULT_SERVICE.uninstall_engine()

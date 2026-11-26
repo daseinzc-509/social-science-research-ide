@@ -23,6 +23,18 @@ public sealed class ModelCenterWindow : Window
     private readonly ComboBox _aiMode = Picker("系统代理", "直连", "自定义 HTTP 代理");
     private readonly TextBox _downloadProxy = Edit("http://127.0.0.1:7890");
     private readonly TextBox _aiProxy = Edit("http://127.0.0.1:7890");
+    private readonly TextBlock _engineState = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 12.5,
+        LineHeight = 20,
+    };
+    private readonly ComboBox _engineMirror = Picker(
+        "官方源（PyPI + PyTorch CPU）",
+        "清华大学 PyPI 镜像（推荐国内）",
+        "阿里云 PyPI 镜像（推荐国内）");
+    private readonly TextBox _customPypiIndex = Edit("可选自定义 HTTPS PyPI 源（留空则使用上方预设）");
+    private readonly Button _uninstallEngineButton;
     private readonly TextBlock _modelState = new()
     {
         TextWrapping = TextWrapping.Wrap,
@@ -165,7 +177,7 @@ public sealed class ModelCenterWindow : Window
         };
     }
 
-    public ModelCenterWindow(SraApiClient api)
+    public ModelCenterWindow(SraApiClient api, int initialTabIndex = 0)
     {
         _api = api;
         Title = "SRA · 模型配置中心";
@@ -243,6 +255,28 @@ public sealed class ModelCenterWindow : Window
             Buttons(Action("保存网络设置", () => _ = RunAsync(SaveNetworkAsync), "primary")));
 
         // Tab 3: Docling / 增强
+        var engineStateBox = new Border
+        {
+            Padding = new Thickness(14, 12),
+            Child = _engineState,
+        };
+        engineStateBox.Classes.Add("tonal-card");
+        _uninstallEngineButton = Action("清理独立引擎", () => _ = RunAsync(UninstallDoclingEngineAsync), "danger", "compact");
+        _uninstallEngineButton.IsEnabled = false;
+
+        var engineCard = Card(
+            "card",
+            "本地 PDF 解析引擎（CPU-only Docling）",
+            "瘦壳精简安装包通过按需安装独立的 CPU-only Docling 运行时保持轻巧体积；安装自动复用“网络代理”页的下载代理配置，不会传递任何 AI API Key。",
+            engineStateBox,
+            FieldGroup("下载镜像源", _engineMirror),
+            FieldGroup("自定义 PyPI 源（可选，仅支持 HTTPS）", _customPypiIndex),
+            Buttons(
+                Action("一键安装 / 更新 Docling 引擎（CPU 版）", () => _ = RunAsync(InstallDoclingEngineAsync), "primary"),
+                Action("验证本地引擎", () => _ = RunAsync(VerifyDoclingEngineAsync), "tonal"),
+                _uninstallEngineButton,
+                Action("刷新状态", () => _ = RunAsync(LoadAsync), "ghost")));
+
         var doclingStateBox = new Border
         {
             Padding = new Thickness(14, 12),
@@ -293,9 +327,9 @@ public sealed class ModelCenterWindow : Window
             {
                 new TabItem { Header = "AI 服务商", Content = TabPage(effectiveCard, profileEditorCard, activationCard) },
                 new TabItem { Header = "网络代理", Content = TabPage(downloadProxyCard, aiProxyCard) },
-                new TabItem { Header = "Docling / 增强", Content = TabPage(doclingCard, enhancementsCard) },
+                new TabItem { Header = "Docling / 增强", Content = TabPage(engineCard, doclingCard, enhancementsCard) },
             },
-            SelectedIndex = 0,
+            SelectedIndex = Math.Clamp(initialTabIndex, 0, 2),
         };
 
         var tabsSurface = new Border
@@ -343,6 +377,8 @@ public sealed class ModelCenterWindow : Window
 
     private static int Choice(string mode) => mode switch { "direct" => 1, "custom" => 2, _ => 0 };
     private static string SelectedMode(ComboBox combo) => combo.SelectedIndex switch { 1 => "direct", 2 => "custom", _ => "system" };
+    private static int MirrorChoice(string preset) => preset switch { "tsinghua" => 1, "aliyun" => 2, _ => 0 };
+    private string SelectedMirrorPreset() => _engineMirror.SelectedIndex switch { 1 => "tsinghua", 2 => "aliyun", _ => "default" };
     private string SelectedStage() => _stage.SelectedIndex switch { 1 => "pro", 2 => "vision", _ => "lite" };
 
     private async Task RunAsync(Func<Task> work)
@@ -386,6 +422,32 @@ public sealed class ModelCenterWindow : Window
             + $"{(verified ? "已通过离线验证" : "尚未通过离线验证")}\n"
             + "模型路径：" + Value(models, "model_directory") + "\n"
             + "Docling 版本：" + Value(models, "docling_version");
+
+        if (root.TryGetProperty("engine", out var engine) && engine.ValueKind == JsonValueKind.Object)
+        {
+            var mode = Value(engine, "mode", "missing");
+            var ver = Value(engine, "docling_version", "missing");
+            var torchVer = Value(engine, "torch_version");
+            var managedAvailable = engine.TryGetProperty("managed_available", out var ma) && ma.GetBoolean();
+            var uvAvailable = engine.TryGetProperty("uv_available", out var uv) && uv.GetBoolean();
+            var modeSummary = mode switch
+            {
+                "embedded" => $"内置引擎已就绪 · docling {ver}（当前运行环境已包含 Docling）",
+                "managed" => $"独立托管引擎已就绪 · docling {ver}" + (string.IsNullOrWhiteSpace(torchVer) ? "" : $" · torch {torchVer}"),
+                _ => "未安装本地 Docling 引擎（导入 PDF 前请点击下方“一键安装”）",
+            };
+            _engineState.Text = modeSummary
+                + "\n引擎目录：" + Value(engine, "engine_dir", "—")
+                + "\n安装器工具：" + (uvAvailable ? "已检测到 uv（快速独立安装）" : "未检测到 uv（开发态将回退至 venv + pip）");
+            _engineMirror.SelectedIndex = MirrorChoice(Value(engine, "mirror_preset", "default"));
+            _customPypiIndex.Text = Value(engine, "custom_pypi_index");
+            _uninstallEngineButton.IsEnabled = managedAvailable;
+        }
+        else
+        {
+            _engineState.Text = "当前后端未返回本地引擎信息，请确认 Python 后端为最新版本。";
+            _uninstallEngineButton.IsEnabled = false;
+        }
 
         if (root.TryGetProperty("enhancements", out var prefs))
         {
@@ -553,6 +615,50 @@ public sealed class ModelCenterWindow : Window
         _status.Text = _useManagedModels.IsChecked == true
             ? "已开启已验证的托管模型；新解析任务使用该模型。"
             : "已恢复旧版缓存机制，不删除现有权重。";
+    }
+
+    private async Task InstallDoclingEngineAsync()
+    {
+        var mirror = SelectedMirrorPreset();
+        var customIndex = _customPypiIndex.Text?.Trim() ?? "";
+        _status.Text = "正在启动独立 CPU-only Docling 引擎安装任务（自动复用网络代理设置）…";
+        var accepted = await _api.StartInstallDoclingEngineAsync(mirror, customIndex);
+        await _api.WaitForJobAsync(
+            accepted.JobId,
+            snapshot =>
+            {
+                if (!IsVisible) return;
+                _status.Text = snapshot.Messages.LastOrDefault() ?? "正在安装本地 Docling 引擎…";
+            });
+        await LoadAsync();
+        _status.Text = "本地 CPU-only Docling 引擎安装并自检通过，现在可以直接导入并解析 PDF 论文。";
+    }
+
+    private async Task VerifyDoclingEngineAsync()
+    {
+        _status.Text = "正在独立离线进程中验证本地 Docling 引擎…";
+        var accepted = await _api.StartVerifyDoclingEngineAsync();
+        await _api.WaitForJobAsync(
+            accepted.JobId,
+            snapshot =>
+            {
+                if (!IsVisible) return;
+                _status.Text = snapshot.Messages.LastOrDefault() ?? "正在验证本地 Docling 引擎…";
+            });
+        await LoadAsync();
+        _status.Text = "本地 Docling 引擎验证通过。";
+    }
+
+    private async Task UninstallDoclingEngineAsync()
+    {
+        var confirm = new ConfirmWindow(
+            "清理独立 Docling 引擎",
+            "将删除 SRA 专属目录下按需安装的独立 Docling 虚拟环境以释放磁盘空间。\n\n不会删除你的论文库、PDF、笔记、Paper Card 或模型配置，之后随时可再次一键安装。继续？",
+            "确认清理");
+        if (!await confirm.ShowDialog<bool>(this)) return;
+        await _api.DeleteDoclingEngineAsync();
+        await LoadAsync();
+        _status.Text = "已清理独立托管 Docling 引擎目录。";
     }
 
     private async Task StartModelOperationAsync(bool download)

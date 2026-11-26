@@ -1948,8 +1948,11 @@
                   </StackPanel>
                   <TextBlock Text="模型缓存（SRA 管理）" FontWeight="SemiBold"/>
                   <TextBlock x:Name="CacheStoragePathText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
+                  <TextBlock Text="本地解析引擎（SRA 管理）" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="EngineStoragePathText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="打开缓存目录" Classes="secondary" Click="OpenCacheDir_Click"/>
+                    <Button Content="打开引擎目录" Classes="secondary" Click="OpenEngineDir_Click"/>
                     <Button Content="刷新占用信息" Classes="ghost" Click="RefreshStorage_Click"/>
                   </StackPanel>
                   <TextBlock x:Name="StorageSizeText" FontSize="11" TextWrapping="Wrap" Classes="muted"/>

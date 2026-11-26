@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from . import docling_engine
 from .model_runtime import commit_verified_download, models_directory, state_report
 from .network_settings import download_environment
 
@@ -17,7 +18,21 @@ _RUNNING = threading.Lock()
 def worker_command(action: str, *, directory: Path, formula: bool) -> list[str]:
     if action not in {"download", "verify"}:
         raise ValueError("Invalid model worker action")
-    if getattr(sys, "frozen", False):
+    if docling_engine.embedded_docling_version() is None:
+        if docling_engine.managed_engine_ready():
+            command = [
+                str(docling_engine.engine_python_executable()),
+                "-m",
+                "sociology_research.model_center_worker",
+                action,
+                str(directory),
+            ]
+        else:
+            raise RuntimeError(
+                "尚未安装本地 Docling 解析引擎，无法下载或验证离线权重。"
+                "请先在「模型配置中心 → Docling / 增强」点击「一键安装 / 更新 Docling 引擎（CPU 版）」。"
+            )
+    elif getattr(sys, "frozen", False):
         command = [sys.executable, "--sra-model-worker", action, str(directory)]
     else:
         command = [sys.executable, "-m", "sociology_research.model_center_worker", action, str(directory)]
@@ -28,9 +43,9 @@ def worker_command(action: str, *, directory: Path, formula: bool) -> list[str]:
 
 def _run_worker(action: str, *, directory: Path, formula: bool, progress: Callable[[str], None]) -> None:
     env = download_environment(offline=(action == "verify"))
-    if not getattr(sys, "frozen", False):
-        src_dir = str(Path(__file__).resolve().parents[1])
-        env["PYTHONPATH"] = src_dir + os.pathsep + env.get("PYTHONPATH", "")
+    pkg_root = docling_engine.worker_package_root()
+    if pkg_root is not None and (not getattr(sys, "frozen", False) or docling_engine.embedded_docling_version() is None):
+        env["PYTHONPATH"] = str(pkg_root) + os.pathsep + env.get("PYTHONPATH", "")
     args = worker_command(action, directory=directory, formula=formula)
     # No shell or remote commands; the worker sees only a known local model path.
     with subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

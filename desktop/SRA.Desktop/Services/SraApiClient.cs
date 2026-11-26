@@ -853,6 +853,39 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
     }
 
+    public Task<JsonElement> GetDoclingEngineStatusAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync<JsonElement>("api/v1/settings/model-center/engine", cancellationToken);
+
+    public async Task<JobAccepted> StartInstallDoclingEngineAsync(
+        string mirrorPreset = "default",
+        string customPypiIndex = "",
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            "api/v1/settings/model-center/engine/install",
+            new { mirror_preset = mirrorPreset, custom_pypi_index = customPypiIndex },
+            _jsonOptions,
+            cancellationToken);
+        return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
+    }
+
+    public async Task<JobAccepted> StartVerifyDoclingEngineAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            "api/v1/settings/model-center/engine/verify",
+            content: null,
+            cancellationToken);
+        return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
+    }
+
+    public async Task<JsonElement> DeleteDoclingEngineAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.DeleteAsync(
+            "api/v1/settings/model-center/engine",
+            cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
     // SRA Region Review v3: authenticated local API bridge
 
     /// <summary>Render a paper PDF page without exposing the desktop token in the URL.</summary>

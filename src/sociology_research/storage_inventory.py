@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .user_storage import user_config_dir, user_root
+from .user_storage import user_config_dir, user_engine_dir, user_root
 
 _MAX_ENTRIES = 100_000
 
@@ -49,6 +49,7 @@ def storage_inventory(data_dir: Path) -> dict[str, object]:
     data = Path(data_dir).expanduser().resolve()
     config = user_config_dir().resolve()
     managed_cache = root / "cache"
+    engine = user_engine_dir().resolve()
     # Users can override caches explicitly; report these paths, but never claim
     # an external location is SRA-owned or automatically removed on uninstall.
     configured_caches = []
@@ -62,11 +63,13 @@ def storage_inventory(data_dir: Path) -> dict[str, object]:
         "config_dir": str(config),
         "data_dir": str(data),
         "cache_dir": str(managed_cache),
+        "engine_dir": str(engine),
         "data_managed": data_managed,
         "usage": {
             "data": _directory_usage(data),
             "config": _directory_usage(config),
             "cache": _directory_usage(managed_cache),
+            "engine": _directory_usage(engine),
         },
         "configured_caches": configured_caches,
         "notes": (

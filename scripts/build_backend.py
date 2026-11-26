@@ -24,8 +24,34 @@ from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILES = ("full",)
+PROFILES = ("full", "slim")
 POLICIES = ("conservative", "compatible")
+
+# 瘦壳（slim）模式排除所有重型本地 ML / PDF 推理依赖（torch/docling/transformers/scipy/cv2 等），
+# 仅保留轻量 FastAPI + SQLite + Pydantic + pypdfium2 页面渲染；PDF 解析交由模型配置中心一键安装的
+# 独立 CPU-only Docling 托管环境（user_root()/engine/docling/venv）隔离执行。
+SLIM_HEAVY_EXCLUDES = (
+    "docling",
+    "docling_core",
+    "docling_parse",
+    "docling_ibm_models",
+    "torch",
+    "torchvision",
+    "transformers",
+    "timm",
+    "scipy",
+    "cv2",
+    "rapidocr",
+    "rapidocr_onnxruntime",
+    "onnxruntime",
+    "sympy",
+    "pandas",
+    "accelerate",
+    "sentencepiece",
+    "huggingface_hub",
+    "safetensors",
+    "tokenizers",
+)
 
 # 桌面无头后端永不使用的测试造数库、单测运行器、Tcl/Tk GUI 与 PythonWin MFC IDE 外壳。
 # 注意：绝不包含 torch/torchvision/transformers/cv2/docling/rapidocr/win32/pywin32_system32。
@@ -111,6 +137,7 @@ def command_args(
     *,
     collection_policy: str = "conservative",
     exclude_dev_gui: bool = False,
+    uv_binary: Path | None = None,
     project: Path = ROOT,
     target: Path | None = None,
 ) -> list[str]:
@@ -146,6 +173,36 @@ def command_args(
     if exclude_dev_gui:
         for module in DEV_AND_GUI_EXCLUDES:
             args += ["--exclude-module", module]
+
+    if profile == "slim":
+        # 瘦壳模式：排除全部重型 ML 推理库，同时携带纯 Python sociology_research 源码与可选 uv，
+        # 供独立托管 Docling 虚拟环境通过子进程直接复用 100% 相同的解析与离线验证逻辑。
+        for module in SLIM_HEAVY_EXCLUDES:
+            args += ["--exclude-module", module]
+        if collection_policy == "compatible":
+            for module in ("keyring", "pydantic"):
+                _add(args, module, "--collect-all")
+        else:
+            _add(args, "pydantic", "--collect-submodules")
+            _add(args, "keyring", "--collect-all")
+        _add(args, "pypdfium2", "--collect-all")
+        pkg_src = project / "src" / "sociology_research"
+        args += ["--add-data", f"{pkg_src}{os.pathsep}sra_src/sociology_research"]
+        if uv_binary is not None:
+            uv_path = Path(uv_binary).expanduser().resolve()
+            if not uv_path.is_file():
+                raise FileNotFoundError(f"Specified uv binary not found: {uv_path}")
+            args += ["--add-binary", f"{uv_path}{os.pathsep}tools"]
+        for module, distribution in (("keyring", "keyring"), ("pydantic", "pydantic")):
+            if available(module):
+                try:
+                    importlib.metadata.version(distribution)
+                except importlib.metadata.PackageNotFoundError:
+                    continue
+                args += ["--copy-metadata", distribution]
+        args += [str(project / "scripts" / "desktop_backend_entry.py")]
+        return args
+
     if collection_policy == "compatible":
         # Rollback mode keeps broad collection for the remaining dependencies.
         for module in ("keyring", "pydantic", "rapidocr_onnxruntime"):
@@ -218,6 +275,8 @@ def main() -> None:
                         help="Exclude test/faker/tkinter/pythonwin modules not used by the headless backend")
     parser.add_argument("--check-clean-env", action="store_true",
                         help="Fail before freezing if duplicate .dist-info metadata or legacy pymupdf remain in site-packages")
+    parser.add_argument("--uv-binary", type=Path, default=None,
+                        help="Optional path to a standalone uv binary bundled under tools/ in slim profile")
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "backend")
     options = parser.parse_args()
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -233,6 +292,7 @@ def main() -> None:
         options.profile,
         collection_policy=options.collection_policy,
         exclude_dev_gui=options.exclude_dev_and_gui,
+        uv_binary=options.uv_binary,
         target=options.output,
     )
     print(f"PyInstaller collection policy: {options.collection_policy}; backend: {options.profile}", flush=True)

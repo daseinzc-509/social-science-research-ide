@@ -25,7 +25,9 @@ def docling_version() -> str:
     try:
         return importlib.metadata.version("docling")
     except importlib.metadata.PackageNotFoundError:
-        return "missing"
+        from .docling_engine import active_docling_version
+
+        return active_docling_version()
 
 
 def read_state() -> dict:

@@ -198,13 +198,40 @@ def full_profile_imports() -> None:
     # invoked here. A separate optional real-PDF acceptance test is required.
 
 
+def slim_profile_imports(*, check_no_legacy: bool | None = None) -> None:
+    """验证瘦壳（slim）后端核心服务与托管引擎管理器可用，且严守无 PyMuPDF 红线。"""
+    import importlib.util
+    import sqlite3
+    import sys
+    import fastapi
+    import pydantic
+    import uvicorn
+    from sociology_research import docling_engine
+    from sociology_research.api.app import create_app
+
+    enforce_no_legacy = getattr(sys, "frozen", False) if check_no_legacy is None else check_no_legacy
+    if enforce_no_legacy:
+        for legacy in ("pymupdf", "fitz"):
+            if importlib.util.find_spec(legacy) is not None:
+                raise AssertionError(f"Legacy PDF library must not exist in slim bundle: {legacy}")
+    for obj in (sqlite3, fastapi, pydantic, uvicorn, create_app, docling_engine.engine_status):
+        if obj is None:
+            raise AssertionError("A required slim backend API module was not importable")
+    if docling_engine.worker_package_root() is None:
+        raise AssertionError("Slim bundle is missing sra_src/sociology_research for managed Docling workers")
+    print("Slim backend core & managed engine probe OK (offline)", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("full",), required=True)
+    parser.add_argument("--profile", choices=("full", "slim"), required=True)
     opts = parser.parse_args(argv)
     image = pdf_roundtrip()
-    image_decode_roundtrip(image, required=True)
-    full_profile_imports()
+    if opts.profile == "slim":
+        slim_profile_imports()
+    else:
+        image_decode_roundtrip(image, required=True)
+        full_profile_imports()
     print(f"Frozen backend dependency/PDF/image probe PASSED ({opts.profile}; offline)", flush=True)
     return 0
 

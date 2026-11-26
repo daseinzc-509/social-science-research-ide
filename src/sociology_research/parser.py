@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import json
 import os
 import re
+import subprocess
+import tempfile
 import threading
 import time
 import unicodedata
@@ -39,8 +42,25 @@ class DocumentParser(Protocol):
     ) -> ParsedDocument: ...
 
 
+def _managed_docling_ready() -> bool:
+    from .docling_engine import managed_engine_ready
+
+    return managed_engine_ready()
+
+
+def _resolve_formula_enrichment_flag() -> bool:
+    value = os.environ.get("SRA_DOCLING_FORMULA_ENRICHMENT")
+    if value is None:
+        value = os.environ.get("SRA_FORMULA_ENRICHMENT")
+    if value is None:
+        from .user_storage import read_user_preferences
+
+        value = read_user_preferences().get("SRA_FORMULA_ENRICHMENT", "0")
+    return str(value).strip().casefold() in {"1", "true", "yes", "on"}
+
+
 def create_default_parser() -> DocumentParser:
-    """Require Docling in development and in frozen desktop builds.
+    """Require Docling in development, full builds, or slim builds with managed engine.
 
     ``auto`` remains a legacy alias, so older user configuration is compatible.
     Other parsers fail explicitly rather than silently changing extraction quality.
@@ -51,12 +71,114 @@ def create_default_parser() -> DocumentParser:
             "SRA_PDF_PARSER must be 'docling' (legacy 'auto' also works); "
             "the PyMuPDF fallback has been removed."
         )
-    if not _docling_installed():
-        raise DocumentParseError(
-            "Docling is required for SRA PDF import, but is not installed. "
-            "Install the project's Docling-only dependencies."
-        )
-    return DoclingDocumentParser()
+    if _docling_installed():
+        return DoclingDocumentParser()
+    if _managed_docling_ready():
+        return ManagedSubprocessDoclingParser()
+    raise DocumentParseError(
+        "Docling is required for SRA PDF import, but local Docling engine is not installed. "
+        "请打开「设置 → 模型配置中心 → Docling / 增强」点击「一键安装 / 更新 Docling 引擎（CPU 版）」。"
+    )
+
+
+class ManagedSubprocessDoclingParser:
+    """瘦壳打包模式下的纯 Docling 解析器：通过独立托管虚拟环境子进程执行解析。"""
+
+    def __init__(self) -> None:
+        from .docling_engine import active_docling_version
+
+        self.formula_enabled = _resolve_formula_enrichment_flag()
+        option = "formula" if self.formula_enabled else "default"
+        version = active_docling_version()
+        self.version = f"docling-only-v2-table-spans-{option}:{version}"
+
+    def parse(
+        self,
+        pdf_path: Path,
+        *,
+        paper_id: str,
+        sha256: str,
+        progress: Callable[[str], None] | None = None,
+    ) -> ParsedDocument:
+        from .docling_engine import engine_python_executable, worker_package_root
+        from .model_runtime import state_report
+        from .network_settings import download_environment
+
+        path = _validate_pdf_path(pdf_path)
+        python_exe = engine_python_executable()
+        if not python_exe.is_file():
+            raise DocumentParseError(
+                "Docling is required for SRA PDF import, but the managed Docling engine is missing. "
+                "请前往「设置 → 模型配置中心 → Docling / 增强」重新安装本地 Docling 引擎。"
+            )
+        pkg_root = worker_package_root()
+        if pkg_root is None:
+            raise DocumentParseError(
+                "Unable to locate sociology_research worker source for the managed Docling engine."
+            )
+
+        # 若已启用离线验证的托管模型，子进程直接启用离线模式；否则允许按下载代理拉取首次权重
+        offline_models = bool(state_report(formula=self.formula_enabled).get("verified"))
+        env = download_environment(offline=offline_models)
+        existing_py_path = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(pkg_root) + (os.pathsep + existing_py_path if existing_py_path else "")
+        env["PYTHONUTF8"] = "1"
+        env["SRA_FORMULA_ENRICHMENT"] = "1" if self.formula_enabled else "0"
+
+        with tempfile.TemporaryDirectory(prefix="sra-docling-parse-") as folder:
+            out_json = Path(folder) / "parsed.json"
+            err_json = out_json.with_suffix(".error.json")
+            cmd = [
+                str(python_exe),
+                "-m",
+                "sociology_research.docling_parse_worker",
+                str(path.resolve()),
+                paper_id,
+                sha256,
+                str(out_json),
+            ]
+            _emit(progress, "Docling: launching managed local Docling engine...")
+            with subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ) as child:
+                assert child.stdout is not None
+                try:
+                    for line in child.stdout:
+                        if line.startswith("SRA stage:"):
+                            message = line.split("SRA stage:", 1)[1].strip()[:240]
+                            if message:
+                                _emit(progress, message)
+                    code = child.wait()
+                except BaseException:
+                    if child.poll() is None:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait(timeout=3)
+                    raise
+
+            if code != 0:
+                detail = f"Managed Docling worker failed (exit code {code})."
+                if err_json.is_file():
+                    try:
+                        parsed_err = json.loads(err_json.read_text(encoding="utf-8"))
+                        if isinstance(parsed_err, dict) and parsed_err.get("error"):
+                            detail = str(parsed_err["error"])
+                    except (OSError, json.JSONDecodeError):
+                        pass
+                raise DocumentParseError(detail)
+
+            if not out_json.is_file():
+                raise DocumentParseError("Managed Docling worker exited without writing parsed output.")
+            return ParsedDocument.model_validate_json(out_json.read_text(encoding="utf-8"))
 
 
 class DoclingDocumentParser:
@@ -70,13 +192,7 @@ class DoclingDocumentParser:
         # Formula enrichment is opt-in: it may require additional model weights.
         # UI preferences are persisted in the per-user config store. A process
         # environment variable can override them for reproducible CI/dev runs.
-        value = os.environ.get("SRA_DOCLING_FORMULA_ENRICHMENT")
-        if value is None:
-            value = os.environ.get("SRA_FORMULA_ENRICHMENT")
-        if value is None:
-            from .user_storage import read_user_preferences
-            value = read_user_preferences().get("SRA_FORMULA_ENRICHMENT", "0")
-        self.formula_enabled = str(value).strip().casefold() in {"1", "true", "yes", "on"}
+        self.formula_enabled = _resolve_formula_enrichment_flag()
         option = "formula" if self.formula_enabled else "default"
         # Parser version changes intentionally invalidate stale evidence caches on reparse.
         self.version = f"docling-only-v2-table-spans-{option}:{version}"

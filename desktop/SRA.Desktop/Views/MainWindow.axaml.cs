@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private string? _dataFolder;
     private string? _configFolder;
     private string? _cacheFolder;
+    private string? _engineFolder;
 
 
 
@@ -171,6 +172,7 @@ public partial class MainWindow : Window
         }
 
         NavigateTo("papers");
+        if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
         if (pdfFiles.Count == 1)
         {
             var entry = pdfFiles[0];
@@ -318,6 +320,36 @@ public partial class MainWindow : Window
         await window.ShowDialog(this);
     }
 
+    private async Task<bool> EnsureDoclingEngineReadyBeforeImportAsync()
+    {
+        if (ViewModel is null) return false;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var status = await ViewModel.Api.GetDoclingEngineStatusAsync(cts.Token);
+            if (status.TryGetProperty("ready", out var readyProp) && readyProp.GetBoolean())
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // 若旧版后端未实现 /engine 或瞬时超时，放行由后端实际导入逻辑返回具体错误
+            return true;
+        }
+
+        var prompt = new ConfirmWindow(
+            "需要安装本地 Docling 解析引擎",
+            "当前精简版尚未安装本地 Docling 解析引擎，暂时无法解析 PDF 论文。\n\n点击「前往安装」将直接打开「模型配置中心 → Docling / 增强」，支持一键下载安装 CPU-only Docling（自动复用网络代理设置并支持国内镜像）。",
+            "前往安装");
+        if (await prompt.ShowDialog<bool>(this))
+        {
+            var window = new ModelCenterWindow(ViewModel.Api, initialTabIndex: 2);
+            await window.ShowDialog(this);
+        }
+        return false;
+    }
+
     private async void RefreshStorage_Click(object? sender, RoutedEventArgs e)
         => await RefreshStorageInventoryAsync();
 
@@ -327,8 +359,10 @@ public partial class MainWindow : Window
         _dataFolder = null;
         _configFolder = null;
         _cacheFolder = null;
+        _engineFolder = null;
         DataStoragePathText.Text = "正在查询后端实际存储位置...";
         CacheStoragePathText.Text = "—";
+        EngineStoragePathText.Text = "—";
         StorageSizeText.Text = "";
         if (ViewModel is null) return;
         try
@@ -338,19 +372,29 @@ public partial class MainWindow : Window
             _dataFolder = result.GetProperty("data_dir").GetString();
             _configFolder = result.GetProperty("config_dir").GetString();
             _cacheFolder = result.GetProperty("cache_dir").GetString();
+            _engineFolder = result.TryGetProperty("engine_dir", out var engineDirProp)
+                ? engineDirProp.GetString()
+                : null;
             var managed = result.GetProperty("data_managed").GetBoolean();
             DataStoragePathText.Text = (_dataFolder ?? "—") +
                 (managed ? "  [SRA 专属位置]" : "  [自定义/旧版目录，卸载不会删除]");
             CacheStoragePathText.Text = _cacheFolder ?? "—";
+            EngineStoragePathText.Text = _engineFolder ?? "—";
             var usage = result.GetProperty("usage");
+            long engineBytes = usage.TryGetProperty("engine", out var engineUsage)
+                && engineUsage.TryGetProperty("bytes", out var engineBytesProp)
+                ? engineBytesProp.GetInt64()
+                : 0;
             StorageSizeText.Text = $"论文库 {PrettyBytes(usage.GetProperty("data").GetProperty("bytes").GetInt64())} · " +
                 $"配置 {PrettyBytes(usage.GetProperty("config").GetProperty("bytes").GetInt64())} · " +
-                $"SRA 缓存 {PrettyBytes(usage.GetProperty("cache").GetProperty("bytes").GetInt64())}";
+                $"SRA 缓存 {PrettyBytes(usage.GetProperty("cache").GetProperty("bytes").GetInt64())} · " +
+                $"解析引擎 {PrettyBytes(engineBytes)}";
         }
         catch (Exception ex)
         {
             DataStoragePathText.Text = "暂时无法从运行中的 Python 后端获取实际存储路径。";
             CacheStoragePathText.Text = "连接后端后点击「刷新占用信息」。";
+            EngineStoragePathText.Text = "—";
             StorageSizeText.Text = ex.Message.Length > 160 ? ex.Message[..160] : ex.Message;
         }
     }
@@ -374,6 +418,9 @@ public partial class MainWindow : Window
 
     private void OpenCacheDir_Click(object? sender, RoutedEventArgs e)
         => OpenFolder(_cacheFolder);
+
+    private void OpenEngineDir_Click(object? sender, RoutedEventArgs e)
+        => OpenFolder(_engineFolder);
 
     private void OpenFolder(string? path)
     {
@@ -426,6 +473,7 @@ public partial class MainWindow : Window
     private async void ImportPdf_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !StorageProvider.CanOpen) return;
+        if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "导入论文 PDF",
@@ -440,6 +488,7 @@ public partial class MainWindow : Window
     private async void BatchImport_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !StorageProvider.CanOpen) return;
+        if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "批量选择论文 PDF",
@@ -466,6 +515,7 @@ public partial class MainWindow : Window
     private async void FolderImport_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !StorageProvider.CanPickFolder) return;
+        if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = "选择包含 PDF 的文件夹",

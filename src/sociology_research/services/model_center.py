@@ -10,6 +10,14 @@ import json
 from typing import Any
 
 from ..config import Settings, save_local_environment
+from ..docling_engine import (
+    engine_status as docling_engine_status,
+    install_managed_engine,
+    uninstall_managed_engine,
+    validate_custom_pypi_index,
+    validate_mirror_preset,
+    verify_managed_engine,
+)
 from ..llm_client import OpenAICompatibleClient
 from ..model_center_service import download_and_verify
 from ..model_profiles import (
@@ -44,6 +52,7 @@ class ModelCenterService:
             "network": read_network_settings(),
             "profiles": list_profiles(),
             "models": state_report(),
+            "engine": docling_engine_status(),
             "effective": effective_connections(),
             "enhancements": self.enhancement_preferences(),
         }
@@ -130,3 +139,46 @@ class ModelCenterService:
             lambda progress: download_and_verify(formula=formula, download=download, progress=progress),
         )
         return {"job_id": job.id}
+
+    @staticmethod
+    def engine_status() -> dict[str, Any]:
+        return docling_engine_status()
+
+    def start_engine_install(
+        self,
+        *,
+        mirror_preset: str = "default",
+        custom_pypi_index: str = "",
+        jobs: Any | None = None,
+    ) -> dict[str, str]:
+        # 在创建后台任务前同步校验镜像与自定义源 URL，非法参数立即返回 HTTP 400
+        preset = validate_mirror_preset(mirror_preset)
+        custom_index = validate_custom_pypi_index(custom_pypi_index)
+        job_service = jobs if jobs is not None else self._jobs
+        if job_service is None:
+            raise RuntimeError("JobService is required for Docling engine installation")
+        job = job_service.create("docling-engine-install")
+        job_service.start(
+            job,
+            lambda progress: install_managed_engine(
+                mirror_preset=preset,
+                custom_pypi_index=custom_index,
+                progress=progress,
+            ),
+        )
+        return {"job_id": job.id}
+
+    def start_engine_verify(self, *, jobs: Any | None = None) -> dict[str, str]:
+        job_service = jobs if jobs is not None else self._jobs
+        if job_service is None:
+            raise RuntimeError("JobService is required for Docling engine verification")
+        job = job_service.create("docling-engine-verify")
+        job_service.start(
+            job,
+            lambda progress: verify_managed_engine(progress=progress),
+        )
+        return {"job_id": job.id}
+
+    @staticmethod
+    def uninstall_engine() -> dict[str, Any]:
+        return uninstall_managed_engine()

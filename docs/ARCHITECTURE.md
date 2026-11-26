@@ -54,13 +54,13 @@ flowchart TB
 | `papers.py` | PDF 导入（单篇/批量去重与诚实逐文件结果统计）、重解析、删除、元数据修订、全文检索与详情组装。 |
 | `analysis.py` | 单篇与批量论文 Lite/Pro 分析编排、费用/范围预检、参考文献提取。 |
 | `projects.py` | 研究项目 CRUD、论文归属与阅读状态管理、以及**零 LLM 调用的确定性 Evidence Matrix** 构建（复用 `analysis/reporting.py` 提取结构化比较矩阵）。 |
-| `model_center.py` | 统一管理 Lite / Pro / Vision 命名配置、独立下载/AI 代理、托管 Docling 权重下载与独立子进程离线验证、公式/图片增强开关。 |
+| `model_center.py` | 统一管理 Lite / Pro / Vision 命名配置、独立下载/AI 代理、**独立托管 CPU-only Docling 引擎一键安装/验证/清理**、托管 Docling 权重下载与独立子进程离线验证、公式/图片增强开关。 |
 | `region_review_service.py` + `region_review.py` + `region_review_versioning.py` + `region_review_reanalysis.py` | PDF 栅格渲染、区域 OCR/人工抄录草稿、多版本人工修订历史与源块指纹失效检测、以及 v5 独立 Pro 复评（含本地快照指纹预检、外发正文预览、显式双重确认与独立快照保存）。 |
 | `visual.py` | 表格/图片区域本地裁剪预览（不收费）与经研究者显式确认后的单张图片 Vision API 分析。 |
 | `exports.py` & `maintenance.py` | JSON / 精读 Markdown / 解析纯文本 / Zotero BibTeX 导出；Repository Doctor（快速与深度哈希校验）与旧 prompt 缓存清理。 |
 
 ### 2.2 研究核心与基础设施（`src/sociology_research/`）
-- **`parser.py`**：纯 Docling PDF 解析器（已移除 PyMuPDF），输出带 `page_number`、`bbox`、`table_rows`、`table_cells`（合并单元格坐标）与 `figure_regions` 的 `ParsedDocument`。
+- **`parser.py` + `docling_engine.py` + `docling_parse_worker.py`**：纯 Docling PDF 解析器（已移除 PyMuPDF），输出带 `page_number`、`bbox`、`table_rows`、`table_cells`（合并单元格坐标）与 `figure_regions` 的 `ParsedDocument`。支持双运行模式：源码开发 / `full` 打包态直接内联运行 `DoclingDocumentParser`；`slim` 瘦壳打包态自动委派给按需安装在 `user_root()/engine/docling/venv` 的独立 CPU-only Docling 子进程（`ManagedSubprocessDoclingParser`），100% 复用相同解析质量与双遍 OCR 质检逻辑。
 - **`analyzer.py` + `analysis/`**：
   - `analysis/layout.py`：版式与前后页结构识别；
   - `analysis/metadata.py`：基于首页版式与确定性规则的书目元数据核验；
@@ -120,7 +120,7 @@ flowchart TB
 | `paper_tools` | `POST/DELETE /{id}/metadata`, `GET/POST/PUT/DELETE /{id}/notes`, `GET/PUT/DELETE /{id}/claim-reviews`, `POST /{id}/references/extract`, `GET /{id}/{card.json,text.txt,references.json,references.bib,citation.ris}` | 元数据修订、个人笔记、Claim 单条人工审定、参考文献提取与多格式导出（含 NoteExpress RIS）。 |
 | `region_review` | `/pages/{n}.png`, `/pages/{n}/blocks`, `/pages/{n}/preview`, `/confirm`, `/reviews`, `/reviews/{id}/{revise,revoke}`, `/packet`, `/reanalysis/{preview,run,reports}` | 原文对照、局部 OCR、版本修订与 v5 独立 Pro 复评。 |
 | `visual` | `/settings/visual`, `/figures/{id}/preview`, `/figures/{id}/analyze` | 裁剪图本地预览与显式授权后的 Vision 图片分析。 |
-| `model_center` | `/model-center`, `/profiles`, `/activate`, `/network`, `/enhancements`, `/models/{mode,download,verify}` | 统一模型配置、代理与 Docling 权重管理。 |
+| `model_center` | `/model-center`, `/profiles`, `/activate`, `/network`, `/enhancements`, `/engine[/{install,verify}]`, `/models/{mode,download,verify}` | 统一模型配置、代理、独立托管 CPU-only Docling 引擎与离线权重管理。 |
 | `settings` & `workspace` | `/settings/{models,storage}`, `/dashboard`, `/batch-analyze`, `/references/extract-batch`, `/maintenance/{doctor,prune-cache}` | 兼容设置、存储透明化、批量队列与库体检维护。 |
 
 ### 安全与进程生命周期（`api/desktop_entry.py` + `LocalBackendHost.cs`）
@@ -156,7 +156,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     Src["Git Source"] --> Gate1["check_release_safety.py source"]
-    Gate1 --> Freeze["PyInstaller (full / Docling-only)<br/>build_backend.py"]
+    Gate1 --> Freeze["PyInstaller (full 或 slim 瘦壳 / 纯 Docling)<br/>build_backend.py"]
     Freeze --> NoPyMuPDF["check_bundle_without_pymupdf.py"]
     NoPyMuPDF --> Prune["prune_release_assets.py<br/>移除 .pdb 与非必要编解码器"]
     Prune --> Probe["冻结后端真机自检<br/>--self-test-bundle & smoke_backend.py"]
@@ -164,6 +164,9 @@ flowchart LR
     Pack --> Audit["report_build_sizes.py & check_asset_sizes.py<br/>check_release_safety.py artifact/zip & SHA256SUMS"]
 ```
 
-- **CI 流水线（`.github/workflows/ci.yml`）**：每次 push 跑 19 份离线回归测试 + `win-x64` / `osx-arm64` 双端 Release 编译发布。
+- **双模式安装包架构（`scripts/build_backend.py`）**：
+  - `full` 模式（向后兼容）：内置完整 `docling` / `torch` / `transformers` / `rapidocr`，适合开箱离线部署；
+  - `slim` 瘦壳模式（两位数 MB 目标）：排除 `torch`/`docling`/`transformers`/`scipy`/`cv2`/`rapidocr` 等重型 ML 依赖（绝不引入 PyMuPDF），仅保留轻量 FastAPI/SQLite/`pypdfium2` 页面预览 + 纯 Python worker 源码与随包 `uv`，用户首次在「模型配置中心 → Docling / 增强」点击一键安装，即按网络代理配置与国内镜像自动拉取 CPU-only Docling 运行时至 `user_root()/engine/docling/venv`。
+- **CI 流水线（`.github/workflows/ci.yml`）**：每次 push 跑离线全栈回归测试 + `win-x64` / `osx-arm64` 双端 Release 编译发布。
 - **Release 流水线（`.github/workflows/release-desktop.yml`）**：支持 `workflow_dispatch` 内部预览打包与 `v*` 标签自动发布（含 `-` 后缀标 Pre-release，正式语义版本号提取 `CHANGELOG.md` 发布正式 Release）。
 - **测试体系（`tests/`，400+ 用例）**：涵盖研究引擎、API 路由与 DTO 契约、SQLite WAL/FTS5/Projects/SSE、打包依赖与冗余裁剪、macOS DMG 重试策略、隐私门禁以及全部桌面端 XAML/C# 静态契约。

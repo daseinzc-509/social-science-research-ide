@@ -44,6 +44,11 @@ def user_data_dir() -> Path:
     return user_root() / "data"
 
 
+def user_engine_dir() -> Path:
+    """独立托管解析引擎目录（与研究数据和模型权重分离，便于按需安装与清理）。"""
+    return user_root() / "engine"
+
+
 def resolve_data_dir(*, legacy_project_data: Path | None = None) -> Path:
     """Respect an explicit path. Preserve existing project libraries until migrated.
 
