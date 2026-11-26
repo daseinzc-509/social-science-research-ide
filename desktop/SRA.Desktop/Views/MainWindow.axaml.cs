@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using SRA.Desktop.Models;
@@ -582,6 +583,18 @@ public partial class MainWindow : Window
         await SaveTextAsync(SafeName(ViewModel.SelectedPaper.Title) + "-paper-card.json", content);
     }
 
+    private async void CopyRawCardJson_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || !ViewModel.HasCard) return;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+        await clipboard.SetTextAsync(ViewModel.FullRawCardJson);
+        ViewModel.StatusText = "已复制完整 Paper Card JSON 到剪贴板。";
+    }
+
+    private void ToggleFullRawCard_Click(object? sender, RoutedEventArgs e)
+        => ViewModel?.ToggleFullRawCardView();
+
     private async void ExportReading_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel?.SelectedPaper is null) return;
@@ -608,6 +621,20 @@ public partial class MainWindow : Window
         if (ViewModel?.SelectedPaper is null) return;
         var content = await ViewModel.Api.GetReferencesBibtexAsync(ViewModel.SelectedPaper.Id);
         await SaveTextAsync(SafeName(ViewModel.SelectedPaper.Title) + "-references.bib", content);
+    }
+
+    private async void ExportRis_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.SelectedPaper is null) return;
+        try
+        {
+            var content = await ViewModel.Api.GetPaperRisAsync(ViewModel.SelectedPaper.Id);
+            await SaveTextAsync(SafeName(ViewModel.SelectedPaper.Title) + ".ris", content);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "导出 RIS（NoteExpress）失败：" + exc.Message;
+        }
     }
 
     private async Task SaveTextAsync(string suggestedName, string content)

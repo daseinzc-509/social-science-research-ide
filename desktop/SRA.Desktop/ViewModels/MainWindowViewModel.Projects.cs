@@ -13,12 +13,14 @@ public partial class MainWindowViewModel
 {
     private readonly Dictionary<string, HashSet<string>> _projectPaperIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Status, string Note)> _activeProjectEntries = new(StringComparer.Ordinal);
+    private readonly List<ProjectMatrixRowItem> _allMatrixRows = [];
     private CancellationTokenSource? _matrixCts;
 
     public ObservableCollection<ProjectSummaryView> Projects { get; } = [];
     public ObservableCollection<ProjectSummaryView> SelectedPaperProjects { get; } = [];
     public ObservableCollection<ProjectMatrixRowItem> MatrixRows { get; } = [];
     public ObservableCollection<ProjectNoteItem> ProjectNotes { get; } = [];
+    public IReadOnlyList<MatrixStudyTypeOption> MatrixStudyTypeOptions => MatrixStudyTypeOption.All;
 
     /// <summary>
     /// 左侧目录树筛选模式：all / analyzed / pending / project。
@@ -31,6 +33,9 @@ public partial class MainWindowViewModel
     [ObservableProperty] private int matrixAnalyzedPapers;
     [ObservableProperty] private string draftProjectNoteTitle = "";
     [ObservableProperty] private string draftProjectNoteBody = "";
+    [ObservableProperty] private string matrixReadingFilter = "all";
+    [ObservableProperty] private MatrixStudyTypeOption selectedMatrixStudyTypeOption = MatrixStudyTypeOption.All[0];
+    [ObservableProperty] private string matrixReviewFilter = "all";
 
     public bool IsFilterAll => LibraryFilterMode == "all";
     public bool IsFilterAnalyzed => LibraryFilterMode == "analyzed";
@@ -44,7 +49,29 @@ public partial class MainWindowViewModel
     public bool HasSelectedPaperProjects => SelectedPaperProjects.Count > 0;
     public bool HasNoSelectedPaperProjects => SelectedPaperProjects.Count == 0;
     public bool HasMatrixRows => MatrixRows.Count > 0;
-    public bool IsMatrixEmpty => MatrixRows.Count == 0 && !IsLoadingMatrix;
+    public bool HasAnyMatrixRowsInProject => _allMatrixRows.Count > 0;
+    public bool IsMatrixEmpty => _allMatrixRows.Count == 0 && !IsLoadingMatrix;
+    public bool IsMatrixFilteredEmpty => _allMatrixRows.Count > 0 && MatrixRows.Count == 0 && !IsLoadingMatrix;
+    public bool HasActiveMatrixFilters =>
+        MatrixReadingFilter != "all" ||
+        SelectedMatrixStudyTypeOption.Value != "all" ||
+        MatrixReviewFilter != "all";
+    public string MatrixFilterSummary => HasActiveMatrixFilters
+        ? $"筛选显示 {MatrixRows.Count} / {_allMatrixRows.Count} 篇文献"
+        : $"共 {_allMatrixRows.Count} 篇文献";
+
+    public bool IsMatrixReadingAll => MatrixReadingFilter == "all";
+    public bool IsMatrixReadingCore => MatrixReadingFilter == "core";
+    public bool IsMatrixReadingReviewed => MatrixReadingFilter == "reviewed";
+    public bool IsMatrixReadingReading => MatrixReadingFilter == "reading";
+    public bool IsMatrixReadingQueued => MatrixReadingFilter == "queued";
+
+    public bool IsMatrixReviewAll => MatrixReviewFilter == "all";
+    public bool IsMatrixReviewHasReview => MatrixReviewFilter == "has_review";
+    public bool IsMatrixReviewCorrected => MatrixReviewFilter == "corrected";
+    public bool IsMatrixReviewRejected => MatrixReviewFilter == "rejected";
+    public bool IsMatrixReviewUnreviewed => MatrixReviewFilter == "unreviewed";
+
     public bool HasProjectNotes => ProjectNotes.Count > 0;
     public bool HasNoProjectNotes => ProjectNotes.Count == 0;
     public string ProjectNotesCount => ProjectNotes.Count.ToString();
@@ -82,6 +109,7 @@ public partial class MainWindowViewModel
         {
             IsMatrixViewMode = false;
             IsSynthesisViewMode = false;
+            _allMatrixRows.Clear();
             MatrixRows.Clear();
             ProjectNotes.Clear();
             ClearSynthesisState();
@@ -93,6 +121,72 @@ public partial class MainWindowViewModel
         RaiseProjectScopeState();
         RaiseSearchPanelState();
         RaiseSynthesisState();
+        RaiseMatrixFilterState();
+    }
+
+    partial void OnMatrixReadingFilterChanged(string value) => ApplyMatrixFilters();
+    partial void OnSelectedMatrixStudyTypeOptionChanged(MatrixStudyTypeOption value) => ApplyMatrixFilters();
+    partial void OnMatrixReviewFilterChanged(string value) => ApplyMatrixFilters();
+
+    public void ResetMatrixFilters()
+    {
+        MatrixReadingFilter = "all";
+        SelectedMatrixStudyTypeOption = MatrixStudyTypeOption.All[0];
+        MatrixReviewFilter = "all";
+        ApplyMatrixFilters();
+    }
+
+    private void ApplyMatrixFilters()
+    {
+        IEnumerable<ProjectMatrixRowItem> query = _allMatrixRows;
+        if (MatrixReadingFilter != "all")
+        {
+            query = query.Where(r => string.Equals(r.ReadingStatus, MatrixReadingFilter, StringComparison.OrdinalIgnoreCase));
+        }
+        var st = SelectedMatrixStudyTypeOption?.Value ?? "all";
+        if (st == "unanalyzed")
+        {
+            query = query.Where(r => !r.HasCard);
+        }
+        else if (st != "all")
+        {
+            query = query.Where(r => string.Equals(r.StudyType, st, StringComparison.OrdinalIgnoreCase));
+        }
+        query = MatrixReviewFilter switch
+        {
+            "has_review" => query.Where(r => r.HasAnyHumanReview),
+            "corrected" => query.Where(r => r.HasAnyHumanCorrected),
+            "rejected" => query.Where(r => r.HasAnyHumanRejected),
+            "unreviewed" => query.Where(r => r.HasCard && !r.HasAnyHumanReview),
+            _ => query,
+        };
+
+        MatrixRows.Clear();
+        foreach (var row in query)
+        {
+            MatrixRows.Add(row);
+        }
+        RaiseMatrixFilterState();
+    }
+
+    private void RaiseMatrixFilterState()
+    {
+        OnPropertyChanged(nameof(HasMatrixRows));
+        OnPropertyChanged(nameof(HasAnyMatrixRowsInProject));
+        OnPropertyChanged(nameof(IsMatrixEmpty));
+        OnPropertyChanged(nameof(IsMatrixFilteredEmpty));
+        OnPropertyChanged(nameof(HasActiveMatrixFilters));
+        OnPropertyChanged(nameof(MatrixFilterSummary));
+        OnPropertyChanged(nameof(IsMatrixReadingAll));
+        OnPropertyChanged(nameof(IsMatrixReadingCore));
+        OnPropertyChanged(nameof(IsMatrixReadingReviewed));
+        OnPropertyChanged(nameof(IsMatrixReadingReading));
+        OnPropertyChanged(nameof(IsMatrixReadingQueued));
+        OnPropertyChanged(nameof(IsMatrixReviewAll));
+        OnPropertyChanged(nameof(IsMatrixReviewHasReview));
+        OnPropertyChanged(nameof(IsMatrixReviewCorrected));
+        OnPropertyChanged(nameof(IsMatrixReviewRejected));
+        OnPropertyChanged(nameof(IsMatrixReviewUnreviewed));
     }
 
     partial void OnIsMatrixViewModeChanged(bool value)
@@ -262,11 +356,9 @@ public partial class MainWindowViewModel
             }
 
             _projectPaperIds[projectId] = ids;
-            MatrixRows.Clear();
-            foreach (var row in rows)
-            {
-                MatrixRows.Add(row);
-            }
+            _allMatrixRows.Clear();
+            _allMatrixRows.AddRange(rows);
+            ApplyMatrixFilters();
             MatrixTotalPapers = data.TryGetProperty("total_papers", out var tp) && tp.TryGetInt32(out var total)
                 ? total : rows.Count;
             MatrixAnalyzedPapers = data.TryGetProperty("analyzed_papers", out var ap) && ap.TryGetInt32(out var analyzed)

@@ -214,6 +214,21 @@
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
 
+  <!-- 只读大文本 / JSON / 日志检视框：关闭焦点动画与重绘抖动，防止切换焦点卡顿 -->
+  <Style Selector="TextBox.readonly-code">
+    <Setter Property="Transitions">
+      <Transitions />
+    </Setter>
+  </Style>
+  <Style Selector="TextBox.readonly-code:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="TextBox.readonly-code:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSoftBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
   <!-- MD3 Search Bar（全药丸填充式，无默认硬描边，聚焦亮起柔和主色） -->
   <Style Selector="Border.search-shell">
     <Setter Property="Background" Value="{DynamicResource SurfaceContainerHighBrush}" />

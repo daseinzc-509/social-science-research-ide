@@ -23,7 +23,13 @@ from .models import (
     ResearchProject,
     SourceBlock,
 )
-from .search import ensure_fts_schema, rebuild_all_fts, search_documents, sync_paper_fts
+from .search import (
+    ensure_fts_schema,
+    rebuild_all_fts,
+    search_documents,
+    sync_paper_fts,
+    sync_project_notes_fts,
+)
 
 
 class ResearchRepository:
@@ -1047,6 +1053,7 @@ class ResearchRepository:
                 connection,
                 query,
                 paper_ids=scoped_ids,
+                project_id=project_id,
                 source_kinds=set(source_kinds) if source_kinds else None,
                 limit=limit,
             )
@@ -1155,6 +1162,7 @@ class ResearchRepository:
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"project already exists: {new_name}") from exc
+            sync_project_notes_fts(connection, project_id)
             row = connection.execute(
                 """
                 SELECT p.*, COUNT(pp.paper_id) AS paper_count
@@ -1183,6 +1191,7 @@ class ResearchRepository:
                 ).fetchone()[0]
             )
             connection.execute("DELETE FROM research_projects WHERE id = ?", (project_id,))
+            sync_project_notes_fts(connection, project_id)
         return {
             "project_id": str(row["id"]),
             "name": str(row["name"]),
@@ -1337,6 +1346,7 @@ class ResearchRepository:
                 "UPDATE research_projects SET updated_at = ? WHERE id = ?",
                 (now, project_id),
             )
+            sync_project_notes_fts(connection, project_id)
             row = connection.execute(
                 "SELECT id, project_id, title, note, created_at, updated_at FROM project_notes WHERE id = ?",
                 (note_id,),
@@ -1379,6 +1389,7 @@ class ResearchRepository:
                 "UPDATE research_projects SET updated_at = ? WHERE id = ?",
                 (now, project_id),
             )
+            sync_project_notes_fts(connection, project_id)
             updated = connection.execute(
                 "SELECT id, project_id, title, note, created_at, updated_at FROM project_notes WHERE id = ?",
                 (note_id,),
@@ -1398,6 +1409,7 @@ class ResearchRepository:
                     "UPDATE research_projects SET updated_at = ? WHERE id = ?",
                     (now, project_id),
                 )
+                sync_project_notes_fts(connection, project_id)
         return deleted
 
     @staticmethod

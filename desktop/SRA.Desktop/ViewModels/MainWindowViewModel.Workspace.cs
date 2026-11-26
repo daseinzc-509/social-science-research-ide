@@ -50,6 +50,8 @@ public partial class MainWindowViewModel
             var papers = await _api.GetPapersAsync();
             _allPapers.Clear();
             _allPapers.AddRange(papers);
+            RaiseScopeCountLabels();
+            await RefreshProjectsAsync();
             ApplyFilter(SearchText, SelectedPaper?.Id);
             await LoadDashboardAsync();
         }
@@ -83,6 +85,8 @@ public partial class MainWindowViewModel
             var papers = await _api.GetPapersAsync();
             _allPapers.Clear();
             _allPapers.AddRange(papers);
+            RaiseScopeCountLabels();
+            await RefreshProjectsAsync();
             ApplyFilter(SearchText, SelectedPaper?.Id);
             await LoadDashboardAsync();
         }
@@ -200,11 +204,38 @@ public partial class MainWindowViewModel
         }
         IsBusy = true;
         var deletingId = SelectedPaper.Id;
+        var currentIndex = Papers.IndexOf(SelectedPaper);
+        var nextPreferredId = Papers
+            .Where(p => p.Id != deletingId)
+            .ElementAtOrDefault(Math.Max(0, Math.Min(currentIndex, Papers.Count - 2)))
+            ?.Id;
         try
         {
             var result = await _api.DeletePaperAsync(deletingId, true);
+            // 立刻从本地列表与搜索命中中剔除已删除论文，避免等待网络刷新期间产生 404 幽灵项
+            _allPapers.RemoveAll(p => p.Id == deletingId);
+            for (var i = FullTextHits.Count - 1; i >= 0; i--)
+            {
+                if (FullTextHits[i].PaperId == deletingId)
+                {
+                    FullTextHits.RemoveAt(i);
+                }
+            }
+            RaiseScopeCountLabels();
+            ApplyFilter(SearchText, nextPreferredId);
+            if (SelectedPaper is null)
+            {
+                ClearProjection();
+                SelectedDetail = null;
+                SelectedTitle = "选择一篇论文";
+                SelectedSubtitle = "从左侧论文库开始你的阅读。";
+                SelectedParseStatus = "尚未选择文档";
+                SelectedAnalysisState = "未选择";
+                RawCardJson = "尚未选择论文。";
+            }
             StatusText = string.IsNullOrWhiteSpace(result.FileWarning) ? "论文已删除" : result.FileWarning;
-            await RefreshAsync();
+            // 不能调用受 IsBusy 守卫短路的 RefreshAsync()，改用内部 RefreshCoreAsync 同步后端全量状态与专题计数
+            await RefreshCoreAsync(nextPreferredId, preserveStatusText: true);
         }
         catch (Exception exc)
         {

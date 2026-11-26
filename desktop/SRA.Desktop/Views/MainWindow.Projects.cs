@@ -101,6 +101,39 @@ public partial class MainWindow
         }
     }
 
+    private async void ExportActiveProjectRis_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.ActiveProject is not { } proj) return;
+        try
+        {
+            var ris = await ViewModel.Api.GetProjectRisAsync(proj.Id);
+            await SaveTextAsync(SafeName(proj.Name) + "-noteexpress.ris", ris);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "导出专题 RIS（NoteExpress）失败：" + exc.Message;
+        }
+    }
+
+    private void MatrixReadingFilter_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null && sender is Control { Tag: string filter })
+        {
+            ViewModel.MatrixReadingFilter = filter;
+        }
+    }
+
+    private void MatrixReviewFilter_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null && sender is Control { Tag: string filter })
+        {
+            ViewModel.MatrixReviewFilter = filter;
+        }
+    }
+
+    private void ResetMatrixFilters_Click(object? sender, RoutedEventArgs e)
+        => ViewModel?.ResetMatrixFilters();
+
     // ─── 专题级研究笔记（MY NOTE）就地交互 ───
 
     private async void SaveDraftProjectNote_Click(object? sender, RoutedEventArgs e)
@@ -203,6 +236,20 @@ public partial class MainWindow
         }
     }
 
+    private async void ContextExportProjectRis_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || sender is not Control { Tag: ProjectSummaryView proj }) return;
+        try
+        {
+            var ris = await ViewModel.Api.GetProjectRisAsync(proj.Id);
+            await SaveTextAsync(SafeName(proj.Name) + "-noteexpress.ris", ris);
+        }
+        catch (Exception exc)
+        {
+            ViewModel.StatusText = "导出专题 RIS（NoteExpress）失败：" + exc.Message;
+        }
+    }
+
     private async void ContextDeleteProject_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || sender is not Control { Tag: ProjectSummaryView proj }) return;
@@ -296,6 +343,12 @@ public partial class MainWindow
     {
         if (SelectTargetPaper(sender) is null) return;
         ExportBibtex_Click(sender, e);
+    }
+
+    private void ContextExportRis_Click(object? sender, RoutedEventArgs e)
+    {
+        if (SelectTargetPaper(sender) is null) return;
+        ExportRis_Click(sender, e);
     }
 
     private void ContextReparsePaper_Click(object? sender, RoutedEventArgs e)

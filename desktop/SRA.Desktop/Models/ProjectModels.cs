@@ -32,6 +32,27 @@ public sealed record ProjectReadingStatusOption(string Value, string Label)
 public sealed record ProjectEditorResult(string Name, string ResearchQuestion, string Description);
 
 /// <summary>
+/// Evidence Matrix 研究类型筛选下拉项。
+/// </summary>
+public sealed record MatrixStudyTypeOption(string Value, string Label)
+{
+    public static IReadOnlyList<MatrixStudyTypeOption> All { get; } =
+    [
+        new("all", "全部研究类型"),
+        new("quantitative_observational", "定量观察研究"),
+        new("experimental", "实验研究"),
+        new("qualitative", "质性研究"),
+        new("mixed_methods", "混合方法"),
+        new("theoretical", "理论探讨"),
+        new("review", "文献综述"),
+        new("methodological", "方法论研究"),
+        new("unanalyzed", "待分析文献"),
+    ];
+
+    public override string ToString() => Label;
+}
+
+/// <summary>
 /// 专题级跨文献研究笔记（MY NOTE / USER_NOTE）。
 /// </summary>
 public sealed class ProjectNoteItem
@@ -245,6 +266,21 @@ public sealed class ProjectMatrixRowItem
     public bool HasAuthorExplanations => AuthorExplanations.Count > 0;
     public bool HasAuthorLimitations => AuthorLimitations.Count > 0;
     public bool HasAiLimitations => AiLimitations.Count > 0;
+
+    private IEnumerable<MatrixClaimItem> AllClaims =>
+        ResearchQuestions
+            .Concat(TheoriesAndConcepts)
+            .Concat(ResearchDesign)
+            .Concat(MajorFindings)
+            .Concat(AuthorExplanations)
+            .Concat(AuthorLimitations)
+            .Concat(AiLimitations);
+
+    public int HumanReviewCount => AllClaims.Count(c => c.HasHumanReview);
+    public bool HasAnyHumanReview => HumanReviewCount > 0;
+    public bool HasAnyHumanCorrected => AllClaims.Any(c => c.IsHumanCorrected);
+    public bool HasAnyHumanRejected => AllClaims.Any(c => c.IsHumanRejected);
+    public string HumanReviewSummaryBadge => HumanReviewCount > 0 ? $"人工审定 {HumanReviewCount}" : "";
 
     public string MetaSubtitle
     {

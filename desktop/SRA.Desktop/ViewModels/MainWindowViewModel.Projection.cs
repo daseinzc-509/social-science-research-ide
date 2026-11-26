@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using SRA.Desktop.Models;
 
@@ -9,6 +10,68 @@ namespace SRA.Desktop.ViewModels;
 /// </summary>
 public partial class MainWindowViewModel
 {
+    private const int RawCardPreviewCharLimit = 20_000;
+
+    private static readonly JsonSerializerOptions ReadableJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private string _fullRawCardJson = "";
+
+    public string FullRawCardJson => string.IsNullOrEmpty(_fullRawCardJson) ? RawCardJson : _fullRawCardJson;
+
+    partial void OnShowFullRawCardJsonChanged(bool value)
+    {
+        OnPropertyChanged(nameof(RawCardToggleButtonText));
+        ApplyRawCardView();
+    }
+
+    public void ToggleFullRawCardView()
+    {
+        if (!IsRawCardTruncated) return;
+        ShowFullRawCardJson = !ShowFullRawCardJson;
+    }
+
+    private void SetRawCardJsonSource(string fullText)
+    {
+        _fullRawCardJson = fullText;
+        IsRawCardTruncated = fullText.Length > RawCardPreviewCharLimit;
+        ShowFullRawCardJson = false;
+        OnPropertyChanged(nameof(RawCardToggleButtonText));
+        ApplyRawCardView();
+    }
+
+    private void ApplyRawCardView()
+    {
+        if (string.IsNullOrEmpty(_fullRawCardJson))
+        {
+            RawCardSummaryText = "尚未生成 Paper Card。";
+            return;
+        }
+        var totalChars = _fullRawCardJson.Length;
+        var approxKb = Math.Max(1, (int)Math.Round(totalChars / 1024.0));
+        if (!IsRawCardTruncated || ShowFullRawCardJson)
+        {
+            RawCardJson = _fullRawCardJson;
+            RawCardSummaryText = $"完整 Paper Card JSON（UTF-8 中文直显 · 约 {approxKb} KB · {totalChars:N0} 字符）";
+            return;
+        }
+        var preview = _fullRawCardJson[..RawCardPreviewCharLimit];
+        var lastNewLine = preview.LastIndexOf('\n');
+        if (lastNewLine > RawCardPreviewCharLimit - 1000)
+        {
+            preview = preview[..lastNewLine];
+        }
+        RawCardJson = preview
+            + "\n\n// ────────────────────────────────────────────────────────────\n"
+            + $"// 已启用流畅预览（展示前 {preview.Length:N0} / 共 {totalChars:N0} 字符，约 {approxKb} KB），\n"
+            + "// 防止超大只读文本框在点击与切换焦点时卡顿。\n"
+            + "// 请使用上方「复制完整 JSON」「导出 JSON」或「展开完整 JSON」查看全部内容。\n"
+            + "// ────────────────────────────────────────────────────────────";
+        RawCardSummaryText = $"流畅预览模式（完整约 {approxKb} KB · {totalChars:N0} 字符，点击右侧可一键复制或导出完整 JSON）";
+    }
     private void ProjectDetail(PaperDetailResponse detail)
     {
         References.Clear();
@@ -40,11 +103,15 @@ public partial class MainWindowViewModel
             SelectedStudyType = "未分析";
             SelectedAnalysisState = "等待分析";
             AbstractText = "这篇 PDF 已导入并解析，但还没有 Paper Card。";
+            _fullRawCardJson = "";
+            IsRawCardTruncated = false;
+            ShowFullRawCardJson = false;
             RawCardJson = "尚无 Paper Card。";
+            RawCardSummaryText = "尚无 Paper Card。";
             return;
         }
 
-        RawCardJson = JsonSerializer.Serialize(card, new JsonSerializerOptions { WriteIndented = true });
+        SetRawCardJsonSource(JsonSerializer.Serialize(card, ReadableJsonOptions));
         SelectedAnalysisState = "可审计分析已完成";
         ProjectMetadata(card);
         ProjectStudyProfile(card);
@@ -248,6 +315,9 @@ public partial class MainWindowViewModel
         SelectedStudyMethod = "—";
         SelectedIdentification = "—";
         StudyRationale = "";
+        SelectedFactsCount = "—";
+        SelectedEvidenceCount = "—";
+        SelectedReviewsCount = "—";
         MetadataTitle = "—";
         MetadataAuthors = "—";
         MetadataJournal = "—";
@@ -263,6 +333,10 @@ public partial class MainWindowViewModel
         ManualMetadataNote = "";
         ReviewPlanText = "—";
         ReferenceStatusText = "尚未提取参考文献。";
+        _fullRawCardJson = "";
+        IsRawCardTruncated = false;
+        ShowFullRawCardJson = false;
+        RawCardSummaryText = "尚未选择论文。";
         ClearNotesAndReviews();
         RaiseProjectionSectionState();
     }

@@ -137,6 +137,17 @@ def export_project_evidence_matrix_markdown(
     )
 
 
+@router.get("/{project_id}/citations.ris", response_class=PlainTextResponse)
+def export_project_ris(
+    project_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return PlainTextResponse(
+        services.projects.render_project_ris(project_id),
+        media_type="application/x-research-info-systems; charset=utf-8",
+    )
+
+
 @router.get("/{project_id}/notes", response_model=ProjectNoteListResponse)
 def list_project_notes(
     project_id: str,

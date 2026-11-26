@@ -19,19 +19,28 @@ public partial class MainWindowViewModel
         {
             return;
         }
+        await RefreshCoreAsync(SelectedPaper?.Id);
+    }
 
-        var selectedId = SelectedPaper?.Id;
+    private async Task RefreshCoreAsync(string? preferredId = null, bool preserveStatusText = false)
+    {
         try
         {
-            StatusText = "正在刷新论文库…";
+            if (!preserveStatusText)
+            {
+                StatusText = "正在刷新论文库…";
+            }
             var papers = await _api.GetPapersAsync();
             _allPapers.Clear();
             _allPapers.AddRange(papers);
             RaiseScopeCountLabels();
             await RefreshProjectsAsync();
-            ApplyFilter(SearchText, selectedId);
+            ApplyFilter(SearchText, preferredId);
             ApiStatusText = "API 已连接 · v1";
-            StatusText = _allPapers.Count == 0 ? "论文库为空" : $"论文库已刷新：{_allPapers.Count} 篇";
+            if (!preserveStatusText)
+            {
+                StatusText = _allPapers.Count == 0 ? "论文库为空" : $"论文库已刷新：{_allPapers.Count} 篇";
+            }
         }
         catch (Exception exc)
         {

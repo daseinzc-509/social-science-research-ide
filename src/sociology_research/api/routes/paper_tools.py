@@ -86,6 +86,17 @@ def export_references_bibtex(
     return PlainTextResponse(content, media_type=media_type)
 
 
+@router.get("/{paper_id}/citation.ris", response_class=PlainTextResponse)
+def export_paper_ris(
+    paper_id: str,
+    services: ApplicationServices = Depends(get_services),
+):
+    return PlainTextResponse(
+        services.exports.paper_ris(paper_id),
+        media_type="application/x-research-info-systems; charset=utf-8",
+    )
+
+
 @router.get("/{paper_id}/notes", response_model=UserNoteListResponse)
 def list_notes(
     paper_id: str,

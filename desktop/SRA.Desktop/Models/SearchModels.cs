@@ -12,16 +12,25 @@ public sealed class SearchHitItem
     public string Provenance { get; init; } = "";
     public int? PageNumber { get; init; }
     public string Snippet { get; init; } = "";
+    public string HighlightQuery { get; init; } = "";
     public double Score { get; init; }
 
     public bool IsSourceBlock => string.Equals(SourceKind, "SOURCE_BLOCK", StringComparison.OrdinalIgnoreCase);
     public bool IsPaperCard => string.Equals(SourceKind, "PAPER_CARD", StringComparison.OrdinalIgnoreCase);
     public bool IsUserNote => string.Equals(SourceKind, "USER_NOTE", StringComparison.OrdinalIgnoreCase);
+    public bool IsProjectNote => string.Equals(SourceKind, "PROJECT_NOTE", StringComparison.OrdinalIgnoreCase);
     public bool IsHumanReviewed => string.Equals(SourceKind, "HUMAN_REVIEWED", StringComparison.OrdinalIgnoreCase);
     public bool IsMetadata => string.Equals(SourceKind, "METADATA", StringComparison.OrdinalIgnoreCase);
 
     public bool IsCardAi => IsPaperCard && string.Equals(Provenance, "AI_INFERRED", StringComparison.OrdinalIgnoreCase);
     public bool IsCardAuthor => IsPaperCard && !IsCardAi;
+    public bool IsAnyNote => IsUserNote || IsProjectNote;
+    public bool IsPaperTarget => !IsProjectNote;
+
+    public string? TargetProjectId =>
+        PaperId.StartsWith("project:", StringComparison.Ordinal) && PaperId.Length > "project:".Length
+            ? PaperId["project:".Length..]
+            : null;
 
     public bool HasPageNumber => PageNumber is > 0;
     public string PageBadgeLabel => PageNumber is > 0 ? $"PDF p.{PageNumber}" : "";
@@ -34,13 +43,14 @@ public sealed class SearchHitItem
     public bool IsClaimReviewHit =>
         IsHumanReviewed && DocKey.StartsWith("claim_review:", StringComparison.Ordinal);
 
-    public bool CanJumpPdf => HasPageNumber || !string.IsNullOrWhiteSpace(SourceBlockId);
+    public bool CanJumpPdf => !IsProjectNote && (HasPageNumber || !string.IsNullOrWhiteSpace(SourceBlockId));
 
     public string SourceKindLabel => SourceKind.ToUpperInvariant() switch
     {
         "SOURCE_BLOCK" => "PDF 原文",
         "PAPER_CARD" => IsCardAi ? "AI REVIEW" : "AUTHOR · Card",
         "USER_NOTE" => "MY NOTE",
+        "PROJECT_NOTE" => "专题笔记",
         "HUMAN_REVIEWED" => IsClaimReviewHit ? "人工审定" : "局部复核",
         "METADATA" => "书目元数据",
         _ => SourceKind,
@@ -50,6 +60,7 @@ public sealed class SearchHitItem
     {
         get
         {
+            if (IsProjectNote) return "打开专题笔记 →";
             if (IsUserNote) return "直达「我的笔记」→";
             if (IsClaimReviewHit) return "查看人工审定 →";
             if (IsSourceBlock && PageNumber is > 0) return $"定位 PDF p.{PageNumber} →";
@@ -65,9 +76,9 @@ public sealed class SearchHitItem
     /// 避免主按钮和副按钮重复：当主按钮不是跳 PDF 但命中条目仍携带有效页码时显示副按钮。
     /// </summary>
     public bool ShowSecondaryPdfButton =>
-        HasPageNumber && !(IsSourceBlock || (IsHumanReviewed && !IsClaimReviewHit));
+        !IsProjectNote && HasPageNumber && !(IsSourceBlock || (IsHumanReviewed && !IsClaimReviewHit));
 
-    public static SearchHitItem FromView(SearchHitView view) => new()
+    public static SearchHitItem FromView(SearchHitView view, string highlightQuery = "") => new()
     {
         DocKey = view.DocKey,
         PaperId = view.PaperId,
@@ -76,6 +87,7 @@ public sealed class SearchHitItem
         Provenance = view.Provenance,
         PageNumber = view.PageNumber,
         Snippet = view.Snippet,
+        HighlightQuery = highlightQuery,
         Score = view.Score,
     };
 }

@@ -30,6 +30,7 @@ VALID_SOURCE_KINDS = frozenset({
     "SOURCE_BLOCK",
     "PAPER_CARD",
     "USER_NOTE",
+    "PROJECT_NOTE",
     "HUMAN_REVIEWED",
 })
 
@@ -415,8 +416,58 @@ def sync_paper_fts(connection: sqlite3.Connection, paper_id: str) -> int:
     return len(entries)
 
 
+def sync_project_notes_fts(connection: sqlite3.Connection, project_id: str) -> int:
+    """在当前连接事务内重建单个研究专题的专题笔记 FTS5 索引（删除专题时自动清空）。"""
+    if not _table_exists(connection, "search_fts"):
+        return 0
+    pseudo_paper_id = f"project:{project_id}"
+    connection.execute("DELETE FROM search_fts WHERE paper_id = ?", (pseudo_paper_id,))
+    if not _table_exists(connection, "research_projects") or not _table_exists(connection, "project_notes"):
+        return 0
+    proj_row = connection.execute(
+        "SELECT id, name FROM research_projects WHERE id = ?",
+        (project_id,),
+    ).fetchone()
+    if proj_row is None:
+        return 0
+    proj_name = str(proj_row["name"] or "").strip()
+    rows = connection.execute(
+        "SELECT id, title, note FROM project_notes WHERE project_id = ? ORDER BY rowid",
+        (project_id,),
+    ).fetchall()
+    entries: list[tuple[str, str, str, str, str, int | None, str]] = []
+    for row in rows:
+        title = str(row["title"] or "").strip()
+        body = str(row["note"] or "").strip()
+        if not body:
+            continue
+        raw = f"{title} — {body}" if title else body
+        tokenized = tokenize_for_fts(f"{raw} {proj_name}" if proj_name else raw)
+        if not tokenized:
+            continue
+        entries.append((
+            tokenized,
+            f"project_note:{project_id}:{row['id']}",
+            pseudo_paper_id,
+            "PROJECT_NOTE",
+            "USER_NOTE",
+            None,
+            raw[:4000],
+        ))
+    if entries:
+        connection.executemany(
+            """
+            INSERT INTO search_fts (
+                fts_tokens, doc_key, paper_id, source_kind, provenance, page_number, snippet_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            entries,
+        )
+    return len(entries)
+
+
 def rebuild_all_fts(connection: sqlite3.Connection) -> int:
-    """全量重建当前数据库内所有论文的 FTS5 索引。"""
+    """全量重建当前数据库内所有论文与专题研究笔记的 FTS5 索引。"""
     if not ensure_fts_schema(connection):
         return 0
     connection.execute("DELETE FROM search_fts")
@@ -427,15 +478,36 @@ def rebuild_all_fts(connection: sqlite3.Connection) -> int:
     total = 0
     for pid in paper_ids:
         total += sync_paper_fts(connection, pid)
+    if _table_exists(connection, "research_projects") and _table_exists(connection, "project_notes"):
+        proj_ids = [
+            str(row["id"])
+            for row in connection.execute("SELECT id FROM research_projects ORDER BY created_at").fetchall()
+        ]
+        for proj_id in proj_ids:
+            total += sync_project_notes_fts(connection, proj_id)
     return total
 
 
 def _resolve_paper_titles(connection: sqlite3.Connection, paper_ids: set[str]) -> dict[str, str]:
     if not paper_ids:
         return {}
-    placeholders = ",".join("?" for _ in paper_ids)
-    params = tuple(paper_ids)
     titles: dict[str, str] = {}
+    project_ids = {pid[len("project:"):] for pid in paper_ids if pid.startswith("project:")}
+    real_paper_ids = {pid for pid in paper_ids if not pid.startswith("project:")}
+
+    if project_ids and _table_exists(connection, "research_projects"):
+        placeholders = ",".join("?" for _ in project_ids)
+        for row in connection.execute(
+            f"SELECT id, name FROM research_projects WHERE id IN ({placeholders})",
+            tuple(project_ids),
+        ).fetchall():
+            titles[f"project:{row['id']}"] = f"专题 · {row['name']}"
+
+    if not real_paper_ids:
+        return titles
+
+    placeholders = ",".join("?" for _ in real_paper_ids)
+    params = tuple(real_paper_ids)
     for row in connection.execute(
         f"SELECT id, original_name FROM papers WHERE id IN ({placeholders})",
         params,
@@ -475,12 +547,18 @@ def search_documents(
     query: str,
     *,
     paper_ids: set[str] | None = None,
+    project_id: str | None = None,
     source_kinds: set[str] | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """执行跨文献全文检索并返回按相关性排序的可溯源命中片段。"""
+    """执行跨文献全文检索并返回按相关性排序的可溯源命中片段（含专题研究笔记）。"""
     capped = max(1, min(int(limit), 200))
-    if paper_ids is not None and len(paper_ids) == 0:
+    effective_paper_ids: set[str] | None = set(paper_ids) if paper_ids is not None else None
+    if project_id:
+        if effective_paper_ids is None:
+            effective_paper_ids = set()
+        effective_paper_ids.add(f"project:{project_id}")
+    if effective_paper_ids is not None and len(effective_paper_ids) == 0:
         return []
     match_expr = build_fts_match_query(query)
     if not match_expr:
@@ -510,10 +588,10 @@ def search_documents(
             """
         ]
         params: list[Any] = [match_expr]
-        if paper_ids is not None:
-            placeholders = ",".join("?" for _ in paper_ids)
+        if effective_paper_ids is not None:
+            placeholders = ",".join("?" for _ in effective_paper_ids)
             sql.append(f"AND paper_id IN ({placeholders})")
-            params.extend(sorted(paper_ids))
+            params.extend(sorted(effective_paper_ids))
         if allowed_kinds:
             placeholders = ",".join("?" for _ in allowed_kinds)
             sql.append(f"AND source_kind IN ({placeholders})")
@@ -542,6 +620,8 @@ def search_documents(
         ]
         fallback_params: list[Any] = [needle]
         if paper_ids is not None:
+            if not paper_ids:
+                return []
             placeholders = ",".join("?" for _ in paper_ids)
             fallback_sql.append(f"AND paper_id IN ({placeholders})")
             fallback_params.extend(sorted(paper_ids))

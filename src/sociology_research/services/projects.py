@@ -512,3 +512,39 @@ class ProjectService:
 
         lines += ["---", "", "本证据矩阵由本地 SQLite 确定性生成，未调用任何外部模型。"]
         return "\n".join(lines).rstrip() + "\n"
+
+    def render_project_ris(self, project_id: str) -> str:
+        """导出当前研究专题内全部文献的 NoteExpress 兼容 RIS 文件（含手动题录、个人笔记与专题备注）。"""
+        from .exports import render_paper_ris_record
+
+        project = self.repository.get_project(project_id)
+        if project is None:
+            raise KeyError(f"unknown project id: {project_id}")
+        entries = self.repository.list_project_papers(project_id)
+        blocks: list[str] = []
+        for entry in entries:
+            paper = self.repository.get_paper(entry.paper_id)
+            if paper is None:
+                continue
+            card = None
+            try:
+                card = self.repository.get_card(paper.id)
+            except Exception:
+                card = None
+            overrides = self.repository.get_metadata_overrides(paper.id)
+            user_notes = self.repository.list_user_notes(paper.id)
+            claim_reviews = self.repository.list_claim_reviews(paper.id)
+            reading_label = _READING_STATUS_ZH.get(str(entry.reading_status.value), str(entry.reading_status.value))
+            blocks.append(
+                render_paper_ris_record(
+                    paper,
+                    card=card,
+                    metadata_overrides=overrides,
+                    user_notes=user_notes,
+                    claim_reviews=claim_reviews,
+                    project_name=project.name,
+                    reading_status=reading_label,
+                    project_note=entry.project_note,
+                )
+            )
+        return "\r\n".join(blocks)

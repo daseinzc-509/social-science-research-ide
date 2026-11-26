@@ -98,6 +98,9 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string reviewPlanText = "—";
     [ObservableProperty] private string referenceStatusText = "尚未提取参考文献。";
     [ObservableProperty] private string rawCardJson = "尚未选择论文。";
+    [ObservableProperty] private string rawCardSummaryText = "尚未选择论文。";
+    [ObservableProperty] private bool isRawCardTruncated;
+    [ObservableProperty] private bool showFullRawCardJson;
     [ObservableProperty] private string jobLog = "没有正在运行的任务。";
     [ObservableProperty] private string jobStage = "准备就绪";
     [ObservableProperty] private double jobProgress;
@@ -158,6 +161,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool CanRunPaperActions => HasSelection && !IsBusy;
     public bool CanCancelJob => !string.IsNullOrWhiteSpace(ActiveJobId) && !IsCancellingJob;
     public string AnalyzeButtonText => HasCard ? "重新分析" : "开始分析";
+    public string RawCardToggleButtonText => ShowFullRawCardJson ? "切回流畅预览" : "展开完整 JSON";
     public Uri? SelectedPdfUri => SelectedPaper is null ? null : _api.PaperPdfUri(SelectedPaper.Id);
 
     private async Task InitializeAsync()

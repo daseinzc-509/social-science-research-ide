@@ -32,6 +32,7 @@ public partial class MainWindowViewModel
     public bool IsSourceFilterSourceBlock => SearchSourceFilter == "SOURCE_BLOCK";
     public bool IsSourceFilterPaperCard => SearchSourceFilter == "PAPER_CARD";
     public bool IsSourceFilterUserNote => SearchSourceFilter == "USER_NOTE";
+    public bool IsSourceFilterProjectNote => SearchSourceFilter == "PROJECT_NOTE";
     public bool IsSourceFilterHumanReviewed => SearchSourceFilter == "HUMAN_REVIEWED";
     public bool IsSourceFilterMetadata => SearchSourceFilter == "METADATA";
 
@@ -103,6 +104,7 @@ public partial class MainWindowViewModel
         OnPropertyChanged(nameof(IsSourceFilterSourceBlock));
         OnPropertyChanged(nameof(IsSourceFilterPaperCard));
         OnPropertyChanged(nameof(IsSourceFilterUserNote));
+        OnPropertyChanged(nameof(IsSourceFilterProjectNote));
         OnPropertyChanged(nameof(IsSourceFilterHumanReviewed));
         OnPropertyChanged(nameof(IsSourceFilterMetadata));
         OnPropertyChanged(nameof(CanToggleProjectSearchScope));
@@ -173,7 +175,12 @@ public partial class MainWindowViewModel
         try
         {
             var projectId = IsSearchingProjectScope ? ActiveProject?.Id : null;
-            IEnumerable<string>? kinds = SearchSourceFilter == "ALL" ? null : [SearchSourceFilter];
+            IEnumerable<string>? kinds = SearchSourceFilter switch
+            {
+                "ALL" => null,
+                "USER_NOTE" => ["USER_NOTE", "PROJECT_NOTE"],
+                _ => [SearchSourceFilter],
+            };
             var response = await _api.SearchLibraryAsync(
                 term,
                 projectId: projectId,
@@ -185,7 +192,7 @@ public partial class MainWindowViewModel
             FullTextHits.Clear();
             foreach (var hit in response.Hits)
             {
-                FullTextHits.Add(SearchHitItem.FromView(hit));
+                FullTextHits.Add(SearchHitItem.FromView(hit, highlightQuery: term));
             }
             FullTextTotalHits = response.Total;
             QuickSearchHitCount = response.Total;

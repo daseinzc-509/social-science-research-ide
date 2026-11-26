@@ -82,6 +82,16 @@ public partial class MainWindow
     {
         if (ViewModel is null || (sender as Control)?.Tag is not SearchHitItem hit) return;
 
+        if (hit.IsProjectNote && !string.IsNullOrWhiteSpace(hit.TargetProjectId))
+        {
+            var targetProj = ViewModel.Projects.FirstOrDefault(p => p.Id == hit.TargetProjectId);
+            if (targetProj is not null)
+            {
+                await ViewModel.SelectProjectScopeAsync(targetProj, openMatrix: true);
+                return;
+            }
+        }
+
         if (hit.IsUserNote || hit.IsClaimReviewHit)
         {
             ViewModel.FocusPaperInSingleView(hit.PaperId);

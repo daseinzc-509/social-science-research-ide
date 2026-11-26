@@ -159,6 +159,7 @@
                             <MenuItem Header="编辑专题信息" Tag="{Binding}" Click="ContextEditProject_Click" />
                             <MenuItem Header="导出证据矩阵 (Markdown)" Tag="{Binding}" Click="ContextExportProjectMatrix_Click" />
                             <MenuItem Header="导出证据矩阵 (Excel / CSV)" Tag="{Binding}" Click="ContextExportProjectMatrixCsv_Click" />
+                            <MenuItem Header="导出专题题录与笔记 (RIS · NoteExpress)" Tag="{Binding}" Click="ContextExportProjectRis_Click" />
                             <Separator />
                             <MenuItem Header="删除此专题" Tag="{Binding}" Click="ContextDeleteProject_Click" />
                           </ContextMenu>
@@ -231,6 +232,7 @@
                         <MenuItem Header="编辑题录元数据" Tag="{Binding}" Click="ContextEditPaperMetadata_Click" />
                         <MenuItem Header="提取参考文献" Tag="{Binding}" Click="ContextExtractPaperReferences_Click" />
                         <MenuItem Header="导出">
+                          <MenuItem Header="导出题录与笔记 (RIS · NoteExpress)" Tag="{Binding}" Click="ContextExportRis_Click" />
                           <MenuItem Header="导出精读报告 (Markdown)" Tag="{Binding}" Click="ContextExportReading_Click" />
                           <MenuItem Header="导出 Paper Card (JSON)" Tag="{Binding}" Click="ContextExportCard_Click" />
                           <MenuItem Header="导出解析文本 (TXT)" Tag="{Binding}" Click="ContextExportText_Click" />
@@ -411,11 +413,13 @@
                 </StackPanel>
               </Border>
               <Button Content="＋ 添加文献" Classes="tonal compact" Click="AddPapersToActiveProject_Click" />
-              <Button Content="导出矩阵 ▾" Classes="secondary compact" IsEnabled="{Binding HasMatrixRows}" ToolTip.Tip="导出当前专题证据矩阵为 Excel CSV 或 Markdown">
+              <Button Content="导出矩阵 ▾" Classes="secondary compact" IsEnabled="{Binding HasAnyMatrixRowsInProject}" ToolTip.Tip="导出当前专题证据矩阵为 Excel CSV、Markdown 或 NoteExpress RIS">
                 <Button.Flyout>
                   <MenuFlyout>
                     <MenuItem Header="导出为 Excel / CSV（UTF-8 BOM）" Click="ExportActiveMatrixCsv_Click" />
                     <MenuItem Header="导出为 Markdown（含专题笔记与审定）" Click="ExportActiveMatrixMarkdown_Click" />
+                    <Separator />
+                    <MenuItem Header="导出专题题录与笔记 (RIS · NoteExpress)" Click="ExportActiveProjectRis_Click" />
                   </MenuFlyout>
                 </Button.Flyout>
               </Button>
@@ -449,9 +453,10 @@
                   <Button Content="{Binding AnalyzeButtonText}" Classes="primary" IsEnabled="{Binding CanRunPaperActions}" Click="Analyze_Click" />
                   <Button Content="打开 PDF" Classes="tonal" IsEnabled="{Binding HasSelection}" Click="OpenPdf_Click" />
                   <Button Content="局部复核" Classes="tonal" IsEnabled="{Binding HasSelection}" Click="RegionReview_Click" ToolTip.Tip="原 PDF 与提取结果对照、区域 OCR、人工确认" />
-                  <Button Content="导出 ▾" Classes="secondary" IsEnabled="{Binding HasSelection}" ToolTip.Tip="导出当前论文精读报告、JSON、纯文本或 BibTeX">
+                  <Button Content="导出 ▾" Classes="secondary" IsEnabled="{Binding HasSelection}" ToolTip.Tip="导出当前论文题录 (NoteExpress RIS)、精读报告、JSON、纯文本或 BibTeX">
                     <Button.Flyout>
                       <MenuFlyout>
+                        <MenuItem Header="导出题录与笔记 (RIS · NoteExpress)" Click="ExportRis_Click" />
                         <MenuItem Header="导出精读报告 (Markdown)" Click="ExportReading_Click" />
                         <MenuItem Header="导出 Paper Card (JSON)" Click="ExportCard_Click" />
                         <MenuItem Header="导出解析文本 (TXT)" Click="ExportText_Click" />
@@ -998,11 +1003,29 @@
             </TabItem>
 
             <TabItem Header="原始 Card">
-              <TextBox Text="{Binding RawCardJson}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
-                       Margin="18" Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
-                        SelectionBrush="{DynamicResource AccentSoftBrush}" SelectionForegroundBrush="{DynamicResource InkBrush}"
-                       BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10"
-                       ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+              <Grid Margin="18" RowDefinitions="Auto,*" RowSpacing="10">
+                <Border Grid.Row="0" Classes="tonal-card" Padding="14,10">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0" Text="{Binding RawCardSummaryText}" Classes="muted" FontSize="12"
+                               VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                      <Button Content="{Binding RawCardToggleButtonText}" Classes="ghost compact"
+                              IsVisible="{Binding IsRawCardTruncated}" Click="ToggleFullRawCard_Click" />
+                      <Button Content="复制完整 JSON" Classes="tonal compact"
+                              IsEnabled="{Binding HasCard}" Click="CopyRawCardJson_Click" />
+                      <Button Content="导出 JSON" Classes="secondary compact"
+                              IsEnabled="{Binding HasCard}" Click="ExportCard_Click" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+                <TextBox Grid.Row="1" x:Name="RawCardTextBox" Classes="readonly-code"
+                         Text="{Binding RawCardJson}" IsReadOnly="True" IsUndoEnabled="False"
+                         AcceptsReturn="True" TextWrapping="NoWrap"
+                         Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
+                         SelectionBrush="{DynamicResource AccentSoftBrush}" SelectionForegroundBrush="{DynamicResource InkBrush}"
+                         BorderThickness="0" CornerRadius="10" FontFamily="Consolas" FontSize="11"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+              </Grid>
             </TabItem>
 
             <TabItem Header="日志">
@@ -1012,7 +1035,8 @@
                   <ProgressBar Grid.Column="1" Width="180" Height="5" Minimum="0" Maximum="100" Value="{Binding JobProgress}" IsIndeterminate="{Binding JobIndeterminate}" VerticalAlignment="Center" />
                   <Button Grid.Column="2" Content="取消任务" Classes="secondary compact" Click="CancelJob_Click" IsVisible="{Binding CanCancelJob}" VerticalAlignment="Center" />
                 </Grid>
-                <TextBox Grid.Row="1" Text="{Binding JobLog}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                <TextBox Grid.Row="1" Classes="readonly-code"
+                         Text="{Binding JobLog}" IsReadOnly="True" IsUndoEnabled="False" AcceptsReturn="True" TextWrapping="Wrap"
                          Padding="14" Background="{DynamicResource SurfaceSoftBrush}" Foreground="{DynamicResource InkBrush}"
                           SelectionBrush="{DynamicResource AccentSoftBrush}" SelectionForegroundBrush="{DynamicResource InkBrush}" BorderThickness="0" CornerRadius="8" FontFamily="Consolas" FontSize="10" />
               </Grid>
@@ -1100,6 +1124,48 @@
                   </Expander>
                 </Border>
 
+                <!-- Evidence Matrix 多维快速筛选条（大专题论文众多时一键按状态/类型/审定过滤） -->
+                <Border Classes="soft-card" Padding="14,12" IsVisible="{Binding HasAnyMatrixRowsInProject}">
+                  <StackPanel Spacing="9">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <WrapPanel Grid.Column="0" ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="阅读状态" Classes="eyebrow" VerticalAlignment="Center" Margin="0,0,2,0" />
+                        <Button Content="全部" Tag="all" Classes="scope-chip" Classes.active="{Binding IsMatrixReadingAll}" Click="MatrixReadingFilter_Click" />
+                        <Button Content="核心文献" Tag="core" Classes="scope-chip" Classes.active="{Binding IsMatrixReadingCore}" Click="MatrixReadingFilter_Click" />
+                        <Button Content="已复核" Tag="reviewed" Classes="scope-chip" Classes.active="{Binding IsMatrixReadingReviewed}" Click="MatrixReadingFilter_Click" />
+                        <Button Content="在读" Tag="reading" Classes="scope-chip" Classes.active="{Binding IsMatrixReadingReading}" Click="MatrixReadingFilter_Click" />
+                        <Button Content="待读" Tag="queued" Classes="scope-chip" Classes.active="{Binding IsMatrixReadingQueued}" Click="MatrixReadingFilter_Click" />
+                      </WrapPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding MatrixFilterSummary}" Classes="muted" FontSize="11.5" VerticalAlignment="Center" />
+                        <Button Content="重置筛选" Classes="ghost compact" MinHeight="24" Padding="8,1" FontSize="11"
+                                IsVisible="{Binding HasActiveMatrixFilters}" Click="ResetMatrixFilters_Click" />
+                      </StackPanel>
+                    </Grid>
+
+                    <WrapPanel ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
+                      <TextBlock Text="人工审定" Classes="eyebrow" VerticalAlignment="Center" Margin="0,0,2,0" />
+                      <Button Content="全部" Tag="all" Classes="scope-chip" Classes.active="{Binding IsMatrixReviewAll}" Click="MatrixReviewFilter_Click" />
+                      <Button Content="已人工审定" Tag="has_review" Classes="scope-chip" Classes.active="{Binding IsMatrixReviewHasReview}" Click="MatrixReviewFilter_Click" />
+                      <Button Content="含人工修正" Tag="corrected" Classes="scope-chip" Classes.active="{Binding IsMatrixReviewCorrected}" Click="MatrixReviewFilter_Click" />
+                      <Button Content="含存疑驳回" Tag="rejected" Classes="scope-chip" Classes.active="{Binding IsMatrixReviewRejected}" Click="MatrixReviewFilter_Click" />
+                      <Button Content="尚未审定" Tag="unreviewed" Classes="scope-chip" Classes.active="{Binding IsMatrixReviewUnreviewed}" Click="MatrixReviewFilter_Click" />
+                      <TextBlock Text="·  研究类型" Classes="eyebrow" VerticalAlignment="Center" Margin="8,0,2,0" />
+                      <ComboBox ItemsSource="{Binding MatrixStudyTypeOptions}"
+                                SelectedItem="{Binding SelectedMatrixStudyTypeOption, Mode=TwoWay}"
+                                MinWidth="148" FontSize="11.5" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
+                <!-- 筛选后无匹配提示 -->
+                <Border Classes="soft-card" Padding="26,20" IsVisible="{Binding IsMatrixFilteredEmpty}">
+                  <StackPanel Spacing="10" HorizontalAlignment="Center">
+                    <TextBlock Text="当前筛选条件下没有匹配的专题文献" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Center" />
+                    <Button Content="重置全部筛选条件" Classes="tonal compact" HorizontalAlignment="Center" Click="ResetMatrixFilters_Click" />
+                  </StackPanel>
+                </Border>
+
                 <!-- 空专题友好引导 -->
                 <Border Classes="soft-card" Padding="36,30" IsVisible="{Binding IsMatrixEmpty}">
                   <StackPanel Spacing="12" HorizontalAlignment="Center" MaxWidth="440">
@@ -1135,6 +1201,9 @@
                                 </Border>
                                 <Border Classes="badge" Padding="8,2">
                                   <TextBlock Text="{Binding StudyTypeLabel}" Classes="muted" FontSize="10.5" FontWeight="Medium" />
+                                </Border>
+                                <Border IsVisible="{Binding HasAnyHumanReview}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                  <TextBlock Text="{Binding HumanReviewSummaryBadge}" Foreground="{DynamicResource EmeraldInkBrush}" FontSize="10.5" FontWeight="SemiBold" />
                                 </Border>
                               </WrapPanel>
                               <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="23" />
@@ -1354,7 +1423,8 @@
                         <Button Content="全部来源" Tag="ALL" Classes="scope-chip" Classes.active="{Binding IsSourceFilterAll}" Click="SearchSourceFilter_Click" />
                         <Button Content="PDF 原文" Tag="SOURCE_BLOCK" Classes="scope-chip" Classes.active="{Binding IsSourceFilterSourceBlock}" Click="SearchSourceFilter_Click" />
                         <Button Content="Paper Card" Tag="PAPER_CARD" Classes="scope-chip" Classes.active="{Binding IsSourceFilterPaperCard}" Click="SearchSourceFilter_Click" />
-                        <Button Content="我的笔记 (MY NOTE)" Tag="USER_NOTE" Classes="scope-chip" Classes.active="{Binding IsSourceFilterUserNote}" Click="SearchSourceFilter_Click" />
+                        <Button Content="我的笔记 (全部)" Tag="USER_NOTE" Classes="scope-chip" Classes.active="{Binding IsSourceFilterUserNote}" Click="SearchSourceFilter_Click" />
+                        <Button Content="专题笔记" Tag="PROJECT_NOTE" Classes="scope-chip" Classes.active="{Binding IsSourceFilterProjectNote}" Click="SearchSourceFilter_Click" />
                         <Button Content="人工审定 / 复核" Tag="HUMAN_REVIEWED" Classes="scope-chip" Classes.active="{Binding IsSourceFilterHumanReviewed}" Click="SearchSourceFilter_Click" />
                         <Button Content="书目元数据" Tag="METADATA" Classes="scope-chip" Classes.active="{Binding IsSourceFilterMetadata}" Click="SearchSourceFilter_Click" />
                       </WrapPanel>
@@ -1390,8 +1460,8 @@
                           <ContextMenu>
                             <MenuItem Header="直达对应位置" Tag="{Binding}" Click="SearchHitPrimaryJump_Click" />
                             <MenuItem Header="定位 PDF 原页" IsVisible="{Binding CanJumpPdf}" Tag="{Binding}" Click="SearchHitJumpPdf_Click" />
-                            <MenuItem Header="打开论文精读" Tag="{Binding}" Click="SearchHitOpenPaper_Click" />
-                            <MenuItem Header="打开论文「我的笔记」" Tag="{Binding}" Click="SearchHitOpenNotes_Click" />
+                            <MenuItem Header="打开论文精读" IsVisible="{Binding IsPaperTarget}" Tag="{Binding}" Click="SearchHitOpenPaper_Click" />
+                            <MenuItem Header="打开论文「我的笔记」" IsVisible="{Binding IsPaperTarget}" Tag="{Binding}" Click="SearchHitOpenNotes_Click" />
                             <Separator />
                             <MenuItem Header="复制命中片段与来源" Tag="{Binding}" Click="SearchHitCopySnippet_Click" />
                           </ContextMenu>
@@ -1400,7 +1470,7 @@
                           <Border Grid.Column="0" IsVisible="{Binding IsSourceBlock}" Background="{DynamicResource BlueInkBrush}" />
                           <Border Grid.Column="0" IsVisible="{Binding IsCardAuthor}" Background="{DynamicResource BlueInkBrush}" />
                           <Border Grid.Column="0" IsVisible="{Binding IsCardAi}" Background="{DynamicResource PurpleInkBrush}" />
-                          <Border Grid.Column="0" IsVisible="{Binding IsUserNote}" Background="{DynamicResource InkTertiaryBrush}" />
+                          <Border Grid.Column="0" IsVisible="{Binding IsAnyNote}" Background="{DynamicResource InkTertiaryBrush}" />
                           <Border Grid.Column="0" IsVisible="{Binding IsHumanReviewed}" Background="{DynamicResource EmeraldInkBrush}" />
                           <Border Grid.Column="0" IsVisible="{Binding IsMetadata}" Background="{DynamicResource AmberInkBrush}" />
 
@@ -1416,7 +1486,7 @@
                                 <Border IsVisible="{Binding IsCardAi}" Background="{DynamicResource PurpleSoftBrush}" BorderBrush="{DynamicResource PurpleLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
                                   <TextBlock Text="{Binding SourceKindLabel}" Foreground="{DynamicResource PurpleInkBrush}" FontSize="10" FontWeight="SemiBold" />
                                 </Border>
-                                <Border IsVisible="{Binding IsUserNote}" Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
+                                <Border IsVisible="{Binding IsAnyNote}" Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
                                   <TextBlock Text="{Binding SourceKindLabel}" Classes="muted" FontSize="10" FontWeight="SemiBold" />
                                 </Border>
                                 <Border IsVisible="{Binding IsHumanReviewed}" Background="{DynamicResource EmeraldSoftBrush}" BorderBrush="{DynamicResource EmeraldLineBrush}" BorderThickness="1" CornerRadius="999" Padding="8,2">
@@ -1442,7 +1512,9 @@
                               </StackPanel>
                             </Grid>
 
-                            <TextBlock Text="{Binding Snippet}" FontSize="13" LineHeight="22" TextWrapping="Wrap" />
+                            <controls:HighlightedSnippetText SnippetText="{Binding Snippet}"
+                                                             HighlightQuery="{Binding HighlightQuery}"
+                                                             FontSize="13" LineHeight="22" TextWrapping="Wrap" />
                           </StackPanel>
                         </Grid>
                       </Border>

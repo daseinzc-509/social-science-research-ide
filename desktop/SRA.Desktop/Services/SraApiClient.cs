@@ -373,6 +373,12 @@ public sealed class SraApiClient : IDisposable
     public async Task<string> GetReferencesBibtexAsync(string paperId, CancellationToken cancellationToken = default) =>
         await GetTextAsync($"api/v1/papers/{Uri.EscapeDataString(paperId)}/references.bib", cancellationToken);
 
+    public async Task<string> GetPaperRisAsync(string paperId, CancellationToken cancellationToken = default) =>
+        await GetTextAsync($"api/v1/papers/{Uri.EscapeDataString(paperId)}/citation.ris", cancellationToken);
+
+    public async Task<string> GetProjectRisAsync(string projectId, CancellationToken cancellationToken = default) =>
+        await GetTextAsync($"api/v1/projects/{Uri.EscapeDataString(projectId)}/citations.ris", cancellationToken);
+
     public async Task<JobAccepted> StartAnalysisAsync(string paperId, AnalysisRequest request, CancellationToken cancellationToken = default)
     {
         using var response = await _http.PostAsJsonAsync(
