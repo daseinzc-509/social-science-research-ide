@@ -43,6 +43,7 @@ jobs:
             tests/test_project_synthesis.py \
             tests/test_ris_matrix_filter_and_search_polish.py \
             tests/test_managed_docling_engine.py \
+            tests/test_v030_closure_features.py \
             tests/test_secure_distribution.py \
             tests/test_desktop_release_pipeline.py \
             tests/test_crossplatform_desktop.py \

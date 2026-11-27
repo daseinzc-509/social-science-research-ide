@@ -67,10 +67,30 @@ class AnalysisService:
         self.jobs.start(job, work)
         return job.id
 
-    def start_batch_analysis(self, paper_ids: list[str] | None = None) -> str:
-        selected = paper_ids or [
-            paper.id for paper in self.repository.list_papers() if self.repository.get_card(paper.id) is None
-        ]
+    def start_batch_analysis(
+        self,
+        paper_ids: list[str] | None = None,
+        *,
+        project_id: str | None = None,
+    ) -> str:
+        clean_project = (project_id or "").strip() or None
+        if paper_ids:
+            selected = list(paper_ids)
+        elif clean_project is not None:
+            if self.repository.get_project(clean_project) is None:
+                raise KeyError(f"unknown project id: {clean_project}")
+            entries = self.repository.list_project_papers(clean_project)
+            selected = [
+                entry.paper_id
+                for entry in entries
+                if self.repository.get_card(entry.paper_id) is None
+            ]
+            if not selected:
+                raise ValueError("no pending papers in this project")
+        else:
+            selected = [
+                paper.id for paper in self.repository.list_papers() if self.repository.get_card(paper.id) is None
+            ]
         if not selected:
             raise ValueError("no papers are waiting for analysis")
         job = self.jobs.create("batch-analysis")
@@ -92,7 +112,12 @@ class AnalysisService:
                 except Exception as exc:
                     failed.append({"paper_id": paper_id, "error": str(exc)})
                     progress(f"Failed: {paper.original_name}: {exc}")
-            return {"selected": len(selected), "completed": done, "failed": failed}
+            return {
+                "selected": len(selected),
+                "completed": done,
+                "failed": failed,
+                "project_id": clean_project,
+            }
 
         self.jobs.start(job, work)
         return job.id

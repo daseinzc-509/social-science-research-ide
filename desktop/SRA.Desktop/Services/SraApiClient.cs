@@ -358,6 +358,46 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<JsonElement>(response, cancellationToken);
     }
 
+    /// <summary>流式导出研究库 SQLite 在线备份 .zip，绝不把大体积归档加载进内存，亦不含 API Key。</summary>
+    public async Task<long> DownloadBackupArchiveToStreamAsync(
+        bool includePdfs,
+        Stream destination,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/maintenance/backup")
+        {
+            Content = JsonContent.Create(new { include_pdfs = includePdfs }, options: _jsonOptions),
+        };
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var buffer = new byte[128 * 1024];
+        long total = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            total += read;
+        }
+        await destination.FlushAsync(cancellationToken);
+        return total;
+    }
+
+    /// <summary>上传 .zip 研究库备份包执行只读完整性与 SHA-256 校验。</summary>
+    public async Task<JsonElement> VerifyBackupArchiveAsync(
+        Stream zipStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        using var form = new MultipartFormDataContent();
+        using var content = new StreamContent(zipStream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+        var cleanName = string.IsNullOrWhiteSpace(fileName) ? "backup.zip" : Path.GetFileName(fileName);
+        form.Add(content, "file", cleanName);
+        using var response = await _http.PostAsync("api/v1/maintenance/backup/verify", form, cancellationToken);
+        return await ReadJsonAsync<JsonElement>(response, cancellationToken);
+    }
+
     public async Task<string> GetReadingReportAsync(string paperId, CancellationToken cancellationToken = default) =>
         await GetTextAsync($"api/v1/papers/{Uri.EscapeDataString(paperId)}/reading-report", cancellationToken);
 
@@ -390,11 +430,18 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
     }
 
-    public async Task<JobAccepted> StartBatchAnalysisAsync(IEnumerable<string>? paperIds = null, CancellationToken cancellationToken = default)
+    public async Task<JobAccepted> StartBatchAnalysisAsync(
+        IEnumerable<string>? paperIds = null,
+        string? projectId = null,
+        CancellationToken cancellationToken = default)
     {
         using var response = await _http.PostAsJsonAsync(
             "api/v1/batch-analyze",
-            new { paper_ids = paperIds?.ToArray() },
+            new
+            {
+                paper_ids = paperIds?.ToArray(),
+                project_id = string.IsNullOrWhiteSpace(projectId) ? null : projectId.Trim(),
+            },
             _jsonOptions,
             cancellationToken
         );
@@ -537,17 +584,28 @@ public sealed class SraApiClient : IDisposable
         return await ReadJsonAsync<DeletePaperResult>(response, cancellationToken);
     }
 
-    public async Task<JobAccepted> ImportPaperAsync(Stream pdfStream, string fileName, CancellationToken cancellationToken = default)
+    public async Task<JobAccepted> ImportPaperAsync(
+        Stream pdfStream,
+        string fileName,
+        string? projectId = null,
+        CancellationToken cancellationToken = default)
     {
         using var form = new MultipartFormDataContent();
         using var file = new StreamContent(pdfStream);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         AddPdfFilePart(form, file, "file", fileName);
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            form.Add(new StringContent(projectId.Trim()), "project_id");
+        }
         using var response = await _http.PostAsync("api/v1/papers/import", form, cancellationToken);
         return await ReadJsonAsync<JobAccepted>(response, cancellationToken);
     }
 
-    public async Task<JobAccepted> ImportPapersBatchAsync(IReadOnlyList<(Stream Stream, string FileName)> files, CancellationToken cancellationToken = default)
+    public async Task<JobAccepted> ImportPapersBatchAsync(
+        IReadOnlyList<(Stream Stream, string FileName)> files,
+        string? projectId = null,
+        CancellationToken cancellationToken = default)
     {
         using var form = new MultipartFormDataContent();
         var contents = new List<StreamContent>();
@@ -559,6 +617,10 @@ public sealed class SraApiClient : IDisposable
                 contents.Add(content);
                 content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
                 AddPdfFilePart(form, content, "files", fileName);
+            }
+            if (!string.IsNullOrWhiteSpace(projectId))
+            {
+                form.Add(new StringContent(projectId.Trim()), "project_id");
             }
             using var response = await _http.PostAsync("api/v1/papers/import-batch", form, cancellationToken);
             return await ReadJsonAsync<JobAccepted>(response, cancellationToken);

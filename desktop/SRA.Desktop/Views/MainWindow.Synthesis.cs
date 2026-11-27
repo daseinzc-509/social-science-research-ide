@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using SRA.Desktop.Models;
 
@@ -33,6 +34,24 @@ public partial class MainWindow
         if (consent is null || !consent.ApproveExternalSend || !consent.AcknowledgeApiCost) return;
 
         await ViewModel.RunApprovedProjectSynthesisAsync(preview, consent);
+    }
+
+    private async void CopyActiveSynthesisMarkdown_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.ActiveProject is not { } proj || ViewModel.ActiveSynthesisDetail is not { } detail) return;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+        string md;
+        try
+        {
+            md = await ViewModel.Api.GetProjectSynthesisMarkdownAsync(proj.Id, detail.Id);
+        }
+        catch
+        {
+            md = detail.Markdown;
+        }
+        await clipboard.SetTextAsync(md);
+        ViewModel.StatusText = "已复制当前多文献综合 Markdown 到剪贴板。";
     }
 
     private async void ExportActiveSynthesisMarkdown_Click(object? sender, RoutedEventArgs e)

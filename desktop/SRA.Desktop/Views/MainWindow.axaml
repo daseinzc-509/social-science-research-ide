@@ -210,8 +210,14 @@
                     HorizontalContentAlignment="Left" Padding="10,4" FontSize="11"
                     Click="OpenFullTextSearch_Click" />
             <Grid ColumnDefinitions="*,Auto" Margin="6,1,5,0">
-              <TextBlock Text="{Binding ActiveScopeHeading}" FontWeight="SemiBold" FontSize="11" Classes="muted" TextTrimming="CharacterEllipsis"/>
-              <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="tertiary" FontSize="10.5"/>
+              <TextBlock Text="{Binding ActiveScopeHeading}" FontWeight="SemiBold" FontSize="11" Classes="muted" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+              <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="tertiary" FontSize="10.5" VerticalAlignment="Center"/>
+            </Grid>
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="6,0,5,0">
+              <TextBlock Grid.Column="0" Text="排序" Classes="tertiary" FontSize="10.5" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="1" ItemsSource="{Binding LibrarySortOptions}"
+                        SelectedItem="{Binding SelectedLibrarySort, Mode=TwoWay}"
+                        HorizontalAlignment="Stretch" FontSize="11" MinHeight="26" Padding="8,2" />
             </Grid>
           </StackPanel>
 
@@ -262,6 +268,12 @@
                             </StackPanel>
                           </Border>
                         </Grid>
+                        <Border IsVisible="{Binding HasHumanBadge}" HorizontalAlignment="Left"
+                                Background="{DynamicResource BlueSoftBrush}"
+                                BorderBrush="{DynamicResource BlueLineBrush}"
+                                BorderThickness="1" CornerRadius="999" Padding="7,1">
+                          <TextBlock Text="{Binding HumanBadgeText}" Foreground="{DynamicResource BlueInkBrush}" FontSize="10" FontWeight="Medium" />
+                        </Border>
                       </StackPanel>
                     </Grid>
                   </Border>
@@ -412,6 +424,10 @@
                   <Button Content="全文检索" Classes="mode-pill" Classes.active="{Binding ShowSearchPanelView}" Click="OpenFullTextSearch_Click" />
                 </StackPanel>
               </Border>
+              <Button Content="{Binding AnalyzeActiveProjectPendingButtonText}" Classes="primary compact"
+                      IsVisible="{Binding HasPendingPapersInActiveProject}" IsEnabled="{Binding !IsBusy}"
+                      Click="AnalyzeActiveProjectPending_Click"
+                      ToolTip.Tip="仅分析当前研究专题内尚未生成 Paper Card 的论文（不影响其他专题）" />
               <Button Content="＋ 添加文献" Classes="tonal compact" Click="AddPapersToActiveProject_Click" />
               <Button Content="导出矩阵 ▾" Classes="secondary compact" IsEnabled="{Binding HasAnyMatrixRowsInProject}" ToolTip.Tip="导出当前专题证据矩阵为 Excel CSV、Markdown 或 NoteExpress RIS">
                 <Button.Flyout>
@@ -1566,15 +1582,17 @@
                       <TextBlock Text="{Binding SynthesisStatusMessage}" FontSize="12" TextWrapping="Wrap" />
                     </Border>
 
-                    <!-- 历史不可变快照切换 + 导出 / 删除 -->
-                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding HasSynthesisHistory}">
+                    <!-- 历史不可变快照切换 + 复制 / 导出 / 删除 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding HasSynthesisHistory}">
                       <TextBlock Grid.Column="0" Text="历史综合快照" Classes="eyebrow" VerticalAlignment="Center" />
                       <ComboBox Grid.Column="1" ItemsSource="{Binding ProjectSyntheses}"
                                 SelectedItem="{Binding SelectedSynthesisSummary, Mode=TwoWay}"
                                 HorizontalAlignment="Stretch" />
-                      <Button Grid.Column="2" Content="导出报告 (MD)" Classes="secondary compact"
+                      <Button Grid.Column="2" Content="复制 MD" Classes="tonal compact"
+                              IsEnabled="{Binding HasActiveSynthesis}" Click="CopyActiveSynthesisMarkdown_Click" />
+                      <Button Grid.Column="3" Content="导出报告 (MD)" Classes="secondary compact"
                               IsEnabled="{Binding HasActiveSynthesis}" Click="ExportActiveSynthesisMarkdown_Click" />
-                      <Button Grid.Column="3" Content="删除快照" Classes="ghost compact"
+                      <Button Grid.Column="4" Content="删除快照" Classes="ghost compact"
                               IsEnabled="{Binding HasActiveSynthesis}" Click="DeleteActiveSynthesis_Click" />
                     </Grid>
                   </StackPanel>
@@ -1844,6 +1862,19 @@
           <StackPanel Margin="30" MaxWidth="980" Spacing="16">
             <Border Classes="card" Padding="20">
               <StackPanel Spacing="12">
+                <TextBlock Text="研究库安全备份与校验" Classes="h2" />
+                <TextBlock Text="使用 SQLite 在线快照导出 WAL 一致性 .zip 备份包，完整保留所有论文卡片、个人笔记、人工审定、专题矩阵与多文献综合快照。严守安全边界：绝不导出任何 API Key 或凭据；跨设备恢复请先退出桌面端后执行 sra restore-backup。"
+                           Classes="muted" TextWrapping="Wrap" LineHeight="19" />
+                <WrapPanel ItemSpacing="8" LineSpacing="8">
+                  <Button Content="导出轻量备份 (.zip · 数据库+笔记+审定)" Classes="primary" Click="ExportLiteBackup_Click" />
+                  <Button Content="导出完整归档 (.zip · 含全部 PDF)" Classes="tonal" Click="ExportFullBackup_Click" />
+                  <Button Content="校验备份包完整性 (.zip)" Classes="secondary" Click="VerifyBackup_Click" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="20">
+              <StackPanel Spacing="12">
                 <TextBlock Text="Repository Doctor" Classes="h2" />
                 <TextBlock Text="快速检查不会重新读取每个 PDF；深度检查会额外验证文件哈希。" Classes="muted" TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -2008,7 +2039,7 @@
                       Data="M12 3L7 8H10.5V14.5H13.5V8H17L12 3ZM5 17.5V19.5H19V17.5H5Z" />
           </Border>
           <TextBlock Text="释放以导入 PDF 文献" Classes="h1" HorizontalAlignment="Center" />
-          <TextBlock Text="支持拖入单个 PDF、多篇 PDF 或包含 PDF 的文件夹，自动导入本地研究库。"
+          <TextBlock Text="{Binding DropOverlaySubtitle}"
                      Classes="muted" FontSize="13" LineHeight="20"
                      TextAlignment="Center" TextWrapping="Wrap" />
         </StackPanel>

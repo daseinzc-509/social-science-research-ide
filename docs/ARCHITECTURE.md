@@ -57,7 +57,7 @@ flowchart TB
 | `model_center.py` | 统一管理 Lite / Pro / Vision 命名配置、独立下载/AI 代理、**独立托管 CPU-only Docling 引擎一键安装/验证/清理**、托管 Docling 权重下载与独立子进程离线验证、公式/图片增强开关。 |
 | `region_review_service.py` + `region_review.py` + `region_review_versioning.py` + `region_review_reanalysis.py` | PDF 栅格渲染、区域 OCR/人工抄录草稿、多版本人工修订历史与源块指纹失效检测、以及 v5 独立 Pro 复评（含本地快照指纹预检、外发正文预览、显式双重确认与独立快照保存）。 |
 | `visual.py` | 表格/图片区域本地裁剪预览（不收费）与经研究者显式确认后的单张图片 Vision API 分析。 |
-| `exports.py` & `maintenance.py` | JSON / 精读 Markdown / 解析纯文本 / Zotero BibTeX 导出；Repository Doctor（快速与深度哈希校验）与旧 prompt 缓存清理。 |
+| `exports.py` & `maintenance.py` & `backup.py` | JSON / 精读 Markdown / 解析纯文本 / Zotero BibTeX / NoteExpress RIS 导出；Repository Doctor（快速与深度哈希校验）、旧 prompt 缓存清理，以及基于 SQLite Online Backup 的零凭据 `.zip` 研究库安全备份、只读完整性校验与离线原子恢复。 |
 
 ### 2.2 研究核心与基础设施（`src/sociology_research/`）
 - **`parser.py` + `docling_engine.py` + `docling_parse_worker.py`**：纯 Docling PDF 解析器（已移除 PyMuPDF），输出带 `page_number`、`bbox`、`table_rows`、`table_cells`（合并单元格坐标）与 `figure_regions` 的 `ParsedDocument`。支持双运行模式：源码开发 / `full` 打包态直接内联运行 `DoclingDocumentParser`；`slim` 瘦壳打包态自动委派给按需安装在 `user_root()/engine/docling/venv` 的独立 CPU-only Docling 子进程（`ManagedSubprocessDoclingParser`），100% 复用相同解析质量与双遍 OCR 质检逻辑。
@@ -114,14 +114,14 @@ flowchart TB
 | `health` | `GET /api/v1/health` | 后端就绪探针。 |
 | `papers` | `GET /papers`, `GET /papers/search`, `GET/DELETE /papers/{id}`, `GET /papers/{id}/pdf`, `GET /papers/{id}/reading-report`, `POST /papers/{id}/reparse` | 文献库管理、FTS5 双语检索、原文流与精读报告。 |
 | `projects` | `GET/POST /projects`, `GET/PUT/DELETE /projects/{id}`, `POST/DELETE /projects/{id}/papers/{paper_id}`, `GET/POST/PUT/DELETE /projects/{id}/notes`, `GET /projects/{id}/evidence-matrix{,.csv,.md}`, `GET /projects/{id}/citations.ris`, `POST /projects/{id}/synthesis/{preview,run}`, `GET/DELETE /projects/{id}/syntheses[/{sid}]` | 专题聚合、专题笔记、零 LLM Evidence Matrix（含 CSV/MD/NoteExpress RIS 导出）与显式授权跨文献综合。 |
-| `imports` | `POST /import`, `POST /import-batch` | 异步 PDF 导入（返回 `202 JobAccepted`）。 |
+| `imports` | `POST /import`, `POST /import-batch` | 异步 PDF 导入（返回 `202 JobAccepted`），支持可选 `project_id` 幂等自动归入当前研究专题。 |
 | `analysis` | `POST /{paper_id}/analysis/preview`, `POST /{paper_id}/analyze` | 费用/截断预检与异步 Lite/Pro 分析。 |
 | `jobs` | `GET /jobs`, `GET /jobs/{id}`, **`GET /jobs/{id}/events`（SSE）**, `POST /jobs/{id}/cancel` | 任务状态查询、Server-Sent Events 实时进度流与安全取消。 |
 | `paper_tools` | `POST/DELETE /{id}/metadata`, `GET/POST/PUT/DELETE /{id}/notes`, `GET/PUT/DELETE /{id}/claim-reviews`, `POST /{id}/references/extract`, `GET /{id}/{card.json,text.txt,references.json,references.bib,citation.ris}` | 元数据修订、个人笔记、Claim 单条人工审定、参考文献提取与多格式导出（含 NoteExpress RIS）。 |
 | `region_review` | `/pages/{n}.png`, `/pages/{n}/blocks`, `/pages/{n}/preview`, `/confirm`, `/reviews`, `/reviews/{id}/{revise,revoke}`, `/packet`, `/reanalysis/{preview,run,reports}` | 原文对照、局部 OCR、版本修订与 v5 独立 Pro 复评。 |
 | `visual` | `/settings/visual`, `/figures/{id}/preview`, `/figures/{id}/analyze` | 裁剪图本地预览与显式授权后的 Vision 图片分析。 |
 | `model_center` | `/model-center`, `/profiles`, `/activate`, `/network`, `/enhancements`, `/engine[/{install,verify}]`, `/models/{mode,download,verify}` | 统一模型配置、代理、独立托管 CPU-only Docling 引擎与离线权重管理。 |
-| `settings` & `workspace` | `/settings/{models,storage}`, `/dashboard`, `/batch-analyze`, `/references/extract-batch`, `/maintenance/{doctor,prune-cache}` | 兼容设置、存储透明化、批量队列与库体检维护。 |
+| `settings` & `workspace` | `/settings/{models,storage}`, `/dashboard`, `/batch-analyze`（支持 `project_id` 专题范围）, `/references/extract-batch`, `/maintenance/{doctor,prune-cache,backup,backup/verify}` | 兼容设置、存储透明化、全库/专题批量队列、库体检维护与 WAL 一致性安全备份校验。 |
 
 ### 安全与进程生命周期（`api/desktop_entry.py` + `LocalBackendHost.cs`）
 - **捆绑模式**：桌面端 `LocalBackendHost.Launch()` 随机选取本机空闲端口并生成 256-bit 随机令牌写入子进程环境变量 `SRA_DESKTOP_TOKEN`，传递 `--parent-pid <PID>`；后端通过 `DesktopTokenMiddleware` 对所有端点（含 `/health`、`/docs`、`/papers/{id}/pdf`、SSE `/events`）强制校验 `X-SRA-Desktop-Token`。

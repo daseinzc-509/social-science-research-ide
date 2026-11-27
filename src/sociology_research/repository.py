@@ -983,6 +983,22 @@ class ResearchRepository:
                 return True
             return False
 
+    def count_claim_reviews_by_paper(self) -> dict[str, int]:
+        """按论文批量统计已人工审定 Claim 条数（单条聚合 SQL，避免列表页 N+1 查询）。"""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT paper_id, COUNT(*) AS cnt FROM claim_reviews GROUP BY paper_id"
+            ).fetchall()
+        return {str(row["paper_id"]): int(row["cnt"]) for row in rows}
+
+    def count_user_notes_by_paper(self) -> dict[str, int]:
+        """按论文批量统计个人阅读笔记条数（单条聚合 SQL，避免列表页 N+1 查询）。"""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT paper_id, COUNT(*) AS cnt FROM user_notes GROUP BY paper_id"
+            ).fetchall()
+        return {str(row["paper_id"]): int(row["cnt"]) for row in rows}
+
     def save_references(self, paper_id: str, entries: list, mentions: list) -> None:
         """Replace extracted references for one paper; raw source text remains in source_blocks."""
         with self._connection() as connection:
@@ -1254,6 +1270,37 @@ class ResearchRepository:
                 (project_id, paper_id),
             ).fetchone()
         return self._project_paper_from_row(row)
+
+    def attach_paper_to_project_if_absent(self, project_id: str, paper_id: str) -> bool:
+        """幂等归入专题：仅当尚未关联时建立默认关联，绝不覆写既有阅读状态或专题备注。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            if connection.execute("SELECT 1 FROM research_projects WHERE id = ?", (project_id,)).fetchone() is None:
+                raise KeyError(f"unknown project id: {project_id}")
+            if connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone() is None:
+                raise KeyError(f"unknown paper id: {paper_id}")
+            exists = connection.execute(
+                "SELECT 1 FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                (project_id, paper_id),
+            ).fetchone()
+            if exists is not None:
+                return False
+            max_pos = connection.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM project_papers WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO project_papers (project_id, paper_id, reading_status, project_note, position, added_at)
+                VALUES (?, ?, ?, '', ?, ?)
+                """,
+                (project_id, paper_id, ProjectReadingStatus.QUEUED.value, int(max_pos) + 1, now),
+            )
+            connection.execute(
+                "UPDATE research_projects SET updated_at = ? WHERE id = ?",
+                (now, project_id),
+            )
+        return True
 
     def remove_paper_from_project(self, project_id: str, paper_id: str) -> bool:
         now = datetime.now(timezone.utc).isoformat()

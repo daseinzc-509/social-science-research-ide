@@ -52,6 +52,8 @@ class PaperSummary(BaseModel):
     evidence_spans: int = 0
     analysis_claims: int = 0
     warnings: int = 0
+    reviewed_claims: int = 0
+    user_notes_count: int = 0
 
 
 class PaperListResponse(BaseModel):
@@ -80,6 +82,27 @@ class AnalysisPreviewRequest(BaseModel):
 
 class BatchAnalysisRequest(BaseModel):
     paper_ids: list[str] | None = None
+    project_id: str | None = None
+
+
+class BackupCreateRequest(BaseModel):
+    include_pdfs: bool = False
+
+
+class BackupVerifyResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    valid: bool
+    format_version: int = 1
+    created_at: str = ""
+    include_pdfs: bool = False
+    contains_secrets: bool = False
+    db_bytes: int = 0
+    pdf_count: int = 0
+    pdf_bytes: int = 0
+    counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 class DeletePaperRequest(BaseModel):

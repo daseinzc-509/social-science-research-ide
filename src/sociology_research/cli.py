@@ -143,6 +143,16 @@ def build_parser() -> argparse.ArgumentParser:
     prune_cmd.add_argument("--all", action="store_true", help="Target all model cache rows instead of only old prompt versions")
     prune_cmd.add_argument("--yes", action="store_true", help="Actually delete the selected cache rows; without this flag the command is a dry run")
     prune_cmd.add_argument("--vacuum", action="store_true", help="Compact the SQLite file after deletion; requires --yes")
+    backup_cmd = commands.add_parser("backup", help="Create a secretless WAL-consistent .zip backup of the research library")
+    backup_cmd.add_argument("--output", type=Path, required=True, help="Destination .zip archive path")
+    backup_cmd.add_argument("--include-pdfs", action="store_true", help="Also bundle stored PDF files under papers/")
+    verify_backup_cmd = commands.add_parser("verify-backup", help="Verify a .zip research library backup without modifying data")
+    verify_backup_cmd.add_argument("archive", type=Path, help="Path to the .zip backup archive")
+    verify_backup_cmd.add_argument("--json", action="store_true", help="Print the verification report as JSON")
+    restore_cmd = commands.add_parser("restore-backup", help="Offline atomic restore from a verified .zip backup (stop SRA Desktop first)")
+    restore_cmd.add_argument("archive", type=Path, help="Path to the .zip backup archive")
+    restore_cmd.add_argument("--target", type=Path, default=None, help="Target data directory (defaults to active SRA data dir)")
+    restore_cmd.add_argument("--replace", action="store_true", help="Archive an existing non-empty target directory as .bak before restoring")
     ui_cmd = commands.add_parser("ui", help="Open the legacy local browser workspace")
     ui_cmd.add_argument("--port", type=int, default=8765, help="Preferred local port; falls forward if busy (default: 8765)")
     ui_cmd.add_argument("--no-browser", action="store_true", help="Start the UI without opening a browser tab")
@@ -154,6 +164,50 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # 离线校验与恢复命令不应提前触发 ResearchRepository 初始化（避免在空目标目录抢建数据库文件）
+    if args.command == "verify-backup":
+        try:
+            from .backup import verify_backup_archive
+
+            report = verify_backup_archive(args.archive)
+            if args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                status = "VALID" if report["valid"] else "INVALID"
+                print(
+                    f"Backup verification: {status} "
+                    f"(papers={report['counts'].get('papers', 0)}, "
+                    f"notes={report['counts'].get('user_notes', 0)}, "
+                    f"reviews={report['counts'].get('claim_reviews', 0)}, "
+                    f"pdfs={report['pdf_count']})"
+                )
+                for warn in report["warnings"]:
+                    print(f"Warning: {warn}")
+                for err in report["errors"]:
+                    print(f"Error: {err}", file=sys.stderr)
+            return 0 if report["valid"] else 1
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+    if args.command == "restore-backup":
+        try:
+            from .backup import restore_backup_archive
+
+            default_data_dir = Path(os.environ.get("SRA_DATA_DIR", Path.cwd() / "data")).expanduser().resolve()
+            target_dir = args.target if args.target is not None else default_data_dir
+            outcome = restore_backup_archive(args.archive, target_dir, replace=args.replace)
+            print(
+                f"Restored backup to {outcome['target_data_dir']} "
+                f"(papers={outcome['counts'].get('papers', 0)}, pdfs={outcome['pdf_count']}, "
+                f"rewritten_paths={outcome['rewritten_pdf_paths']})"
+            )
+            if outcome["previous_backup_dir"]:
+                print(f"Previous directory preserved at: {outcome['previous_backup_dir']}")
+            return 0
+        except (FileExistsError, ValueError, OSError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+
     data_dir, repository = _paths()
     try:
         if args.command == "import-pdf":
@@ -295,6 +349,16 @@ def main(argv: list[str] | None = None) -> int:
                 before = _format_bytes(int(result["database_bytes_before"]))
                 after = _format_bytes(int(result["database_bytes_after"]))
                 print(f"VACUUM completed: database {before} -> {after}.")
+            return 0
+        if args.command == "backup":
+            from .backup import create_backup_archive
+
+            manifest = create_backup_archive(data_dir, args.output, include_pdfs=args.include_pdfs)
+            print(
+                f"Backup created: {manifest['archive_path']} "
+                f"({_format_bytes(int(manifest['archive_bytes']))}, "
+                f"papers={manifest['counts'].get('papers', 0)}, pdfs={manifest['pdf_count']})"
+            )
             return 0
         if args.command == "ui":
             from .ui import serve_ui

@@ -140,6 +140,56 @@ public partial class MainWindowViewModel
         }
     }
 
+    public async Task ExportBackupArchiveAsync(bool includePdfs, Stream destination, string fileName)
+    {
+        try
+        {
+            var modeLabel = includePdfs ? "完整归档备份（含全部 PDF）" : "轻量备份（数据库 + 笔记 + 审定 + 卡片）";
+            StatusText = $"正在生成并流式导出{modeLabel}…";
+            MaintenanceOutput = $"正在通过 SQLite Online Backup API 导出{modeLabel}（不含任何 API Key）…";
+            var bytes = await _api.DownloadBackupArchiveToStreamAsync(includePdfs, destination);
+            var sizeText = bytes < 1024 * 1024
+                ? $"{bytes / 1024.0:F1} KB"
+                : $"{bytes / 1048576.0:F2} MB";
+            MaintenanceOutput =
+                $"备份导出成功：{fileName}（{sizeText}）\n"
+                + $"备份模式：{modeLabel}\n"
+                + "安全声明：不包含任何 API Key、DPAPI/Keychain 密钥或网络凭据。\n"
+                + "离线恢复命令（先退出桌面端）：sra restore-backup <备份.zip> --replace";
+            StatusText = $"研究库备份已导出：{fileName}（{sizeText}）";
+        }
+        catch (Exception exc)
+        {
+            MaintenanceOutput = "导出研究库备份失败：" + exc.Message;
+            StatusText = "导出备份失败：" + exc.Message;
+        }
+    }
+
+    public async Task VerifyBackupArchiveAsync(Stream zipStream, string fileName)
+    {
+        try
+        {
+            StatusText = $"正在只读校验备份包 {fileName}…";
+            MaintenanceOutput = $"正在校验 {fileName} 的清单 SHA-256 与 SQLite integrity_check…";
+            var report = await _api.VerifyBackupArchiveAsync(zipStream, fileName);
+            var valid = report.TryGetProperty("valid", out var vProp) && vProp.GetBoolean();
+            var formatted = JsonSerializer.Serialize(report, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            });
+            MaintenanceOutput = (valid
+                ? $"备份包校验通过：{fileName}\n\n"
+                : $"备份包校验未通过：{fileName}\n\n") + formatted;
+            StatusText = valid ? $"备份包校验通过：{fileName}" : $"备份包存在异常：{fileName}";
+        }
+        catch (Exception exc)
+        {
+            MaintenanceOutput = "校验备份包失败：" + exc.Message;
+            StatusText = "校验备份包失败：" + exc.Message;
+        }
+    }
+
     public async Task AnalyzeAsync(AnalysisRequest request)
     {
         if (SelectedPaper is null || IsBusy)

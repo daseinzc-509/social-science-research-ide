@@ -7,7 +7,7 @@ from email.message import Message
 from email.utils import collapse_rfc2231_value
 import re
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from ...services.application import ApplicationServices
 from ...services.papers import MAX_BATCH_FILES, MAX_UPLOAD_BYTES
@@ -89,15 +89,25 @@ async def _read_pdf_upload(file: UploadFile) -> tuple[str, bytes]:
 @router.post("/import", response_model=JobAccepted, status_code=202)
 async def import_paper(
     file: UploadFile = File(...),
+    project_id: str | None = Form(default=None),
+    project_id_query: str | None = Query(default=None, alias="project_id"),
     services: ApplicationServices = Depends(get_services),
 ):
     filename, data = await _read_pdf_upload(file)
-    return JobAccepted(job_id=services.papers.start_import(filename, data))
+    target_project = (project_id or project_id_query or "").strip() or None
+    job_id = (
+        services.papers.start_import(filename, data, project_id=target_project)
+        if target_project is not None
+        else services.papers.start_import(filename, data)
+    )
+    return JobAccepted(job_id=job_id)
 
 
 @router.post("/import-batch", response_model=JobAccepted, status_code=202)
 async def import_papers_batch(
     files: list[UploadFile] = File(...),
+    project_id: str | None = Form(default=None),
+    project_id_query: str | None = Query(default=None, alias="project_id"),
     services: ApplicationServices = Depends(get_services),
 ):
     if not files:
@@ -110,4 +120,10 @@ async def import_papers_batch(
     uploads: list[tuple[str, bytes]] = []
     for file in files:
         uploads.append(await _read_pdf_upload(file))
-    return JobAccepted(job_id=services.papers.start_batch_import(uploads))
+    target_project = (project_id or project_id_query or "").strip() or None
+    job_id = (
+        services.papers.start_batch_import(uploads, project_id=target_project)
+        if target_project is not None
+        else services.papers.start_batch_import(uploads)
+    )
+    return JobAccepted(job_id=job_id)

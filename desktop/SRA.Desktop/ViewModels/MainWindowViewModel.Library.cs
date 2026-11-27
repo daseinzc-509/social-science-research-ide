@@ -1,14 +1,21 @@
 using SRA.Desktop.Models;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace SRA.Desktop.ViewModels;
 
 /// <summary>
-/// 论文库检索、列表过滤与当前选中论文的异步加载逻辑。
+/// 论文库检索、列表过滤、多维排序与当前选中论文的异步加载逻辑。
 /// </summary>
 public partial class MainWindowViewModel
 {
     private CancellationTokenSource? _searchCts;
+
+    public IReadOnlyList<LibrarySortOption> LibrarySortOptions => LibrarySortOption.All;
+
+    [ObservableProperty] private LibrarySortOption selectedLibrarySort = LibrarySortOption.All[0];
+
+    partial void OnSelectedLibrarySortChanged(LibrarySortOption value) => ApplyFilter(SearchText);
 
     [RelayCommand]
     public void ClearSearch() => SearchText = "";
@@ -100,8 +107,28 @@ public partial class MainWindowViewModel
                 (paper.Year?.ToString().Contains(term, StringComparison.OrdinalIgnoreCase) ?? false));
         }
 
+        IEnumerable<PaperSummary> ordered = (SelectedLibrarySort?.Value ?? "recent") switch
+        {
+            "year_desc" => filtered
+                .OrderByDescending(p => p.Year ?? int.MinValue)
+                .ThenByDescending(p => p.CreatedAt, StringComparer.Ordinal),
+            "year_asc" => filtered
+                .OrderBy(p => p.Year ?? int.MaxValue)
+                .ThenByDescending(p => p.CreatedAt, StringComparer.Ordinal),
+            "title_asc" => filtered
+                .OrderBy(p => p.Title, StringComparer.OrdinalIgnoreCase),
+            "pending_first" => filtered
+                .OrderBy(p => p.HasCard ? 1 : 0)
+                .ThenByDescending(p => p.CreatedAt, StringComparer.Ordinal),
+            "unreviewed_first" => filtered
+                .OrderBy(p => p.HasCard && p.ReviewedClaims == 0 ? 0 : (p.HasCard ? 1 : 2))
+                .ThenBy(p => p.ReviewedClaims)
+                .ThenByDescending(p => p.CreatedAt, StringComparer.Ordinal),
+            _ => filtered,
+        };
+
         Papers.Clear();
-        foreach (var paper in filtered)
+        foreach (var paper in ordered)
         {
             Papers.Add(paper);
         }

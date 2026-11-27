@@ -173,6 +173,7 @@ public partial class MainWindow : Window
 
         NavigateTo("papers");
         if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
+        var targetProjectId = ViewModel.IsProjectScopeActive ? ViewModel.ActiveProject?.Id : null;
         if (pdfFiles.Count == 1)
         {
             var entry = pdfFiles[0];
@@ -181,7 +182,7 @@ public partial class MainWindow : Window
                 await using Stream stream = entry.StorageFile is not null
                     ? await entry.StorageFile.OpenReadAsync()
                     : File.OpenRead(entry.LocalPath!);
-                await ViewModel.ImportPdfAsync(stream, entry.Name);
+                await ViewModel.ImportPdfAsync(stream, entry.Name, targetProjectId);
             }
             catch (Exception ex)
             {
@@ -200,7 +201,7 @@ public partial class MainWindow : Window
                     : File.OpenRead(entry.LocalPath!);
                 uploads.Add((stream, entry.Name));
             }
-            await ViewModel.ImportBatchAsync(uploads, $"拖放导入 {uploads.Count} 个 PDF");
+            await ViewModel.ImportBatchAsync(uploads, $"拖放导入 {uploads.Count} 个 PDF", targetProjectId);
         }
         catch (Exception ex)
         {
@@ -291,6 +292,46 @@ public partial class MainWindow : Window
         );
         if (!await confirm.ShowDialog<bool>(this)) return;
         await ViewModel.ApplyPruneCacheAsync();
+    }
+
+    private async void ExportLiteBackup_Click(object? sender, RoutedEventArgs e)
+        => await ExportBackupFlowAsync(includePdfs: false);
+
+    private async void ExportFullBackup_Click(object? sender, RoutedEventArgs e)
+        => await ExportBackupFlowAsync(includePdfs: true);
+
+    private async Task ExportBackupFlowAsync(bool includePdfs)
+    {
+        if (ViewModel is null || !StorageProvider.CanSave) return;
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var suffix = includePdfs ? "full" : "lite";
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = includePdfs ? "导出完整研究库归档备份（含 PDF）" : "导出轻量研究库备份（数据库+笔记+审定）",
+            SuggestedFileName = $"sra-library-backup-{suffix}-{stamp}.zip",
+            DefaultExtension = "zip",
+        });
+        if (file is null) return;
+        await using var stream = await file.OpenWriteAsync();
+        stream.SetLength(0);
+        await ViewModel.ExportBackupArchiveAsync(includePdfs, stream, file.Name);
+    }
+
+    private async void VerifyBackup_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || !StorageProvider.CanOpen) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "选择要校验的研究库备份包 (.zip)",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("SRA 研究库备份 (.zip)") { Patterns = ["*.zip"] },
+            ],
+        });
+        if (files.Count == 0) return;
+        await using var stream = await files[0].OpenReadAsync();
+        await ViewModel.VerifyBackupArchiveAsync(stream, files[0].Name);
     }
 
     private void ToggleInspector_Click(object? sender, RoutedEventArgs e)
@@ -474,6 +515,7 @@ public partial class MainWindow : Window
     {
         if (ViewModel is null || !StorageProvider.CanOpen) return;
         if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
+        var targetProjectId = ViewModel.IsProjectScopeActive ? ViewModel.ActiveProject?.Id : null;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "导入论文 PDF",
@@ -482,13 +524,14 @@ public partial class MainWindow : Window
         });
         if (files.Count == 0) return;
         await using var stream = await files[0].OpenReadAsync();
-        await ViewModel.ImportPdfAsync(stream, files[0].Name);
+        await ViewModel.ImportPdfAsync(stream, files[0].Name, targetProjectId);
     }
 
     private async void BatchImport_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !StorageProvider.CanOpen) return;
         if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
+        var targetProjectId = ViewModel.IsProjectScopeActive ? ViewModel.ActiveProject?.Id : null;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "批量选择论文 PDF",
@@ -504,7 +547,7 @@ public partial class MainWindow : Window
             {
                 uploads.Add((await file.OpenReadAsync(), file.Name));
             }
-            await ViewModel.ImportBatchAsync(uploads, $"批量导入 {uploads.Count} 个 PDF");
+            await ViewModel.ImportBatchAsync(uploads, $"批量导入 {uploads.Count} 个 PDF", targetProjectId);
         }
         finally
         {
@@ -516,6 +559,7 @@ public partial class MainWindow : Window
     {
         if (ViewModel is null || !StorageProvider.CanPickFolder) return;
         if (!await EnsureDoclingEngineReadyBeforeImportAsync()) return;
+        var targetProjectId = ViewModel.IsProjectScopeActive ? ViewModel.ActiveProject?.Id : null;
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = "选择包含 PDF 的文件夹",
@@ -543,7 +587,7 @@ public partial class MainWindow : Window
             {
                 uploads.Add((File.OpenRead(path), Path.GetFileName(path)));
             }
-            await ViewModel.ImportBatchAsync(uploads, $"从文件夹导入 {uploads.Count} 个 PDF");
+            await ViewModel.ImportBatchAsync(uploads, $"从文件夹导入 {uploads.Count} 个 PDF", targetProjectId);
         }
         finally
         {

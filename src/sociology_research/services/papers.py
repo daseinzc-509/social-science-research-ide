@@ -46,6 +46,17 @@ class PaperService:
             ordered_project_ids = [entry.paper_id for entry in entries]
             allowed_ids = set(ordered_project_ids)
 
+        review_counts = (
+            self.repository.count_claim_reviews_by_paper()
+            if hasattr(self.repository, "count_claim_reviews_by_paper")
+            else {}
+        )
+        note_counts = (
+            self.repository.count_user_notes_by_paper()
+            if hasattr(self.repository, "count_user_notes_by_paper")
+            else {}
+        )
+
         items: list[dict[str, Any]] = []
         for paper in self.repository.list_papers():
             if allowed_ids is not None and paper.id not in allowed_ids:
@@ -74,6 +85,8 @@ class PaperService:
                     "evidence_spans": len(card.evidence_spans) if card is not None else 0,
                     "analysis_claims": len(card.analysis) if card is not None else 0,
                     "warnings": len(card.warnings) if card is not None else len(paper.warnings),
+                    "reviewed_claims": int(review_counts.get(paper.id, 0)),
+                    "user_notes_count": int(note_counts.get(paper.id, 0)),
                 }
             )
 
@@ -275,7 +288,16 @@ class PaperService:
             raise FileNotFoundError(f"stored PDF is missing: {path}")
         return path
 
-    def start_import(self, filename: str, data: bytes) -> str:
+    def _validate_target_project(self, project_id: str | None) -> str | None:
+        clean = (project_id or "").strip()
+        if not clean:
+            return None
+        if self.repository.get_project(clean) is None:
+            raise KeyError(f"unknown project id: {clean}")
+        return clean
+
+    def start_import(self, filename: str, data: bytes, *, project_id: str | None = None) -> str:
+        target_project = self._validate_target_project(project_id)
         safe_name, payload = self._validate_upload(filename, data)
         temp_dir = Path(tempfile.mkdtemp(prefix="sra-upload-"))
         temp_path = temp_dir / safe_name
@@ -293,6 +315,9 @@ class PaperService:
                 progress=progress,
             )
             record, parsed, created = pipeline.import_pdf(temp_path)
+            attached = False
+            if target_project is not None:
+                attached = self.repository.attach_paper_to_project_if_absent(target_project, record.id)
             self.jobs.message(
                 job.id,
                 "PDF parsed and stored."
@@ -305,12 +330,20 @@ class PaperService:
                 "page_count": record.page_count,
                 "parse_status": str(record.parse_status),
                 "warnings": list(parsed.warnings),
+                "project_id": target_project,
+                "attached_to_project": bool(attached),
             }
 
         self.jobs.start(job, work, cleanup=cleanup_temp)
         return job.id
 
-    def start_batch_import(self, uploads: list[tuple[str, bytes]]) -> str:
+    def start_batch_import(
+        self,
+        uploads: list[tuple[str, bytes]],
+        *,
+        project_id: str | None = None,
+    ) -> str:
+        target_project = self._validate_target_project(project_id)
         if not uploads:
             raise ValueError("no PDF files were uploaded")
         if len(uploads) > MAX_BATCH_FILES:
@@ -348,6 +381,7 @@ class PaperService:
 
         def work(progress):
             results: list[dict[str, Any]] = []
+            attached_count = 0
             progress(f"Batch import: {len(prepared)} valid PDF file(s) queued…")
             for index, (safe_name, path) in enumerate(prepared, start=1):
                 progress(f"Batch import {index}/{len(prepared)}: {safe_name}")
@@ -358,6 +392,11 @@ class PaperService:
                         progress=progress,
                     )
                     record, parsed, created = pipeline.import_pdf(path)
+                    attached = False
+                    if target_project is not None:
+                        attached = self.repository.attach_paper_to_project_if_absent(target_project, record.id)
+                        if attached:
+                            attached_count += 1
                     results.append(
                         {
                             "filename": safe_name,
@@ -366,6 +405,7 @@ class PaperService:
                             "page_count": record.page_count,
                             "parse_status": str(record.parse_status),
                             "warnings": list(parsed.warnings),
+                            "attached_to_project": bool(attached),
                             "error": None,
                         }
                     )
@@ -409,6 +449,8 @@ class PaperService:
                 "imported": imported,
                 "duplicates": duplicates,
                 "failed": failed,
+                "project_id": target_project,
+                "attached_count": attached_count,
             }
 
         self.jobs.start(job, work, cleanup=cleanup_temp)

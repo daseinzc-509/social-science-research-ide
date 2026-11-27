@@ -96,6 +96,24 @@ public partial class MainWindowViewModel
     public bool HasActiveProjectDescription => !string.IsNullOrWhiteSpace(ActiveProjectDescription);
     public string MatrixStatsText => $"共 {MatrixTotalPapers} 篇文献 · 已分析 {MatrixAnalyzedPapers} 篇 · 零模型调用（确定性聚合）";
 
+    public int PendingPapersInActiveProjectCount
+    {
+        get
+        {
+            if (!IsProjectScopeActive || ActiveProject is not { } proj) return 0;
+            var ids = GetProjectPaperIds(proj.Id);
+            return _allPapers.Count(p => ids.Contains(p.Id) && !p.HasCard);
+        }
+    }
+
+    public bool HasPendingPapersInActiveProject => IsProjectScopeActive && PendingPapersInActiveProjectCount > 0;
+
+    public string AnalyzeActiveProjectPendingButtonText => $"分析待处理 ({PendingPapersInActiveProjectCount})";
+
+    public string DropOverlaySubtitle => IsProjectScopeActive && ActiveProject is not null
+        ? $"支持拖入单个 PDF、多篇 PDF 或文件夹；导入后将自动归入当前专题「{ActiveProject.Name}」。"
+        : "支持拖入单个 PDF、多篇 PDF 或包含 PDF 的文件夹，自动导入本地研究库。";
+
     public IReadOnlyList<PaperSummary> AllLibraryPapers => _allPapers;
 
     partial void OnLibraryFilterModeChanged(string value)
@@ -217,6 +235,10 @@ public partial class MainWindowViewModel
         OnPropertyChanged(nameof(MatrixStatsText));
         OnPropertyChanged(nameof(HasMatrixRows));
         OnPropertyChanged(nameof(IsMatrixEmpty));
+        OnPropertyChanged(nameof(PendingPapersInActiveProjectCount));
+        OnPropertyChanged(nameof(HasPendingPapersInActiveProject));
+        OnPropertyChanged(nameof(AnalyzeActiveProjectPendingButtonText));
+        OnPropertyChanged(nameof(DropOverlaySubtitle));
     }
 
     private void RaiseScopeCountLabels()
@@ -224,6 +246,33 @@ public partial class MainWindowViewModel
         OnPropertyChanged(nameof(AllPapersCountLabel));
         OnPropertyChanged(nameof(AnalyzedPapersCountLabel));
         OnPropertyChanged(nameof(PendingPapersCountLabel));
+        OnPropertyChanged(nameof(PendingPapersInActiveProjectCount));
+        OnPropertyChanged(nameof(HasPendingPapersInActiveProject));
+        OnPropertyChanged(nameof(AnalyzeActiveProjectPendingButtonText));
+    }
+
+    public async Task RunActiveProjectPendingAnalysisAsync()
+    {
+        if (!IsProjectScopeActive || ActiveProject is not { } proj || IsBusy)
+        {
+            return;
+        }
+        var pending = PendingPapersInActiveProjectCount;
+        if (pending <= 0)
+        {
+            StatusText = $"专题「{proj.Name}」内所有文献均已完成分析。";
+            return;
+        }
+        await RunJobAsync(
+            $"正在分析专题「{proj.Name}」中的 {pending} 篇待处理文献…",
+            async () => await _api.StartBatchAnalysisAsync(projectId: proj.Id),
+            preferredPaperId: SelectedPaper?.Id,
+            successMessage: $"专题「{proj.Name}」批量分析完成"
+        );
+        if (ActiveProject?.Id == proj.Id)
+        {
+            await LoadActiveProjectMatrixAsync(proj.Id);
+        }
     }
 
     public async Task RefreshProjectsAsync()

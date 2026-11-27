@@ -72,6 +72,23 @@ public partial class MainWindow
         await ShowAddPapersToProjectDialogAsync(proj);
     }
 
+    private async void AnalyzeActiveProjectPending_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.ActiveProject is not { } proj || ViewModel.IsBusy) return;
+        var pending = ViewModel.PendingPapersInActiveProjectCount;
+        if (pending <= 0)
+        {
+            ViewModel.StatusText = $"专题「{proj.Name}」内所有文献均已完成分析。";
+            return;
+        }
+        var confirm = new ConfirmWindow(
+            "分析当前专题待处理论文",
+            $"将为专题「{proj.Name}」中的 {pending} 篇未分析论文依次运行 Lite → Pro 分析（不会触碰其他专题的论文）。\n\n此操作将调用外部模型 API 并可能产生费用，过程中可随时取消。继续？",
+            $"开始分析 ({pending} 篇)");
+        if (!await confirm.ShowDialog<bool>(this)) return;
+        await ViewModel.RunActiveProjectPendingAnalysisAsync();
+    }
+
     private async void ExportActiveMatrixMarkdown_Click(object? sender, RoutedEventArgs e)
     {
         if (ViewModel?.ActiveProject is not { } proj) return;

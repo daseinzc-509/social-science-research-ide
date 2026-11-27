@@ -120,11 +120,47 @@ public sealed class PaperSummary
     [JsonPropertyName("warnings")]
     public int Warnings { get; init; }
 
+    [JsonPropertyName("reviewed_claims")]
+    public int ReviewedClaims { get; init; }
+
+    [JsonPropertyName("user_notes_count")]
+    public int UserNotesCount { get; init; }
+
     [JsonIgnore]
     public string AuthorLine => Authors.Count == 0 ? "作者未知" : string.Join("、", Authors);
 
     [JsonIgnore]
     public string StatusLine => $"{PageCount} 页 · {(HasCard ? "已分析" : "未分析")}" + (Warnings > 0 ? $" · {Warnings} warning" : "");
+
+    [JsonIgnore]
+    public bool HasHumanBadge => ReviewedClaims > 0 || UserNotesCount > 0;
+
+    [JsonIgnore]
+    public string HumanBadgeText
+    {
+        get
+        {
+            if (ReviewedClaims > 0 && UserNotesCount > 0) return $"已审 {ReviewedClaims} · 笔记 {UserNotesCount}";
+            if (ReviewedClaims > 0) return $"已审 {ReviewedClaims}";
+            if (UserNotesCount > 0) return $"笔记 {UserNotesCount}";
+            return "";
+        }
+    }
+}
+
+public sealed record LibrarySortOption(string Value, string Label)
+{
+    public static IReadOnlyList<LibrarySortOption> All { get; } =
+    [
+        new("recent", "最新导入"),
+        new("year_desc", "发表年份（新 → 旧）"),
+        new("year_asc", "发表年份（旧 → 新）"),
+        new("title_asc", "题名（A → Z）"),
+        new("pending_first", "待分析优先"),
+        new("unreviewed_first", "待审定优先"),
+    ];
+
+    public override string ToString() => Label;
 }
 
 public sealed class PaperListResponse

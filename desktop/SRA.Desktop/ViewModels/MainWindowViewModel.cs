@@ -374,30 +374,43 @@ public partial class MainWindowViewModel : ObservableObject
             : string.Join(Environment.NewLine, warnings);
     }
 
-    public async Task ImportPdfAsync(Stream stream, string fileName)
+    public async Task ImportPdfAsync(Stream stream, string fileName, string? projectId = null)
     {
         if (IsBusy)
         {
             return;
         }
+        var targetName = !string.IsNullOrWhiteSpace(projectId) && ActiveProject?.Id == projectId
+            ? ActiveProject.Name
+            : null;
         await RunJobAsync(
-            $"正在导入 {fileName}…",
-            async () => await _api.ImportPaperAsync(stream, fileName),
+            targetName is null ? $"正在导入 {fileName}…" : $"正在导入 {fileName}（自动归入专题「{targetName}」）…",
+            async () => await _api.ImportPaperAsync(stream, fileName, projectId),
             preferredPaperId: null,
-            successMessage: "PDF 导入完成",
+            successMessage: targetName is null ? "PDF 导入完成" : $"PDF 导入完成，已归入专题「{targetName}」",
             selectResultPaper: true
         );
     }
 
-    public async Task ImportBatchAsync(IReadOnlyList<(Stream Stream, string FileName)> files, string label)
+    public async Task ImportBatchAsync(
+        IReadOnlyList<(Stream Stream, string FileName)> files,
+        string label,
+        string? projectId = null)
     {
         if (files.Count == 0 || IsBusy)
         {
             return;
         }
+        var targetName = !string.IsNullOrWhiteSpace(projectId) && ActiveProject?.Id == projectId
+            ? ActiveProject.Name
+            : null;
+        if (targetName is not null)
+        {
+            label = $"{label}（归入专题「{targetName}」）";
+        }
         await RunJobAsync(
             $"正在{label}…",
-            async () => await _api.ImportPapersBatchAsync(files),
+            async () => await _api.ImportPapersBatchAsync(files, projectId),
             preferredPaperId: null,
             successMessage: $"{label}完成",
             completionMessage: snapshot => DescribeBatchImport(snapshot, label)
