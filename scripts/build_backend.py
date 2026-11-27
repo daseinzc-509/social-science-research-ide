@@ -193,7 +193,10 @@ def command_args(
         pkg_src = project / "src" / "sociology_research"
         args += ["--add-data", f"{pkg_src}{os.pathsep}sra_src/sociology_research"]
         if uv_binary is not None:
-            uv_path = Path(uv_binary).expanduser().resolve()
+            uv_path = Path(uv_binary).expanduser()
+            if sys.platform == "win32" and not uv_path.is_file() and uv_path.with_suffix(".exe").is_file():
+                uv_path = uv_path.with_suffix(".exe")
+            uv_path = uv_path.resolve()
             if not uv_path.is_file():
                 raise FileNotFoundError(f"Specified uv binary not found: {uv_path}")
             args += ["--add-binary", f"{uv_path}{os.pathsep}tools"]

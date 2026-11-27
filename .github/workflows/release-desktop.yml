@@ -142,7 +142,7 @@ jobs:
           set -euo pipefail
           set -- --profile "$BUNDLE_PROFILE" --collection-policy "$COLLECTION_POLICY" --output dist/backend
           if [ "$BUNDLE_PROFILE" = 'slim' ]; then
-            UV_BIN="$(command -v uv)"
+            UV_BIN="$(python -c 'import shutil, sys; p = shutil.which("uv"); sys.exit("uv not found on PATH") if not p else print(p)')"
             echo "Bundling standalone uv binary: $UV_BIN"
             set -- "$@" --uv-binary "$UV_BIN" --exclude-dev-and-gui
           fi
