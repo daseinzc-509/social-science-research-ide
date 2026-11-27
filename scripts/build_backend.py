@@ -40,6 +40,7 @@ SLIM_HEAVY_EXCLUDES = (
     "transformers",
     "timm",
     "scipy",
+    "numpy",
     "cv2",
     "rapidocr",
     "rapidocr_onnxruntime",
@@ -186,6 +187,9 @@ def command_args(
             _add(args, "pydantic", "--collect-submodules")
             _add(args, "keyring", "--collect-all")
         _add(args, "pypdfium2", "--collect-all")
+        _add(args, "PIL", "--collect-submodules")
+        if available("PIL"):
+            args += ["--hidden-import", "PIL.Image"]
         pkg_src = project / "src" / "sociology_research"
         args += ["--add-data", f"{pkg_src}{os.pathsep}sra_src/sociology_research"]
         if uv_binary is not None:

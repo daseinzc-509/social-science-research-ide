@@ -38,6 +38,10 @@ def package_app(desktop: Path, backend: Path, output: Path, version: str) -> Pat
     (macos / "SRA.Desktop").chmod((macos / "SRA.Desktop").stat().st_mode | stat.S_IXUSR)
     executable = resources / "backend" / "sra-backend" / "sra-backend"
     executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    for uv_rel in ("tools/uv", "_internal/tools/uv"):
+        bundled_uv = resources / "backend" / "sra-backend" / uv_rel
+        if bundled_uv.is_file():
+            bundled_uv.chmod(bundled_uv.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     icon = resources / "sra.icns"
     if not icon.is_file():
         # The CI step generates sra.icns *before* signing. A placeholder icon

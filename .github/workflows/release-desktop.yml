@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Preview version, e.g. 0.2.2-rc.1 (no v prefix)'
+        description: 'Preview version, e.g. 0.3.0-rc.1 (no v prefix)'
         required: true
-        default: '0.2.2-rc.1'
+        default: '0.3.0-rc.1'
       backend_profile:
-        description: 'Docling-only backend (full)'
+        description: 'slim: lightweight ~70 MB installer with one-click CPU Docling setup; full: offline bundled Docling'
         required: true
-        default: 'full'
+        default: 'slim'
         type: choice
-        options: [full]
+        options: [slim, full]
       collection_policy:
         description: 'conservative: default (preserves model resources); compatible: broad rollback'
         required: true
@@ -51,13 +51,14 @@ jobs:
           set -euo pipefail
           if [ "$TRIGGER" = "push" ]; then
             tag="$REF_NAME"
-            profile=full
+            profile=slim
             policy=conservative
           else
             tag="v${REQUESTED#v}"
             profile="$PROFILE"
             policy="$POLICY"
           fi
+          case "$profile" in slim|full) ;; *) echo "Unsupported backend profile: $profile" >&2; exit 2;; esac
           case "$policy" in conservative|compatible) ;; *) echo "Unsupported collection policy: $policy" >&2; exit 2;; esac
           for field in tag version assembly mac_short; do
             echo "$field=$(python scripts/release_version.py "$tag" --field "$field")" >> "$GITHUB_OUTPUT"
@@ -104,21 +105,48 @@ jobs:
             echo '::error::SRA macOS builds require an Apple Silicon runner'
             exit 1
           fi
+      - name: Install standalone uv for slim profile
+        if: needs.preflight.outputs.profile == 'slim'
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.6.14'
+          enable-cache: false
       - name: Install backend dependencies (run on target architecture)
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e '.[api]'
+          if [ "$BUNDLE_PROFILE" = 'slim' ]; then
+            python -m pip install --no-deps -e .
+            python -m pip install \
+              'pydantic>=2.7,<3' \
+              'fastapi>=0.115,<1' \
+              'uvicorn>=0.30,<1' \
+              'python-multipart>=0.0.9,<1' \
+              'httpx>=0.27,<1' \
+              'pypdfium2>=4.30,<6' \
+              'pillow>=10,<12'
+          else
+            python -m pip install -e '.[api]'
+          fi
           python -m pip install 'PyInstaller==6.22.3'
-          python -m pip check
           if [ "${{ matrix.installer }}" = 'macos' ]; then
             python -m pip install 'keyring>=25,<27'
+          fi
+          if [ "$BUNDLE_PROFILE" = 'full' ]; then
+            python -m pip check
           fi
       - name: Freeze Python backend
         shell: bash
         run: |
-          python scripts/build_backend.py --profile "$BUNDLE_PROFILE" --collection-policy "$COLLECTION_POLICY" --output dist/backend
+          set -euo pipefail
+          set -- --profile "$BUNDLE_PROFILE" --collection-policy "$COLLECTION_POLICY" --output dist/backend
+          if [ "$BUNDLE_PROFILE" = 'slim' ]; then
+            UV_BIN="$(command -v uv)"
+            echo "Bundling standalone uv binary: $UV_BIN"
+            set -- "$@" --uv-binary "$UV_BIN" --exclude-dev-and-gui
+          fi
+          python scripts/build_backend.py "$@"
           python scripts/check_bundle_without_pymupdf.py dist/backend/sra-backend
       - name: Publish Avalonia self-contained desktop
         shell: bash
@@ -156,7 +184,7 @@ jobs:
           "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}" \
             --sra-model-worker --help
           # Verify the frozen API still boots and rejects unauthorized clients.
-          python scripts/smoke_backend.py "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
+          python scripts/smoke_backend.py --profile "$BUNDLE_PROFILE" "dist/backend/sra-backend/sra-backend${{ matrix.installer == 'windows' && '.exe' || '' }}"
       - name: Assemble complete Windows payload
         if: matrix.installer == 'windows'
         shell: pwsh
@@ -202,6 +230,14 @@ jobs:
           python installer/macos/package_app.py --desktop dist/desktop --backend dist/backend/sra-backend \
             --output dist/SRA.app --version "$MAC_SHORT_VERSION"
           bash installer/macos/make_icon.sh desktop/SRA.Desktop/Assets/sra-logo.png dist/SRA.app/Contents/Resources/sra.icns
+          for uv_candidate in \
+            dist/SRA.app/Contents/Resources/backend/sra-backend/tools/uv \
+            dist/SRA.app/Contents/Resources/backend/sra-backend/_internal/tools/uv; do
+            if [ -f "$uv_candidate" ]; then
+              chmod +x "$uv_candidate"
+              codesign --force --sign - --timestamp=none "$uv_candidate"
+            fi
+          done
           codesign --force --deep --sign - --timestamp=none dist/SRA.app
           codesign --verify --deep --strict dist/SRA.app
           python scripts/check_release_safety.py artifact dist/SRA.app
@@ -341,7 +377,7 @@ jobs:
               "### Platform & Privacy Notes\n"
               "- **Windows x64**: Run `SRA-Desktop-Setup-win-x64-*.exe` (recommended, per-user install; silent uninstall preserves personal data) or extract `SRA-win-x64-*.zip`. Not Authenticode-signed.\n"
               "- **macOS Apple Silicon (ARM64, macOS 14+)**: Open `.dmg` and drag `SRA.app` to Applications. Intel Mac is not supported. Packages are ad-hoc signed and **not** Apple notarized; first launch may require right-click Open / Privacy & Security approval.\n"
-              "- **Docling weights**: Docling may fetch model weights on first use (or manage them offline in Model Center).\n"
+              "- **Docling Local PDF Engine**: Lightweight `slim` installers keep downloads small (~70–85 MB). Before importing your first PDF, open **Settings → Model Center → Docling / 增强** and click **一键安装 / 更新 Docling 引擎（CPU 版）** (uses your configured download proxy and supports official / Tsinghua / Aliyun PyPI mirrors).\n"
               "- **Privacy & Integrity**: Verify downloads with `SHA256SUMS-*.txt`. User PDFs, SQLite databases, and API credentials are never bundled."
           )
           out.write_text(body + footer + "\n", encoding="utf-8")

@@ -7,11 +7,14 @@ have distinct provenance. Only installed PDFium and RapidOCR are used; no API.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import math
 import secrets
 import sqlite3
+import subprocess
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -227,13 +230,85 @@ def render_png(pdf_path: Path, page_number: int, scale: float = 1.5):
     return output.getvalue(), dimensions, count
 
 
+_MANAGED_REGION_OCR_SCRIPT = (
+    "import json, math, sys; "
+    "import numpy as np; "
+    "from PIL import Image; "
+    "from rapidocr import RapidOCR; "
+    "img = Image.open(sys.argv[1]).convert('RGB'); "
+    "arr = np.asarray(img)[:, :, ::-1].copy(); "
+    "result = RapidOCR()(arr); "
+    "texts = getattr(result, 'txts', None); "
+    "scores = getattr(result, 'scores', None); "
+    "if texts is None and isinstance(result, tuple) and result and isinstance(result[0], (tuple, list)): "
+    "    rows = result[0]; "
+    "    texts = [r[1] for r in rows if isinstance(r, (tuple, list)) and len(r) > 1]; "
+    "    scores = [r[2] for r in rows if isinstance(r, (tuple, list)) and len(r) > 2]; "
+    "items = [str(v).strip() for v in (texts or ()) if str(v).strip()]; "
+    "nums = [float(x) for x in (scores or ()) if isinstance(x, (int, float)) and math.isfinite(float(x))]; "
+    "avg = (sum(nums) / len(nums)) if nums else None; "
+    "payload = {'text': '\\n'.join(items)[:12000], 'score': avg}; "
+    "print('SRA_REGION_OCR_JSON:' + json.dumps(payload, ensure_ascii=False), flush=True)"
+)
+
+
+def _local_rapidocr_available() -> bool:
+    try:
+        return (
+            importlib.util.find_spec("rapidocr") is not None
+            and importlib.util.find_spec("numpy") is not None
+        )
+    except (ModuleNotFoundError, ValueError):
+        return False
+
+
+def _recognize_crop_via_managed_engine(crop) -> tuple[str, float | None]:
+    """瘦壳模式下将局部裁剪 PNG 委派给独立托管 Docling/RapidOCR 虚拟环境执行离线 OCR。"""
+    from .. import docling_engine
+    from ..network_settings import download_environment
+
+    if not docling_engine.managed_engine_ready():
+        raise ValueError(
+            "当前精简版尚未安装本地 Docling/RapidOCR 引擎，无法执行框选 OCR。"
+            "请前往「设置 → 模型配置中心 → Docling / 增强」点击「一键安装 / 更新 Docling 引擎（CPU 版）」，"
+            "或勾选「仅人工抄录」直接记录校订。"
+        )
+    py_exe = docling_engine.engine_python_executable()
+    env = download_environment(offline=True)
+    env["PYTHONUTF8"] = "1"
+    with tempfile.TemporaryDirectory(prefix="sra-region-ocr-") as folder:
+        png_path = Path(folder) / "crop.png"
+        crop.save(png_path, format="PNG")
+        completed = subprocess.run(
+            [str(py_exe), "-c", _MANAGED_REGION_OCR_SCRIPT, str(png_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+            check=False,
+        )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"托管引擎局部 OCR 失败（退出码 {completed.returncode}）。"
+            "可在模型配置中心验证本地引擎，或改用「仅人工抄录」。"
+        )
+    for line in reversed((completed.stdout or "").splitlines()):
+        if line.startswith("SRA_REGION_OCR_JSON:"):
+            payload = json.loads(line.split("SRA_REGION_OCR_JSON:", 1)[1].strip())
+            text = str(payload.get("text", "") or "")[:12000]
+            raw_score = payload.get("score")
+            score = float(raw_score) if isinstance(raw_score, (int, float)) and math.isfinite(float(raw_score)) else None
+            return text, score
+    raise RuntimeError("托管引擎局部 OCR 未返回有效结果。")
+
+
 def recognize_region(
     pdf_path: Path, page_number: int, bounds: RegionBounds,
     *, engine: Callable | None = None,
 ):
     """OCR only the visually selected page area; never reparse entire document."""
-    import numpy as np
-
     image, dimensions, count = open_pdf_page(pdf_path, page_number, scale=2.0)
     iw, ih = image.size
     crop_box = (
@@ -245,6 +320,12 @@ def recognize_region(
     if crop_box[2] - crop_box[0] < 14 or crop_box[3] - crop_box[1] < 14:
         raise ValueError("Selection is too small for reliable OCR")
     crop = image.crop(crop_box)
+    if engine is None and not _local_rapidocr_available():
+        recognized, score = _recognize_crop_via_managed_engine(crop)
+        return recognized, score, dimensions
+
+    import numpy as np
+
     reader = engine or _rapidocr_lines
     # RapidOCR's numpy image interface expects OpenCV's BGR channel order.
     # PIL's RGB pixels must be converted to prevent colored scans degrading.

@@ -386,17 +386,19 @@ def test_slim_backend_profile_excludes_heavy_ml_and_bundles_worker_source(tmp_pa
     args = build_backend.command_args("slim", uv_binary=fake_uv)
     pairs = _options(args)
 
-    # 瘦壳模式绝不引入 PyMuPDF，也必须排除全部重型 ML 与 Docling 库
+    # 瘦壳模式绝不引入 PyMuPDF，也必须排除全部重型 ML 与 Docling 库（含 numpy）
     for excluded in (
         "pymupdf", "fitz", "docling", "torch", "torchvision",
-        "transformers", "scipy", "cv2", "rapidocr", "rapidocr_onnxruntime",
+        "transformers", "scipy", "numpy", "cv2", "rapidocr", "rapidocr_onnxruntime",
         "sympy", "pandas",
     ):
         assert ("--exclude-module", excluded) in pairs
         assert ("--collect-all", excluded) not in pairs
 
-    # 瘦壳模式保留轻量 pypdfium2 页面渲染、纯 Python 源码树与随包 uv 二进制
+    # 瘦壳模式保留轻量 pypdfium2 + Pillow 页面渲染、纯 Python 源码树与随包 uv 二进制
     assert ("--collect-all", "pypdfium2") in pairs
+    assert ("--collect-submodules", "PIL") in pairs
+    assert ("--hidden-import", "PIL.Image") in pairs
     assert any(
         flag == "--add-data" and "sra_src/sociology_research" in value
         for flag, value in pairs
@@ -457,3 +459,99 @@ def test_desktop_model_center_and_storage_engine_ui_contracts():
     assert "OpenEngineDir_Click" in codebehind
     assert "EnsureDoclingEngineReadyBeforeImportAsync" in codebehind
     assert "initialTabIndex: 2" in codebehind
+
+
+def test_region_review_delegates_ocr_to_managed_engine_in_slim_mode(isolated_home, tmp_path, monkeypatch):
+    from PIL import Image
+    from sociology_research.services import region_review
+
+    monkeypatch.setattr(region_review, "_local_rapidocr_available", lambda: False)
+    monkeypatch.setattr(docling_engine, "embedded_docling_version", lambda: None)
+    monkeypatch.setattr(
+        region_review,
+        "open_pdf_page",
+        lambda pdf_path, page_number, scale: (Image.new("RGB", (200, 200), "white"), (400.0, 400.0), 1),
+    )
+
+    bounds = region_review.RegionBounds(x0=0.1, y0=0.1, x1=0.6, y1=0.4)
+
+    # 1. 未安装本地托管引擎时给出清晰中文引导
+    with pytest.raises(ValueError, match="模型配置中心"):
+        region_review.recognize_region(tmp_path / "dummy.pdf", 1, bounds)
+
+    # 2. 托管引擎已就绪时，离线子进程执行局部 RapidOCR 并剥离所有 AI API Key
+    py_exe = docling_engine.engine_python_executable()
+    py_exe.parent.mkdir(parents=True, exist_ok=True)
+    py_exe.write_bytes(b"fake-python")
+    docling_engine._write_engine_state({
+        "verified": True,
+        "docling_version": "2.134.0",
+        "torch_version": "2.6.0+cpu",
+        "python_executable": str(py_exe.resolve()),
+    })
+    monkeypatch.setenv("SRA_PRO_API_KEY", "SECRET-NEVER-LEAK-TO-OCR")
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, *, env, capture_output, text, encoding, errors, timeout, check):
+        captured["cmd"] = list(cmd)
+        captured["env"] = dict(env)
+        assert Path(cmd[-1]).is_file()
+        return SimpleNamespace(
+            returncode=0,
+            stdout='SRA_REGION_OCR_JSON:{"text": "表 2 回归系数估计结果", "score": 0.96}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(region_review.subprocess, "run", fake_run)
+    text, score, dims = region_review.recognize_region(tmp_path / "dummy.pdf", 1, bounds)
+    assert text == "表 2 回归系数估计结果"
+    assert score == pytest.approx(0.96)
+    assert dims == (400.0, 400.0)
+    assert captured["cmd"][0] == str(py_exe)
+    assert captured["env"].get("HF_HUB_OFFLINE") == "1"
+    assert "SRA_PRO_API_KEY" not in captured["env"]
+
+
+def test_slim_release_pipeline_size_audit_and_v030_changelog_contracts(tmp_path):
+    import re
+    from scripts import report_build_sizes
+
+    # 1. report_build_sizes 支持 slim 并独立统计随包 uv 体积
+    backend, desktop, payload, dist = [tmp_path / n for n in ("backend", "desktop", "payload", "dist")]
+    for rel, size in (
+        (backend / "_internal" / "tools" / "uv.exe", 1300),
+        (backend / "python312.dll", 300),
+        (backend / "_internal" / "fastapi" / "app.pyc", 200),
+        (desktop / "SRA.Desktop.exe", 500),
+        (payload / "SRA.Desktop.exe", 500),
+        (dist / "SRA-Desktop-Setup-win-x64-v0.3.0.exe", 900),
+    ):
+        rel.parent.mkdir(parents=True, exist_ok=True)
+        rel.write_bytes(b"\x00" * size)
+
+    report = report_build_sizes.make_report(
+        target="win-x64",
+        profile="slim",
+        backend=backend,
+        desktop=desktop,
+        payload=payload,
+        asset_globs=[str(dist / "*.exe")],
+        output_dir=tmp_path / "audit",
+    )
+    assert report["backend_profile"] == "slim"
+    assert report["backend_categories_bytes"]["Managed engine tool (uv)"] == 1300
+    assert report["backend_categories_bytes"]["PyTorch family"] == 0
+    assert sum(report["backend_categories_bytes"].values()) == report["frozen_backend_bytes"]
+
+    # 2. release-desktop.yml 的 slim/full 双模式、随包 uv、macOS 签名与 smoke 校验契约
+    workflow = (ROOT / ".github" / "workflows" / "release-desktop.yml").read_text(encoding="utf-8")
+    assert "options: [slim, full]" in workflow
+    assert "astral-sh/setup-uv@v5" in workflow
+    assert "--uv-binary" in workflow
+    assert '--profile "$BUNDLE_PROFILE"' in workflow
+    assert "tools/uv" in workflow and "codesign --force --sign - --timestamp=none" in workflow
+
+    # 3. CHANGELOG.md 含可被发版脚本正则精确提取的 v0.3.0 节
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^## \[v0\.3\.0\][^\n]*\n(.*?)(?=^## \[|\Z)", changelog)
+    assert match is not None and len(match.group(1).strip()) > 120

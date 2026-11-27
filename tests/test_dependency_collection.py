@@ -161,7 +161,7 @@ def test_tag_release_initializes_collection_policy():
     """A tag push has no workflow_dispatch inputs; it must set its own policy."""
     shell = _release_step_script('Validate release version + determine backend profile')
     push_branch = shell.split('if [ "$TRIGGER" = "push" ]; then', 1)[1].split('else', 1)[0]
-    assert 'profile=full' in push_branch
+    assert 'profile=slim' in push_branch
     assert 'policy=conservative' in push_branch
 
 

@@ -22,6 +22,7 @@ CATEGORY_ORDER = (
     "Transformers / Hugging Face",
     "OCR / computer vision",
     "NumPy / scientific stack",
+    "Managed engine tool (uv)",
     "Python runtime",
     "Other backend files",
 )
@@ -64,6 +65,8 @@ def classify_backend(relative: Path) -> str:
     for category, names in families:
         if any(_prefix_matches(part, name) for part in parts for name in names):
             return category
+    if "tools" in parts and stem in {"uv", "uv.exe"}:
+        return "Managed engine tool (uv)"
     if (stem.startswith(("python3", "libpython")) and stem.endswith((".dll", ".so", ".dylib"))) or \
        "lib_dynload" in parts:
         return "Python runtime"
@@ -208,7 +211,7 @@ def make_report(*, target: str, profile: str, backend: Path, desktop: Path,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, choices=("win-x64", "osx-arm64"))
-    parser.add_argument("--profile", choices=("full", "core"), default="full")
+    parser.add_argument("--profile", choices=("full", "slim", "core"), default="full")
     parser.add_argument("--backend", type=Path, required=True)
     parser.add_argument("--desktop", type=Path, required=True)
     parser.add_argument("--payload", type=Path, required=True)
